@@ -23,14 +23,14 @@ def generate_latex_document(cards):
 \usepackage[utf8]{inputenc}
 \usepackage[russian]{babel}
 \usepackage{geometry}
+\usepackage{graphicx}
 \usepackage{array}
 \usepackage{enumitem}
-\usepackage{graphicx}
 \usepackage{multicol}
 \usepackage{xcolor}
 
 % Настройка размера страницы с минимальными полями
-\geometry{a4paper, margin=0.3cm, top=0.4cm, bottom=0.4cm}
+\geometry{a4paper, margin=0.5cm}
 
 % Определение размера карточки (A7) в горизонтальной ориентации
 \newcommand{\cardwidth}{9.3cm}
@@ -38,7 +38,6 @@ def generate_latex_document(cards):
 
 % Настройка отступа вокруг содержимого в рамке
 \setlength{\fboxsep}{8pt}
-\setlength{\tabcolsep}{2pt}
 
 % Стили для карточек
 \newcommand{\frontcard}[1]{%
@@ -63,6 +62,7 @@ def generate_latex_document(cards):
 \pagestyle{empty}
 
 \setlist[itemize]{label={}, left=0.5em, itemsep=-2pt, topsep=0.5ex}
+\setlength{\parindent}{0pt} % Отключение отступа первой строки
 
 \begin{document}
 '''
