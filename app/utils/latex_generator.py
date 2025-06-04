@@ -71,29 +71,28 @@ def generate_latex_document(cards):
     latex += "\n% Передние стороны карточек (задания)\n"
     
     for page in range(num_pages):
-        latex += r"\noindent" + "\n"
-        latex += r"\begin{tabular}{@{}cc@{}}" + "\n"
+        latex += "\n"
         
         for row in range(4):  # 4 ряда по 2 карточки
             idx1 = page * 8 + row * 2
             idx2 = page * 8 + row * 2 + 1
             
             if idx1 < num_cards and idx2 < num_cards:
-                latex += r"\frontcard{" + cards[idx1]['front'].replace('#', r'\#') + "} & " + \
-                         r"\frontcard{" + cards[idx2]['front'].replace('#', r'\#') + r"} \\" + "\n"
+                latex += r"\frontcard{" + cards[idx1]['front'].replace('#', r'\#') + "}" + "\n" + "%" + "\n" + \
+                         r"\frontcard{" + cards[idx2]['front'].replace('#', r'\#') + "}" + "\n" + "\n"
                 if row < 3:  # Уменьшенный отступ между рядами
-                    latex += r"[0.1cm]" + "\n"
+                    latex += "\n"
             elif idx1 < num_cards:
-                latex += r"\frontcard{" + cards[idx1]['front'].replace('#', r'\#') + "} & " + \
-                         r"\frontcard{} \\" + "\n"
+                latex += r"\frontcard{" + cards[idx1]['front'].replace('#', r'\#') + "}" + "\n" + "%" + "\n" + \
+                         r"\frontcard{}" + "\n"  + "\n"
                 if row < 3:
-                    latex += r"[0.1cm]" + "\n"
+                    latex += "\n"
             else:
-                latex += r"\frontcard{} & \frontcard{} \\" + "\n"
+                latex += r"\frontcard{}" + "\n" + "%" + "\n" + r"\frontcard{}" + "\n"
                 if row < 3:
-                    latex += r"[0.1cm]" + "\n"
+                    latex += "\n"
         
-        latex += r"\end{tabular}" + "\n"
+        latex += "\n"
         
         if page < num_pages - 1:
             latex += r"\newpage" + "\n"
@@ -103,9 +102,8 @@ def generate_latex_document(cards):
     latex += r"\newpage" + "\n"
     
     for page in range(num_pages):
-        latex += r"\noindent" + "\n"
-        latex += r"\begin{tabular}{@{}cc@{}}" + "\n"
-        
+        latex += "\n"
+
         for row in range(4):  # 4 ряда по 2 карточки, но в обратном порядке
             # Рассчитываем индексы с учетом переворота страницы
             # Для каждой страницы начинаем с нижнего ряда и двигаемся вверх
@@ -114,21 +112,21 @@ def generate_latex_document(cards):
             idx2 = page * 8 + reverse_row * 2 + 1
             
             if idx1 < num_cards and idx2 < num_cards:
-                latex += r"\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "} & " + \
-                         r"\backcard{" + cards[idx2]['back'].replace('#', r'\#') + r"} \\" + "\n"
+                latex += r"\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "}" + "\n" + "%" + "\n" + \
+                         r"\backcard{" + cards[idx2]['back'].replace('#', r'\#') + "}" + "\n" + "\n"
                 if row < 3:  # Уменьшенный отступ между рядами
-                    latex += r"[0.1cm]" + "\n"
+                    latex += "\n"
             elif idx1 < num_cards:
-                latex += r"\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "} & " + \
-                         r"\backcard{} \\" + "\n"
+                latex += r"\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "}" + "\n" + "%" + "\n" + \
+                         r"\backcard{}" + "\n"  + "\n"
                 if row < 3:
-                    latex += r"[0.1cm]" + "\n"
+                    latex += "\n"
             else:
-                latex += r"\backcard{} & \backcard{} \\" + "\n"
+                latex += r"\backcard{}" + "\n" + "%" + "\n" + r"\backcard{}" + "\n"
                 if row < 3:
-                    latex += r"[0.1cm]" + "\n"
+                    latex += "\n"
         
-        latex += r"\end{tabular}" + "\n"
+        latex += "\n"
         
         if page < num_pages - 1:
             latex += r"\newpage" + "\n"
