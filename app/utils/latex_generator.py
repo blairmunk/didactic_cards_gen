@@ -107,22 +107,21 @@ def generate_latex_document(cards):
         for row in range(4):  # 4 ряда по 2 карточки, но в обратном порядке
             # Рассчитываем индексы с учетом переворота страницы
             # Для каждой страницы начинаем с нижнего ряда и двигаемся вверх
-            reverse_row = 3 - row
-            idx1 = page * 8 + reverse_row * 2
-            idx2 = page * 8 + reverse_row * 2 + 1
+            idx1 = page * 8 + row * 2 + 1
+            idx2 = page * 8 + row * 2
             
             if idx1 < num_cards and idx2 < num_cards:
-                latex += r"\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "}" + "\n" + "%" + "\n" + \
-                         r"\backcard{" + cards[idx2]['back'].replace('#', r'\#') + "}" + "\n" + "\n"
+                latex += r"\rotatebox{180}{\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "}}" + "\n" + "%" + "\n" + \
+                         r"\rotatebox{180}{\backcard{" + cards[idx2]['back'].replace('#', r'\#') + "}}" + "\n" + "\n"
                 if row < 3:  # Уменьшенный отступ между рядами
                     latex += "\n"
             elif idx1 < num_cards:
-                latex += r"\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "}" + "\n" + "%" + "\n" + \
-                         r"\backcard{}" + "\n"  + "\n"
+                latex += r"\rotatebox{180}{\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "}}" + "\n" + "%" + "\n" + \
+                         r"\rotatebox{180}{\backcard{}}" + "\n"  + "\n"
                 if row < 3:
                     latex += "\n"
             else:
-                latex += r"\backcard{}" + "\n" + "%" + "\n" + r"\backcard{}" + "\n"
+                latex += r"\rotatebox{180}{\backcard{}}" + "\n" + "%" + "\n" + r"\rotatebox{180}{\backcard{}}" + "\n"
                 if row < 3:
                     latex += "\n"
         
