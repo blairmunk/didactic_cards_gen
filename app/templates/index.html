@@ -4,114 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Дидактические карточки</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            max-width: 960px;
-            margin: 0 auto;
-            padding: 20px;
-            color: #333;
-        }
-        h1 { color: #2c3e50; }
-        h2 { color: #34495e; margin-top: 25px; }
-
-        .card-form {
-            border: 1px solid #ddd;
-            padding: 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            background: #fafafa;
-        }
-        .form-row {
-            display: flex;
-            gap: 20px;
-            margin-bottom: 15px;
-        }
-        .form-group { flex: 1; }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        textarea {
-            width: 100%;
-            height: 120px;
-            padding: 10px;
-            border-radius: 5px;
-            border: 1px solid #ccc;
-            font-family: inherit;
-            font-size: 14px;
-            box-sizing: border-box;
-        }
-        .buttons {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
-        button, .btn {
-            padding: 10px 18px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 15px;
-            text-decoration: none;
-            display: inline-block;
-            color: white;
-        }
-        .btn-primary   { background-color: #4CAF50; }
-        .btn-secondary { background-color: #2196F3; }
-        .btn-danger    { background-color: #e74c3c; }
-        .btn-warning   { background-color: #f39c12; }
-        .btn-small     { padding: 5px 10px; font-size: 13px; }
-
-        .error-message {
-            color: #e74c3c;
-            font-weight: bold;
-            margin-bottom: 15px;
-            padding: 10px;
-            background: #fdecea;
-            border-radius: 5px;
-        }
-        .info-panel {
-            background-color: #eaf2f8;
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-        }
-
-        /* ── Таблица карточек ── */
-        .cards-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-        }
-        .cards-table th,
-        .cards-table td {
-            border: 1px solid #ddd;
-            padding: 8px 10px;
-            text-align: left;
-            vertical-align: top;
-        }
-        .cards-table th {
-            background: #34495e;
-            color: white;
-        }
-        .cards-table tr:nth-child(even) {
-            background: #f9f9f9;
-        }
-        .cards-table tr:hover {
-            background: #eaf2f8;
-        }
-        .card-text {
-            max-width: 350px;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
-        .actions a {
-            margin-right: 8px;
-            text-decoration: none;
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
     <h1>📇 Генератор дидактических карточек</h1>
@@ -120,24 +13,28 @@
     <div class="error-message">{{ error }}</div>
     {% endif %}
 
+    <div class="success-message" id="success-msg"></div>
+
     <!-- ── Информационная панель ── -->
     <div class="info-panel">
-        <strong>Карточек добавлено:</strong> {{ cards_count }}
+        <strong>Карточек добавлено:</strong> <span id="cards-count">{{ cards_count }}</span>
         &nbsp;|&nbsp;
-        <strong>Листов A4 потребуется:</strong> {{ ((cards_count + 7) // 8) if cards_count > 0 else 0 }}
+        <strong>Листов A4:</strong> <span id="pages-count">{{ ((cards_count + cards_per_page - 1) // cards_per_page) if cards_count > 0 else 0 }}</span>
         &nbsp;|&nbsp;
-        <strong>Пустых ячеек будет добавлено:</strong>
-        {% if cards_count > 0 %}
-            {{ ((((cards_count + 7) // 8) * 8) - cards_count) }}
-        {% else %}
-            0
-        {% endif %}
+        <strong>Пустых ячеек:</strong>
+        <span id="empty-count">
+            {% if cards_count > 0 %}
+                {{ ((((cards_count + cards_per_page - 1) // cards_per_page) * cards_per_page) - cards_count) }}
+            {% else %}
+                0
+            {% endif %}
+        </span>
     </div>
 
-    <!-- ── Добавление одной карточки ── -->
+    <!-- ── Добавление одной карточки (AJAX) ── -->
     <h2>Добавить карточку</h2>
     <div class="card-form">
-        <form action="/add_card" method="post">
+        <form id="single-card-form">
             <div class="form-row">
                 <div class="form-group">
                     <label for="front">Лицевая сторона (задание):</label>
@@ -156,11 +53,10 @@
     <h2>Пакетное добавление</h2>
     <div class="card-form">
         <form action="/add_cards_bulk" method="post">
-            <label for="bulk">Вставьте карточки (формат: <code>лицевая || оборотная</code>, каждая с новой строки):</label>
+            <label for="bulk">Формат: <code>лицевая || оборотная</code>, каждая с новой строки:</label>
             <textarea name="bulk" id="bulk" rows="8"
                       placeholder="Найти ускорение тела массой 5кг || a = F/m = 10/5 = 2 м/с²
-Чему равна сила тяжести тела 3кг || F = mg = 3·10 = 30 Н
-Закон Ома для участка цепи || I = U/R"></textarea>
+Чему равна сила тяжести тела 3кг || F = mg = 3·10 = 30 Н"></textarea>
             <br><br>
             <button type="submit" class="btn-primary">➕ Добавить все</button>
         </form>
@@ -170,36 +66,37 @@
     <h2>Импорт из CSV</h2>
     <div class="card-form">
         <form action="/import_csv" method="post" enctype="multipart/form-data">
-            <label for="csv_file">Файл CSV (разделитель — точка с запятой: <code>лицевая;оборотная</code>):</label>
+            <label for="csv_file">Файл CSV (<code>лицевая;оборотная</code>):</label>
             <input type="file" name="csv_file" id="csv_file" accept=".csv">
             <br><br>
             <button type="submit" class="btn-primary">📂 Импортировать</button>
         </form>
     </div>
 
-    <!-- ── Таблица добавленных карточек ── -->
+    <!-- ── Таблица карточек ── -->
     {% if cards %}
     <h2>Добавленные карточки</h2>
-    <table class="cards-table">
+    <table class="cards-table" id="cards-table">
         <thead>
             <tr>
+                <th style="width:30px"></th>
                 <th style="width:40px">#</th>
                 <th>Лицевая сторона</th>
                 <th>Оборотная сторона</th>
-                <th style="width:120px">Действия</th>
+                <th style="width:100px">Действия</th>
             </tr>
         </thead>
-        <tbody>
+        <tbody id="cards-tbody">
             {% for card in cards %}
-            <tr>
-                <td>{{ loop.index }}</td>
+            <tr draggable="true" data-index="{{ loop.index0 }}">
+                <td class="drag-handle" title="Перетащите для сортировки">⠿</td>
+                <td class="row-number">{{ loop.index }}</td>
                 <td class="card-text">{{ card.front }}</td>
                 <td class="card-text">{{ card.back }}</td>
                 <td class="actions">
                     <a href="/edit_card/{{ loop.index0 }}" title="Редактировать">✏️</a>
-                    <a href="/delete_card/{{ loop.index0 }}"
-                       title="Удалить"
-                       onclick="return confirm('Удалить карточку №{{ loop.index }}?')">🗑️</a>
+                    <a href="#" class="delete-btn" data-index="{{ loop.index0 }}"
+                       title="Удалить">🗑️</a>
                 </td>
             </tr>
             {% endfor %}
@@ -208,21 +105,278 @@
     {% endif %}
 
     <!-- ── Кнопки генерации ── -->
-    {% if cards %}
-    <h2>Генерация</h2>
-    <div class="buttons">
-        <form action="/preview_latex" method="post" style="display:inline">
-            <button type="submit" class="btn-secondary">👁 Предпросмотр LaTeX</button>
-        </form>
-        <form action="/generate" method="post" style="display:inline">
-            <button type="submit" class="btn-primary">📄 Сгенерировать PDF</button>
-        </form>
-        <form action="/reset" method="post" style="display:inline">
-            <button type="submit" class="btn-danger"
-                    onclick="return confirm('Удалить все карточки?')">🗑 Очистить всё</button>
-        </form>
+    <div id="generate-buttons" {% if not cards %}style="display:none"{% endif %}>
+        <h2>Генерация</h2>
+        <div class="buttons">
+            <form action="/preview_latex" method="post" style="display:inline">
+                <button type="submit" class="btn-secondary">👁 Предпросмотр LaTeX</button>
+            </form>
+            <form action="/generate" method="post" style="display:inline">
+                <button type="submit" class="btn-primary">📄 Сгенерировать PDF</button>
+            </form>
+            <form action="/reset" method="post" style="display:inline">
+                <button type="submit" class="btn-danger"
+                        onclick="return confirm('Удалить все карточки?')">🗑 Очистить всё</button>
+            </form>
+        </div>
     </div>
-    {% endif %}
 
+    <!-- ── JavaScript: AJAX + Drag & Drop ── -->
+    <script>
+        const CARDS_PER_PAGE = {{ cards_per_page }};
+
+        // ── Утилиты ──
+
+        function showSuccess(text) {
+            const el = document.getElementById('success-msg');
+            el.textContent = text;
+            el.style.display = 'block';
+            setTimeout(() => { el.style.display = 'none'; }, 2500);
+        }
+
+        function updateCounters(count) {
+            document.getElementById('cards-count').textContent = count;
+            const pages = count > 0 ? Math.ceil(count / CARDS_PER_PAGE) : 0;
+            document.getElementById('pages-count').textContent = pages;
+            document.getElementById('empty-count').textContent =
+                count > 0 ? (pages * CARDS_PER_PAGE - count) : 0;
+
+            // Показать/скрыть кнопки генерации
+            document.getElementById('generate-buttons').style.display =
+                count > 0 ? '' : 'none';
+        }
+
+        function renumberRows() {
+            const rows = document.querySelectorAll('#cards-tbody tr');
+            rows.forEach((row, i) => {
+                row.dataset.index = i;
+                row.querySelector('.row-number').textContent = i + 1;
+                // Обновляем ссылку на редактирование
+                const editLink = row.querySelector('a[href^="/edit_card/"]');
+                if (editLink) editLink.href = '/edit_card/' + i;
+                // Обновляем data-index кнопки удаления
+                const delBtn = row.querySelector('.delete-btn');
+                if (delBtn) delBtn.dataset.index = i;
+            });
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ── AJAX: добавление одной карточки ──
+
+        document.getElementById('single-card-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const frontEl = document.getElementById('front');
+            const backEl = document.getElementById('back');
+            const front = frontEl.value.trim();
+            const back = backEl.value.trim();
+
+            if (!front && !back) {
+                alert('Заполните хотя бы одно поле');
+                return;
+            }
+
+            try {
+                const resp = await fetch('/api/add_card', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ front, back })
+                });
+                const data = await resp.json();
+
+                if (!resp.ok) {
+                    alert(data.error || 'Ошибка');
+                    return;
+                }
+
+                // Добавляем строку в таблицу
+                addCardRow(data.index, data.card);
+                updateCounters(data.cards_count);
+                showSuccess('Карточка добавлена!');
+
+                // Очищаем поля
+                frontEl.value = '';
+                backEl.value = '';
+                frontEl.focus();
+
+            } catch (err) {
+                console.error(err);
+                alert('Ошибка сети');
+            }
+        });
+
+        function addCardRow(index, card) {
+            let tbody = document.getElementById('cards-tbody');
+
+            // Если таблицы ещё нет — создаём
+            if (!tbody) {
+                const container = document.getElementById('generate-buttons');
+                const h2 = document.createElement('h2');
+                h2.textContent = 'Добавленные карточки';
+                container.parentNode.insertBefore(h2, container);
+
+                const table = document.createElement('table');
+                table.className = 'cards-table';
+                table.id = 'cards-table';
+                table.innerHTML = `
+                    <thead>
+                        <tr>
+                            <th style="width:30px"></th>
+                            <th style="width:40px">#</th>
+                            <th>Лицевая сторона</th>
+                            <th>Оборотная сторона</th>
+                            <th style="width:100px">Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody id="cards-tbody"></tbody>
+                `;
+                container.parentNode.insertBefore(table, container);
+                tbody = document.getElementById('cards-tbody');
+                initDragAndDrop();
+            }
+
+            const tr = document.createElement('tr');
+            tr.draggable = true;
+            tr.dataset.index = index;
+            tr.innerHTML = `
+                <td class="drag-handle" title="Перетащите для сортировки">⠿</td>
+                <td class="row-number">${index + 1}</td>
+                <td class="card-text">${escapeHtml(card.front)}</td>
+                <td class="card-text">${escapeHtml(card.back)}</td>
+                <td class="actions">
+                    <a href="/edit_card/${index}" title="Редактировать">✏️</a>
+                    <a href="#" class="delete-btn" data-index="${index}" title="Удалить">🗑️</a>
+                </td>
+            `;
+            tbody.appendChild(tr);
+            attachRowDragEvents(tr);
+            attachDeleteEvent(tr.querySelector('.delete-btn'));
+        }
+
+        // ── AJAX: удаление карточки ──
+
+        function attachDeleteEvent(btn) {
+            btn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                const idx = parseInt(btn.dataset.index);
+                if (!confirm(`Удалить карточку №${idx + 1}?`)) return;
+
+                try {
+                    const resp = await fetch(`/api/delete_card/${idx}`, {
+                        method: 'DELETE'
+                    });
+                    const data = await resp.json();
+
+                    if (!resp.ok) {
+                        alert(data.error || 'Ошибка');
+                        return;
+                    }
+
+                    // Удаляем строку из DOM
+                    btn.closest('tr').remove();
+                    renumberRows();
+                    updateCounters(data.cards_count);
+                    showSuccess('Карточка удалена');
+
+                } catch (err) {
+                    console.error(err);
+                    alert('Ошибка сети');
+                }
+            });
+        }
+
+        // Привязываем события удаления ко всем существующим кнопкам
+        document.querySelectorAll('.delete-btn').forEach(attachDeleteEvent);
+
+        // ── Drag & Drop сортировка ──
+
+        let dragSrcRow = null;
+
+        function attachRowDragEvents(row) {
+            row.addEventListener('dragstart', (e) => {
+                dragSrcRow = row;
+                row.classList.add('dragging');
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', row.dataset.index);
+            });
+
+            row.addEventListener('dragend', () => {
+                row.classList.remove('dragging');
+                document.querySelectorAll('#cards-tbody tr').forEach(r => {
+                    r.classList.remove('drag-over');
+                });
+            });
+
+            row.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = 'move';
+                if (row !== dragSrcRow) {
+                    row.classList.add('drag-over');
+                }
+            });
+
+            row.addEventListener('dragleave', () => {
+                row.classList.remove('drag-over');
+            });
+
+            row.addEventListener('drop', async (e) => {
+                e.preventDefault();
+                row.classList.remove('drag-over');
+
+                if (dragSrcRow === row) return;
+
+                const tbody = document.getElementById('cards-tbody');
+                const rows = Array.from(tbody.querySelectorAll('tr'));
+                const fromIdx = rows.indexOf(dragSrcRow);
+                const toIdx = rows.indexOf(row);
+
+                // Перемещаем в DOM
+                if (fromIdx < toIdx) {
+                    tbody.insertBefore(dragSrcRow, row.nextSibling);
+                } else {
+                    tbody.insertBefore(dragSrcRow, row);
+                }
+
+                renumberRows();
+
+                // Отправляем новый порядок на сервер
+                const newRows = Array.from(tbody.querySelectorAll('tr'));
+                const order = newRows.map(r => parseInt(r.dataset.index));
+
+                try {
+                    const resp = await fetch('/api/reorder', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ order })
+                    });
+                    const data = await resp.json();
+
+                    if (resp.ok) {
+                        // Обновляем data-index после успешного сохранения
+                        newRows.forEach((r, i) => { r.dataset.index = i; });
+                        renumberRows();
+                        showSuccess('Порядок сохранён');
+                    } else {
+                        alert(data.error || 'Ошибка сортировки');
+                        location.reload();
+                    }
+                } catch (err) {
+                    console.error(err);
+                    location.reload();
+                }
+            });
+        }
+
+        function initDragAndDrop() {
+            document.querySelectorAll('#cards-tbody tr').forEach(attachRowDragEvents);
+        }
+
+        initDragAndDrop();
+    </script>
 </body>
 </html>

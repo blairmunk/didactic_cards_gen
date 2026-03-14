@@ -1,133 +1,137 @@
 def escape_latex(text):
-    """
-    Экранирование всех спецсимволов LaTeX.
-    Порядок важен: сначала бэкслеш, потом остальные.
-    """
-    # Бэкслеш — первым, иначе заэкранируем добавленные бэкслеши
+    """Экранирование всех спецсимволов LaTeX."""
     text = text.replace('\\', r'\textbackslash{}')
-    
+
     chars = {
-        '&':  r'\&',
-        '%':  r'\%',
-        '$':  r'\$',
-        '#':  r'\#',
-        '_':  r'\_',
-        '{':  r'\{',
-        '}':  r'\}',
-        '~':  r'\textasciitilde{}',
-        '^':  r'\textasciicircum{}',
+        '&': r'\&',
+        '%': r'\%',
+        '$': r'\$',
+        '#': r'\#',
+        '_': r'\_',
+        '{': r'\{',
+        '}': r'\}',
+        '~': r'\textasciitilde{}',
+        '^': r'\textasciicircum{}',
     }
     for char, replacement in chars.items():
         text = text.replace(char, replacement)
-    
+
     return text
 
 
-def generate_latex_document(cards):
+def generate_latex_document(cards, layout=None):
     """
     Генерирует LaTeX документ для дидактических карточек.
-    
+
     Args:
-        cards: список карточек, где каждая карточка — словарь с ключами 'front' и 'back'.
-               Длина списка должна быть кратна 8.
-    
+        cards: список карточек (длина кратна cards_per_page).
+        layout: объект CardLayoutConfig (или None для значений по умолчанию).
+
     Returns:
-        строка с LaTeX кодом
+        строка с LaTeX кодом.
     """
+    # Значения по умолчанию, если config не передан
+    if layout is None:
+        card_width = 9.3
+        card_height = 6.3
+        cards_per_row = 2
+        rows_per_page = 4
+        fbox_sep = 8
+    else:
+        card_width = layout.card_width_cm
+        card_height = layout.card_height_cm
+        cards_per_row = layout.cards_per_row
+        rows_per_page = layout.rows_per_page
+        fbox_sep = layout.fbox_sep_pt
+
+    cards_per_page = cards_per_row * rows_per_page
     num_cards = len(cards)
-    num_pages = (num_cards + 7) // 8
+    num_pages = (num_cards + cards_per_page - 1) // cards_per_page
 
-    # ─── Преамбула ───────────────────────────────────────────────────
-    latex = r'''\documentclass[a4paper,12pt]{extarticle}
-\usepackage{amsmath}
-\usepackage{amsfonts}
-\usepackage{amssymb}
-\usepackage{amsthm}
-\usepackage{mathtext}
-\usepackage[T2A]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage[russian]{babel}
-\usepackage{geometry}
-\usepackage{graphicx}
-\usepackage{array}
-\usepackage{enumitem}
-\usepackage{multicol}
-\usepackage{xcolor}
+    # ─── Преамбула ───────────────────────────────────────────────
+    latex = rf'''\documentclass[a4paper,12pt]{{extarticle}}
+\usepackage{{amsmath}}
+\usepackage{{amsfonts}}
+\usepackage{{amssymb}}
+\usepackage{{amsthm}}
+\usepackage{{mathtext}}
+\usepackage[T2A]{{fontenc}}
+\usepackage[utf8]{{inputenc}}
+\usepackage[russian]{{babel}}
+\usepackage{{geometry}}
+\usepackage{{graphicx}}
+\usepackage{{array}}
+\usepackage{{enumitem}}
+\usepackage{{multicol}}
+\usepackage{{xcolor}}
 
-% Настройка размера страницы с минимальными полями
-\geometry{a4paper, margin=0.5cm}
+\geometry{{a4paper, margin=0.5cm}}
 
-% Определение размера карточки (A7) в горизонтальной ориентации
-\newcommand{\cardwidth}{9.3cm}
-\newcommand{\cardheight}{6.3cm}
+\newcommand{{\cardwidth}}{{{card_width}cm}}
+\newcommand{{\cardheight}}{{{card_height}cm}}
 
-% Настройка отступа вокруг содержимого в рамке
-\setlength{\fboxsep}{8pt}
+\setlength{{\fboxsep}}{{{fbox_sep}pt}}
 
-% Стили для карточек
-\newcommand{\frontcard}[1]{%
-    \fbox{%
-        \begin{minipage}[t][\cardheight][t]{\cardwidth}
+\newcommand{{\frontcard}}[1]{{%
+    \fbox{{%
+        \begin{{minipage}}[t][\cardheight][t]{{\cardwidth}}
         #1
-        \end{minipage}%
-    }%
-    \vspace{2pt}%
-}
+        \end{{minipage}}%
+    }}%
+    \vspace{{2pt}}%
+}}
 
-\newcommand{\backcard}[1]{%
-    \fcolorbox{white}{white}{%
-        \begin{minipage}[t][\cardheight][t]{\cardwidth}
+\newcommand{{\backcard}}[1]{{%
+    \fcolorbox{{white}}{{white}}{{%
+        \begin{{minipage}}[t][\cardheight][t]{{\cardwidth}}
         #1
-        \end{minipage}%
-    }%
-    \vspace{2pt}%
-}
+        \end{{minipage}}%
+    }}%
+    \vspace{{2pt}}%
+}}
 
-\pagestyle{empty}
+\pagestyle{{empty}}
 
-\setlist[itemize]{label={}, left=0.5em, itemsep=-2pt, topsep=0.5ex}
-\setlength{\parindent}{0pt}
+\setlist[itemize]{{label={{}}, left=0.5em, itemsep=-2pt, topsep=0.5ex}}
+\setlength{{\parindent}}{{0pt}}
 
-\begin{document}
+\begin{{document}}
 '''
 
-    # ─── Передние стороны ────────────────────────────────────────────
+    # ─── Передние стороны ────────────────────────────────────────
     latex += "\n% ===== Передние стороны карточек (задания) =====\n"
 
     for page in range(num_pages):
         latex += "\n"
-        for row in range(4):
-            idx1 = page * 8 + row * 2
-            idx2 = page * 8 + row * 2 + 1
-
-            front1 = escape_latex(cards[idx1]['front']) if idx1 < num_cards else ''
-            front2 = escape_latex(cards[idx2]['front']) if idx2 < num_cards else ''
-
-            latex += r"\frontcard{" + front1 + "}\n%\n"
-            latex += r"\frontcard{" + front2 + "}\n"
-            if row < 3:
+        for row in range(rows_per_page):
+            for col in range(cards_per_row):
+                idx = page * cards_per_page + row * cards_per_row + col
+                front = escape_latex(cards[idx]['front']) if idx < num_cards else ''
+                latex += r"\frontcard{" + front + "}\n"
+                if col < cards_per_row - 1:
+                    latex += "%\n"
+            if row < rows_per_page - 1:
                 latex += "\n"
 
         if page < num_pages - 1:
             latex += r"\newpage" + "\n"
 
-    # ─── Задние стороны ──────────────────────────────────────────────
+    # ─── Задние стороны ──────────────────────────────────────────
     latex += "\n% ===== Задние стороны карточек (решения) =====\n"
     latex += r"\newpage" + "\n"
 
     for page in range(num_pages):
         latex += "\n"
-        for row in range(4):
-            # Swap: правая карточка печатается первой (зеркальный порядок)
-            idx1 = page * 8 + row * 2 + 1
-            idx2 = page * 8 + row * 2
-
-            back1 = escape_latex(cards[idx1]['back']) if idx1 < num_cards else ''
-            back2 = escape_latex(cards[idx2]['back']) if idx2 < num_cards else ''
-
-            latex += r"\rotatebox{180}{\backcard{" + back1 + "}}\n%\n"
-            latex += r"\rotatebox{180}{\backcard{" + back2 + "}}\n"
-            if row < 3:
+        for row in range(rows_per_page):
+            for col in range(cards_per_row):
+                # Зеркальный порядок в строке для двусторонней печати
+                mirror_col = cards_per_row - 1 - col
+                idx = page * cards_per_page + row * cards_per_row + mirror_col
+                back = escape_latex(cards[idx]['back']) if idx < num_cards else ''
+                latex += r"\rotatebox{180}{\backcard{" + back + "}}\n"
+                if col < cards_per_row - 1:
+                    latex += "%\n"
+            if row < rows_per_page - 1:
                 latex += "\n"
 
         if page < num_pages - 1:
