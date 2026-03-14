@@ -1,24 +1,49 @@
+def escape_latex(text):
+    """
+    Экранирование всех спецсимволов LaTeX.
+    Порядок важен: сначала бэкслеш, потом остальные.
+    """
+    # Бэкслеш — первым, иначе заэкранируем добавленные бэкслеши
+    text = text.replace('\\', r'\textbackslash{}')
+    
+    chars = {
+        '&':  r'\&',
+        '%':  r'\%',
+        '$':  r'\$',
+        '#':  r'\#',
+        '_':  r'\_',
+        '{':  r'\{',
+        '}':  r'\}',
+        '~':  r'\textasciitilde{}',
+        '^':  r'\textasciicircum{}',
+    }
+    for char, replacement in chars.items():
+        text = text.replace(char, replacement)
+    
+    return text
+
+
 def generate_latex_document(cards):
     """
     Генерирует LaTeX документ для дидактических карточек.
     
     Args:
-        cards: список карточек, где каждая карточка - словарь с ключами 'front' и 'back'
+        cards: список карточек, где каждая карточка — словарь с ключами 'front' и 'back'.
+               Длина списка должна быть кратна 8.
     
     Returns:
         строка с LaTeX кодом
     """
-    # Подготовка и проверка данных
     num_cards = len(cards)
     num_pages = (num_cards + 7) // 8
-    
-    # Базовый шаблон LaTeX документа
+
+    # ─── Преамбула ───────────────────────────────────────────────────
     latex = r'''\documentclass[a4paper,12pt]{extarticle}
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb}
-\usepackage{amsthm} % в т.ч. для оформления доказательств
-\usepackage{mathtext} % Поддержка кириллицы в формулах
+\usepackage{amsthm}
+\usepackage{mathtext}
 \usepackage[T2A]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage[russian]{babel}
@@ -50,7 +75,6 @@ def generate_latex_document(cards):
 }
 
 \newcommand{\backcard}[1]{%
-    % Невидимая рамка с такими же отступами как у fbox
     \fcolorbox{white}{white}{%
         \begin{minipage}[t][\cardheight][t]{\cardwidth}
         #1
@@ -62,76 +86,52 @@ def generate_latex_document(cards):
 \pagestyle{empty}
 
 \setlist[itemize]{label={}, left=0.5em, itemsep=-2pt, topsep=0.5ex}
-\setlength{\parindent}{0pt} % Отключение отступа первой строки
+\setlength{\parindent}{0pt}
 
 \begin{document}
 '''
-    
-    # Генерация страниц с передними сторонами карточек
-    latex += "\n% Передние стороны карточек (задания)\n"
-    
+
+    # ─── Передние стороны ────────────────────────────────────────────
+    latex += "\n% ===== Передние стороны карточек (задания) =====\n"
+
     for page in range(num_pages):
         latex += "\n"
-        
-        for row in range(4):  # 4 ряда по 2 карточки
+        for row in range(4):
             idx1 = page * 8 + row * 2
             idx2 = page * 8 + row * 2 + 1
-            
-            if idx1 < num_cards and idx2 < num_cards:
-                latex += r"\frontcard{" + cards[idx1]['front'].replace('#', r'\#') + "}" + "\n" + "%" + "\n" + \
-                         r"\frontcard{" + cards[idx2]['front'].replace('#', r'\#') + "}" + "\n" + "\n"
-                if row < 3:  # Уменьшенный отступ между рядами
-                    latex += "\n"
-            elif idx1 < num_cards:
-                latex += r"\frontcard{" + cards[idx1]['front'].replace('#', r'\#') + "}" + "\n" + "%" + "\n" + \
-                         r"\frontcard{}" + "\n"  + "\n"
-                if row < 3:
-                    latex += "\n"
-            else:
-                latex += r"\frontcard{}" + "\n" + "%" + "\n" + r"\frontcard{}" + "\n"
-                if row < 3:
-                    latex += "\n"
-        
-        latex += "\n"
-        
+
+            front1 = escape_latex(cards[idx1]['front']) if idx1 < num_cards else ''
+            front2 = escape_latex(cards[idx2]['front']) if idx2 < num_cards else ''
+
+            latex += r"\frontcard{" + front1 + "}\n%\n"
+            latex += r"\frontcard{" + front2 + "}\n"
+            if row < 3:
+                latex += "\n"
+
         if page < num_pages - 1:
             latex += r"\newpage" + "\n"
-    
-    # Генерация страниц с задними сторонами карточек (в обратном порядке)
-    latex += "\n% Задние стороны карточек (решения) в обратном порядке\n"
+
+    # ─── Задние стороны ──────────────────────────────────────────────
+    latex += "\n% ===== Задние стороны карточек (решения) =====\n"
     latex += r"\newpage" + "\n"
-    
+
     for page in range(num_pages):
         latex += "\n"
-
-        for row in range(4):  # 4 ряда по 2 карточки, но в обратном порядке
-            # Рассчитываем индексы с учетом переворота страницы
-            # Для каждой страницы начинаем с нижнего ряда и двигаемся вверх
+        for row in range(4):
+            # Swap: правая карточка печатается первой (зеркальный порядок)
             idx1 = page * 8 + row * 2 + 1
             idx2 = page * 8 + row * 2
-            
-            if idx1 < num_cards and idx2 < num_cards:
-                latex += r"\rotatebox{180}{\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "}}" + "\n" + "%" + "\n" + \
-                         r"\rotatebox{180}{\backcard{" + cards[idx2]['back'].replace('#', r'\#') + "}}" + "\n" + "\n"
-                if row < 3:  # Уменьшенный отступ между рядами
-                    latex += "\n"
-            elif idx1 < num_cards:
-                latex += r"\rotatebox{180}{\backcard{" + cards[idx1]['back'].replace('#', r'\#') + "}}" + "\n" + "%" + "\n" + \
-                         r"\rotatebox{180}{\backcard{}}" + "\n"  + "\n"
-                if row < 3:
-                    latex += "\n"
-            else:
-                latex += r"\rotatebox{180}{\backcard{}}" + "\n" + "%" + "\n" + r"\rotatebox{180}{\backcard{}}" + "\n"
-                if row < 3:
-                    latex += "\n"
-        
-        latex += "\n"
-        
+
+            back1 = escape_latex(cards[idx1]['back']) if idx1 < num_cards else ''
+            back2 = escape_latex(cards[idx2]['back']) if idx2 < num_cards else ''
+
+            latex += r"\rotatebox{180}{\backcard{" + back1 + "}}\n%\n"
+            latex += r"\rotatebox{180}{\backcard{" + back2 + "}}\n"
+            if row < 3:
+                latex += "\n"
+
         if page < num_pages - 1:
             latex += r"\newpage" + "\n"
-    
-    # Закрываем документ
-    latex += r"\end{document}"
-    
-    return latex
 
+    latex += "\n" + r"\end{document}"
+    return latex

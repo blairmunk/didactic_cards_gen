@@ -3,52 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LaTeX-код карточек</title>
+    <title>Предпросмотр LaTeX</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 900px;
+            max-width: 960px;
             margin: 0 auto;
             padding: 20px;
+            color: #333;
         }
+        h1 { color: #2c3e50; }
         pre {
-            background-color: #f5f5f5;
-            padding: 15px;
-            border-radius: 5px;
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 20px;
+            border-radius: 8px;
             overflow-x: auto;
-            font-size: 14px;
+            font-size: 13px;
             line-height: 1.5;
-            white-space: pre-wrap;
         }
         .buttons {
-            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
         }
-        button, a.button {
-            padding: 10px 15px;
+        .btn {
+            display: inline-block;
+            padding: 10px 18px;
             border: none;
             border-radius: 5px;
             cursor: pointer;
-            font-size: 16px;
+            font-size: 15px;
             text-decoration: none;
-            display: inline-block;
-            margin-right: 10px;
-        }
-        .btn-primary {
-            background-color: #2196F3;
             color: white;
         }
+        .btn-secondary { background-color: #2196F3; }
+        .btn-copy      { background-color: #27ae60; }
     </style>
 </head>
 <body>
-    <h1>LaTeX-код для карточек</h1>
-    
-    <p>Ниже представлен сгенерированный LaTeX-код для ваших карточек:</p>
-    
-    <pre>{{ latex_content }}</pre>
-    
+    <h1>👁 Предпросмотр LaTeX-кода</h1>
+
+    <pre id="latex-code">{{ latex_content }}</pre>
+
     <div class="buttons">
-        <a href="/" class="button btn-primary">Вернуться на главную</a>
+        <a href="/" class="btn btn-secondary">← Назад к карточкам</a>
+        <button class="btn btn-copy" onclick="copyLatex()">📋 Копировать код</button>
     </div>
+
+    <script>
+        function copyLatex() {
+            const code = document.getElementById('latex-code').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                alert('LaTeX-код скопирован в буфер обмена!');
+            });
+        }
+    </script>
 </body>
 </html>
-

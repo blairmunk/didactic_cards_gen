@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ошибка компиляции</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 20px;
+            color: #333;
+        }
+        h1 { color: #e74c3c; }
+        .error-box {
+            background: #fdecea;
+            border: 1px solid #e74c3c;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+        .error-box li {
+            font-family: monospace;
+            margin-bottom: 5px;
+        }
+        details {
+            margin-top: 15px;
+        }
+        summary {
+            cursor: pointer;
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        pre {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+            font-size: 13px;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .btn {
+            display: inline-block;
+            padding: 10px 18px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 15px;
+            text-decoration: none;
+            color: white;
+            background-color: #2196F3;
+        }
+    </style>
+</head>
+<body>
+    <h1>⚠️ Ошибка компиляции LaTeX</h1>
+
+    {% if errors %}
+    <div class="error-box">
+        <strong>Обнаруженные ошибки:</strong>
+        <ul>
+            {% for err in errors %}
+            <li>{{ err }}</li>
+            {% endfor %}
+        </ul>
+    </div>
+    {% else %}
+    <div class="error-box">
+        <p>Компиляция завершилась с ошибкой, но конкретные ошибки не удалось извлечь.</p>
+    </div>
+    {% endif %}
+
+    {% if full_log %}
+    <details>
+        <summary>Показать полный лог компиляции</summary>
+        <pre>{{ full_log }}</pre>
+    </details>
+    {% endif %}
+
+    <br>
+    <a href="/" class="btn">← Вернуться к карточкам</a>
+</body>
+</html>
