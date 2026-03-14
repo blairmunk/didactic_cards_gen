@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Дидактические карточки</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
 </head>
 <body>
     <h1>📇 Генератор дидактических карточек</h1>
@@ -52,7 +52,7 @@
     <!-- ── Пакетное добавление ── -->
     <h2>Пакетное добавление</h2>
     <div class="card-form">
-        <form action="/add_cards_bulk" method="post">
+        <form action="{{ url_for('cards.add_cards_bulk') }}" method="post">
             <label for="bulk">Формат: <code>лицевая || оборотная</code>, каждая с новой строки:</label>
             <textarea name="bulk" id="bulk" rows="8"
                       placeholder="Найти ускорение тела массой 5кг || a = F/m = 10/5 = 2 м/с²
@@ -65,7 +65,7 @@
     <!-- ── Импорт CSV ── -->
     <h2>Импорт из CSV</h2>
     <div class="card-form">
-        <form action="/import_csv" method="post" enctype="multipart/form-data">
+        <form action="{{ url_for('cards.import_csv') }}" method="post" enctype="multipart/form-data">
             <label for="csv_file">Файл CSV (<code>лицевая;оборотная</code>):</label>
             <input type="file" name="csv_file" id="csv_file" accept=".csv">
             <br><br>
@@ -94,9 +94,8 @@
                 <td class="card-text">{{ card.front }}</td>
                 <td class="card-text">{{ card.back }}</td>
                 <td class="actions">
-                    <a href="/edit_card/{{ loop.index0 }}" title="Редактировать">✏️</a>
-                    <a href="#" class="delete-btn" data-index="{{ loop.index0 }}"
-                       title="Удалить">🗑️</a>
+                    <a href="{{ url_for('cards.edit_card', index=loop.index0) }}" title="Редактировать">✏️</a>
+                    <a href="#" class="delete-btn" data-index="{{ loop.index0 }}" title="Удалить">🗑️</a>
                 </td>
             </tr>
             {% endfor %}
@@ -108,21 +107,28 @@
     <div id="generate-buttons" {% if not cards %}style="display:none"{% endif %}>
         <h2>Генерация</h2>
         <div class="buttons">
-            <form action="/preview_latex" method="post" style="display:inline">
+            <form action="{{ url_for('cards.preview_latex') }}" method="post" style="display:inline">
                 <button type="submit" class="btn-secondary">👁 Предпросмотр LaTeX</button>
             </form>
-            <form action="/generate" method="post" style="display:inline">
+            <form action="{{ url_for('cards.generate') }}" method="post" style="display:inline">
                 <button type="submit" class="btn-primary">📄 Сгенерировать PDF</button>
             </form>
-            <form action="/reset" method="post" style="display:inline">
+            <form action="{{ url_for('cards.reset') }}" method="post" style="display:inline">
                 <button type="submit" class="btn-danger"
                         onclick="return confirm('Удалить все карточки?')">🗑 Очистить всё</button>
             </form>
         </div>
     </div>
 
-    <!-- ── JavaScript: AJAX + Drag & Drop ── -->
+    <!-- ── JavaScript ── -->
     <script>
+        // ── URL-ы API (Blueprint-safe) ──
+        const API = {
+            addCard:    '{{ url_for("cards.api_add_card") }}',
+            deleteCard: '{{ url_for("cards.api_delete_card", index=999) }}'.replace('999', ''),
+            reorder:    '{{ url_for("cards.api_reorder") }}',
+            editPage:   '{{ url_for("cards.edit_card", index=999) }}'.replace('999', ''),
+        };
         const CARDS_PER_PAGE = {{ cards_per_page }};
 
         // ── Утилиты ──
@@ -140,8 +146,6 @@
             document.getElementById('pages-count').textContent = pages;
             document.getElementById('empty-count').textContent =
                 count > 0 ? (pages * CARDS_PER_PAGE - count) : 0;
-
-            // Показать/скрыть кнопки генерации
             document.getElementById('generate-buttons').style.display =
                 count > 0 ? '' : 'none';
         }
@@ -151,10 +155,8 @@
             rows.forEach((row, i) => {
                 row.dataset.index = i;
                 row.querySelector('.row-number').textContent = i + 1;
-                // Обновляем ссылку на редактирование
-                const editLink = row.querySelector('a[href^="/edit_card/"]');
-                if (editLink) editLink.href = '/edit_card/' + i;
-                // Обновляем data-index кнопки удаления
+                const editLink = row.querySelector('a[href*="edit_card"]');
+                if (editLink) editLink.href = API.editPage + i;
                 const delBtn = row.querySelector('.delete-btn');
                 if (delBtn) delBtn.dataset.index = i;
             });
@@ -166,7 +168,7 @@
             return div.innerHTML;
         }
 
-        // ── AJAX: добавление одной карточки ──
+        // ── AJAX: добавление карточки ──
 
         document.getElementById('single-card-form').addEventListener('submit', async (e) => {
             e.preventDefault();
@@ -182,7 +184,7 @@
             }
 
             try {
-                const resp = await fetch('/api/add_card', {
+                const resp = await fetch(API.addCard, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ front, back })
@@ -194,12 +196,10 @@
                     return;
                 }
 
-                // Добавляем строку в таблицу
                 addCardRow(data.index, data.card);
                 updateCounters(data.cards_count);
                 showSuccess('Карточка добавлена!');
 
-                // Очищаем поля
                 frontEl.value = '';
                 backEl.value = '';
                 frontEl.focus();
@@ -213,7 +213,6 @@
         function addCardRow(index, card) {
             let tbody = document.getElementById('cards-tbody');
 
-            // Если таблицы ещё нет — создаём
             if (!tbody) {
                 const container = document.getElementById('generate-buttons');
                 const h2 = document.createElement('h2');
@@ -237,7 +236,6 @@
                 `;
                 container.parentNode.insertBefore(table, container);
                 tbody = document.getElementById('cards-tbody');
-                initDragAndDrop();
             }
 
             const tr = document.createElement('tr');
@@ -249,7 +247,7 @@
                 <td class="card-text">${escapeHtml(card.front)}</td>
                 <td class="card-text">${escapeHtml(card.back)}</td>
                 <td class="actions">
-                    <a href="/edit_card/${index}" title="Редактировать">✏️</a>
+                    <a href="${API.editPage}${index}" title="Редактировать">✏️</a>
                     <a href="#" class="delete-btn" data-index="${index}" title="Удалить">🗑️</a>
                 </td>
             `;
@@ -267,7 +265,7 @@
                 if (!confirm(`Удалить карточку №${idx + 1}?`)) return;
 
                 try {
-                    const resp = await fetch(`/api/delete_card/${idx}`, {
+                    const resp = await fetch(API.deleteCard + idx, {
                         method: 'DELETE'
                     });
                     const data = await resp.json();
@@ -277,7 +275,6 @@
                         return;
                     }
 
-                    // Удаляем строку из DOM
                     btn.closest('tr').remove();
                     renumberRows();
                     updateCounters(data.cards_count);
@@ -290,10 +287,9 @@
             });
         }
 
-        // Привязываем события удаления ко всем существующим кнопкам
         document.querySelectorAll('.delete-btn').forEach(attachDeleteEvent);
 
-        // ── Drag & Drop сортировка ──
+        // ── Drag & Drop ──
 
         let dragSrcRow = null;
 
@@ -335,7 +331,6 @@
                 const fromIdx = rows.indexOf(dragSrcRow);
                 const toIdx = rows.indexOf(row);
 
-                // Перемещаем в DOM
                 if (fromIdx < toIdx) {
                     tbody.insertBefore(dragSrcRow, row.nextSibling);
                 } else {
@@ -344,12 +339,11 @@
 
                 renumberRows();
 
-                // Отправляем новый порядок на сервер
                 const newRows = Array.from(tbody.querySelectorAll('tr'));
                 const order = newRows.map(r => parseInt(r.dataset.index));
 
                 try {
-                    const resp = await fetch('/api/reorder', {
+                    const resp = await fetch(API.reorder, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ order })
@@ -357,7 +351,6 @@
                     const data = await resp.json();
 
                     if (resp.ok) {
-                        // Обновляем data-index после успешного сохранения
                         newRows.forEach((r, i) => { r.dataset.index = i; });
                         renumberRows();
                         showSuccess('Порядок сохранён');
