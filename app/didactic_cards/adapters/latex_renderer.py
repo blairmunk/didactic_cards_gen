@@ -102,6 +102,7 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\frontcard}}[1]{{%
     \fbox{{%
         \begin{{minipage}}[t][\cardheight][t]{{\cardwidth}}
+        \vspace{{0pt}}%
         #1
         \end{{minipage}}%
     }}%
@@ -111,6 +112,7 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\backcard}}[1]{{%
     \fcolorbox{{white}}{{white}}{{%
         \begin{{minipage}}[t][\cardheight][t]{{\cardwidth}}
+        \vspace{{0pt}}%
         #1
         \end{{minipage}}%
     }}%
