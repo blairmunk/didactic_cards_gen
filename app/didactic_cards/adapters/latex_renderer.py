@@ -2,9 +2,33 @@ from ..domain.interfaces import DocumentRenderer
 from ..domain.entities import CardDeck
 
 
+import re
+
+
 def escape_latex(text: str) -> str:
-    """Экранирование всех спецсимволов LaTeX."""
-    # 1. Backslash → плейсхолдер (чтобы не мешал дальнейшим заменам)
+    """Экранирование спецсимволов LaTeX, с сохранением математических формул."""
+    # Разбиваем текст на части: формулы ($$...$$ и $...$) и обычный текст
+    # $$...$$ проверяем первым (жадность)
+    parts = re.split(r'(\$\$.+?\$\$|\$.+?\$)', text, flags=re.DOTALL)
+
+    result = []
+    for part in parts:
+        if part.startswith('$$') and part.endswith('$$'):
+            # display math — оставляем как есть
+            result.append(part)
+        elif part.startswith('$') and part.endswith('$') and len(part) > 1:
+            # inline math — оставляем как есть
+            result.append(part)
+        else:
+            # обычный текст — экранируем
+            result.append(_escape_text(part))
+
+    return ''.join(result)
+
+
+def _escape_text(text: str) -> str:
+    """Экранирование спецсимволов в обычном (не-math) тексте."""
+    # 1. Backslash → плейсхолдер
     text = text.replace('\\', '\x00BACKSLASH\x00')
 
     # 2. Все остальные спецсимволы
@@ -22,11 +46,10 @@ def escape_latex(text: str) -> str:
     for char, replacement in chars.items():
         text = text.replace(char, replacement)
 
-    # 3. Плейсхолдер → \textbackslash{} (после экранирования { и })
+    # 3. Плейсхолдер → \textbackslash{}
     text = text.replace('\x00BACKSLASH\x00', r'\textbackslash{}')
 
     return text
-
 
 
 class LatexRenderer(DocumentRenderer):

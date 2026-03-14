@@ -43,6 +43,27 @@ class TestEscapeLatex:
     def test_no_special_chars(self):
         assert escape_latex('Привет мир') == 'Привет мир'
 
+    def test_inline_math_preserved(self):
+        assert escape_latex('Найти $a = \\frac{F}{m}$') == r'Найти $a = \frac{F}{m}$'
+
+    def test_display_math_preserved(self):
+        assert escape_latex('Формула: $$E = mc^2$$') == r'Формула: $$E = mc^2$$'
+
+    def test_mixed_text_and_math(self):
+        result = escape_latex('При 100% нагрузке $F = ma$ и $E = mc^2$')
+        assert r'\%' in result          # процент экранирован
+        assert '$F = ma$' in result     # формула нетронута
+        assert '$E = mc^2$' in result   # вторая формула нетронута
+
+    def test_dollar_without_closing(self):
+        # Одиночный $ без пары — экранируется
+        assert escape_latex('цена 5$') == r'цена 5\$'
+
+    def test_underscore_outside_math(self):
+        result = escape_latex('имя_файла и $a_1$')
+        assert r'имя\_файла' in result  # экранирован
+        assert '$a_1$' in result        # внутри формулы — нет
+
 
 class TestLatexRenderer:
     def make_deck(self, n):
