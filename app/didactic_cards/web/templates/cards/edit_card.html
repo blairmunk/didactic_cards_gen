@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Редактирование карточки</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
 </head>
 <body>
     <h1>✏️ Редактирование карточки №{{ index + 1 }}</h1>
 
-    <form action="/edit_card/{{ index }}" method="post">
+    <form action="{{ url_for('cards.edit_card', index=index) }}" method="post">
         <label for="front">Лицевая сторона (задание):</label>
         <textarea name="front" id="front">{{ card.front }}</textarea>
 
@@ -18,7 +18,7 @@
 
         <div class="buttons">
             <button type="submit" class="btn-primary">💾 Сохранить</button>
-            <a href="/" class="btn btn-secondary">Отмена</a>
+            <a href="{{ url_for('cards.index') }}" class="btn btn-secondary">Отмена</a>
         </div>
     </form>
 </body>
