@@ -7,10 +7,10 @@ import tempfile
 from ..domain.interfaces import CompileResult, PdfCompiler
 
 
-class PdfLatexCompiler(PdfCompiler):
+class XelatexCompiler(PdfCompiler):
 
-    def __init__(self, pdflatex_path: str = 'pdflatex', timeout: int = 30):
-        self.pdflatex_path = pdflatex_path
+    def __init__(self, xelatex_path: str = 'xelatex', timeout: int = 30):
+        self.xelatex_path = xelatex_path
         self.timeout = timeout
 
     def compile(self, latex_source: str) -> CompileResult:
@@ -24,7 +24,7 @@ class PdfLatexCompiler(PdfCompiler):
 
             try:
                 subprocess.run(
-                    [self.pdflatex_path, '-interaction=nonstopmode',
+                    [self.xelatex_path, '-interaction=nonstopmode',
                      '-output-directory', tmpdir, tex_path],
                     capture_output=True,
                     timeout=self.timeout,

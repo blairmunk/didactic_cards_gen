@@ -123,10 +123,8 @@ class GetDeck:
 
 
 class GenerateDocument:
-    def __init__(self, repo: CardRepository,
-                 renderer: DocumentRenderer,
-                 compiler: PdfCompiler,
-                 cards_per_page: int = 8):
+    def __init__(self, repo: CardRepository, renderer: DocumentRenderer,
+                 compiler: PdfCompiler, cards_per_page: int = 8):
         self.repo = repo
         self.renderer = renderer
         self.compiler = compiler
@@ -134,8 +132,7 @@ class GenerateDocument:
 
     def execute(self) -> CompileResult:
         deck = self.repo.load()
-        padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
-        source = self.renderer.render(padded_deck)
+        source = self.renderer.render(deck)
         return self.compiler.compile(source)
 
 

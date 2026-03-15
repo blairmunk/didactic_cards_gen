@@ -1,5 +1,5 @@
 from flask import (Blueprint, render_template, request, redirect,
-                   url_for, send_file, jsonify)
+                   url_for, make_response, jsonify)
 from ..domain.interfaces import CardRepository, DocumentRenderer, PdfCompiler
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
@@ -117,12 +117,14 @@ def generate():
 
     if not result.success:
         return render_template('cards/error.html',
-                               errors=result.errors,
+                               errors=[result.log],
                                full_log=result.log)
 
-    return send_file(result.pdf_path,
-                     as_attachment=True,
-                     download_name='didactic_cards.pdf')
+    response = make_response(result.pdf_data)
+    response.headers['Content-Type'] = 'application/pdf'
+    response.headers['Content-Disposition'] = 'attachment; filename=didactic_cards.pdf'
+    return response
+
 
 
 @cards_bp.route('/preview_latex', methods=['POST'])
