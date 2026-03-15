@@ -1,26 +1,20 @@
 from ..domain.interfaces import DocumentRenderer
 from ..domain.entities import CardDeck
 
-
 import re
 
 
 def escape_latex(text: str) -> str:
     """Экранирование спецсимволов LaTeX, с сохранением математических формул."""
-    # Разбиваем текст на части: формулы ($$...$$ и $...$) и обычный текст
-    # $$...$$ проверяем первым (жадность)
     parts = re.split(r'(\$\$.+?\$\$|\$.+?\$)', text, flags=re.DOTALL)
 
     result = []
     for part in parts:
         if part.startswith('$$') and part.endswith('$$'):
-            # display math — оставляем как есть
             result.append(part)
         elif part.startswith('$') and part.endswith('$') and len(part) > 1:
-            # inline math — оставляем как есть
             result.append(part)
         else:
-            # обычный текст — экранируем
             result.append(_escape_text(part))
 
     return ''.join(result)
@@ -28,10 +22,8 @@ def escape_latex(text: str) -> str:
 
 def _escape_text(text: str) -> str:
     """Экранирование спецсимволов в обычном (не-math) тексте."""
-    # 1. Backslash → плейсхолдер
     text = text.replace('\\', '\x00BACKSLASH\x00')
 
-    # 2. Все остальные спецсимволы
     chars = {
         '&': r'\&',
         '%': r'\%',
@@ -46,22 +38,29 @@ def _escape_text(text: str) -> str:
     for char, replacement in chars.items():
         text = text.replace(char, replacement)
 
-    # 3. Плейсхолдер → \textbackslash{}
     text = text.replace('\x00BACKSLASH\x00', r'\textbackslash{}')
 
     return text
+
+
+def _card_content(text: str) -> str:
+    """Возвращает экранированный текст или mbox для пустых карточек."""
+    escaped = escape_latex(text) if text.strip() else ''
+    return escaped if escaped else r'\mbox{}'
 
 
 class LatexRenderer(DocumentRenderer):
     """Генерирует LaTeX-документ из колоды карточек."""
 
     def __init__(self, card_width_cm=9.3, card_height_cm=6.3,
-                 cards_per_row=2, rows_per_page=4, fbox_sep_pt=8):
+                 cards_per_row=2, rows_per_page=4, fbox_sep_pt=8,
+                 back_border=False):
         self.card_width = card_width_cm
         self.card_height = card_height_cm
         self.cards_per_row = cards_per_row
         self.rows_per_page = rows_per_page
         self.fbox_sep = fbox_sep_pt
+        self.back_border = back_border
         self.cards_per_page = cards_per_row * rows_per_page
 
     def render(self, deck: CardDeck) -> str:
@@ -76,6 +75,31 @@ class LatexRenderer(DocumentRenderer):
         return latex
 
     def _preamble(self) -> str:
+        if self.back_border:
+            backcard_def = (
+                r"\newcommand{\backcard}[1]{%"  "\n"
+                r"    \fbox{%"  "\n"
+                r"        \begin{minipage}[t][\cardheight][t]{\cardwidth}"  "\n"
+                r"        \vspace{0pt}%"  "\n"
+                r"        #1"  "\n"
+                r"        \end{minipage}%"  "\n"
+                r"    }%"  "\n"
+                r"    \vspace{2pt}%"  "\n"
+                r"}"
+            )
+        else:
+            backcard_def = (
+                r"\newcommand{\backcard}[1]{%"  "\n"
+                r"    \fcolorbox{white}{white}{%"  "\n"
+                r"        \begin{minipage}[t][\cardheight][t]{\cardwidth}"  "\n"
+                r"        \vspace{0pt}%"  "\n"
+                r"        #1"  "\n"
+                r"        \end{minipage}%"  "\n"
+                r"    }%"  "\n"
+                r"    \vspace{2pt}%"  "\n"
+                r"}"
+            )
+
         return rf'''\documentclass[a4paper,12pt]{{extarticle}}
 \usepackage{{amsmath}}
 \usepackage{{amsfonts}}
@@ -109,15 +133,7 @@ class LatexRenderer(DocumentRenderer):
     \vspace{{2pt}}%
 }}
 
-\newcommand{{\backcard}}[1]{{%
-    \fcolorbox{{white}}{{white}}{{%
-        \begin{{minipage}}[t][\cardheight][t]{{\cardwidth}}
-        \vspace{{0pt}}%
-        #1
-        \end{{minipage}}%
-    }}%
-    \vspace{{2pt}}%
-}}
+{backcard_def}
 
 \pagestyle{{empty}}
 
@@ -135,8 +151,8 @@ class LatexRenderer(DocumentRenderer):
             for row in range(self.rows_per_page):
                 for col in range(self.cards_per_row):
                     idx = page * self.cards_per_page + row * self.cards_per_row + col
-                    front = escape_latex(cards[idx].front) if idx < num_cards else ''
-                    latex += r"\frontcard{" + front + "}\n"
+                    content = _card_content(cards[idx].front) if idx < num_cards else r'\mbox{}'
+                    latex += r"\frontcard{" + content + "}\n"
                     if col < self.cards_per_row - 1:
                         latex += "%\n"
                 if row < self.rows_per_page - 1:
@@ -157,8 +173,8 @@ class LatexRenderer(DocumentRenderer):
                 for col in range(self.cards_per_row):
                     mirror_col = self.cards_per_row - 1 - col
                     idx = page * self.cards_per_page + row * self.cards_per_row + mirror_col
-                    back = escape_latex(cards[idx].back) if idx < num_cards else ''
-                    latex += r"\rotatebox{180}{\backcard{" + back + "}}\n"
+                    content = _card_content(cards[idx].back) if idx < num_cards else r'\mbox{}'
+                    latex += r"\rotatebox{180}{\backcard{" + content + "}}\n"
                     if col < self.cards_per_row - 1:
                         latex += "%\n"
                 if row < self.rows_per_page - 1:

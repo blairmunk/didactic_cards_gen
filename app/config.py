@@ -9,6 +9,7 @@ class CardLayoutConfig:
     cards_per_row: int = 2
     rows_per_page: int = 4
     fbox_sep_pt: int = 8
+    back_border: bool = False  # True = рамка на обороте (для отладки центровки)
 
     @property
     def cards_per_page(self):
@@ -23,3 +24,4 @@ class AppConfig:
     pdflatex_timeout: int = 30
     max_cards: int = 200
     layout: CardLayoutConfig = field(default_factory=CardLayoutConfig)
+    #layout: CardLayoutConfig = field(default_factory=lambda: CardLayoutConfig(back_border=True))

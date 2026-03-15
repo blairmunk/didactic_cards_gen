@@ -13,7 +13,6 @@ def create_app(config: AppConfig = None) -> Flask:
     app = Flask(__name__)
     app.secret_key = config.secret_key
 
-    # Зависимости — в app.config, blueprint читает через current_app
     app.config['REPO'] = FlaskSessionRepository()
 
     app.config['RENDERER'] = LatexRenderer(
@@ -22,6 +21,7 @@ def create_app(config: AppConfig = None) -> Flask:
         cards_per_row=config.layout.cards_per_row,
         rows_per_page=config.layout.rows_per_page,
         fbox_sep_pt=config.layout.fbox_sep_pt,
+        back_border=config.layout.back_border,
     )
 
     app.config['COMPILER'] = PdfLatexCompiler(
