@@ -1,6 +1,7 @@
 import csv
 import io
 from typing import List, Tuple
+
 from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import CardRepository, DocumentRenderer, PdfCompiler, CompileResult
 
@@ -10,7 +11,6 @@ class AddCard:
         self.repo = repo
 
     def execute(self, front: str, back: str) -> Tuple[Card, int]:
-        """Добавляет одну карточку. Возвращает (карточка, индекс)."""
         deck = self.repo.load()
         card = Card(front=front.strip(), back=back.strip())
         index = deck.add(card)
@@ -23,10 +23,8 @@ class AddCardsBulk:
         self.repo = repo
 
     def execute(self, bulk_text: str) -> int:
-        """Парсит многострочный текст, добавляет карточки. Возвращает кол-во добавленных."""
         deck = self.repo.load()
         count = 0
-
         for line in bulk_text.strip().split('\n'):
             line = line.strip()
             if not line:
@@ -37,7 +35,6 @@ class AddCardsBulk:
             else:
                 deck.add(Card(front=line, back=''))
             count += 1
-
         self.repo.save(deck)
         return count
 
@@ -47,12 +44,10 @@ class ImportCsv:
         self.repo = repo
 
     def execute(self, file_bytes: bytes, delimiter: str = ';') -> int:
-        """Импортирует карточки из CSV. Возвращает кол-во добавленных."""
         deck = self.repo.load()
         stream = io.StringIO(file_bytes.decode('utf-8-sig'))
         reader = csv.reader(stream, delimiter=delimiter)
         count = 0
-
         for row in reader:
             if len(row) >= 2:
                 front = row[0].strip()
@@ -63,7 +58,6 @@ class ImportCsv:
             elif len(row) == 1 and row[0].strip():
                 deck.add(Card(front=row[0].strip(), back=''))
                 count += 1
-
         self.repo.save(deck)
         return count
 
@@ -108,7 +102,7 @@ class ResetCards:
     def __init__(self, repo: CardRepository):
         self.repo = repo
 
-    def execute(self):
+    def execute(self) -> None:
         deck = self.repo.load()
         deck.clear()
         self.repo.save(deck)
@@ -123,8 +117,10 @@ class GetDeck:
 
 
 class GenerateDocument:
-    def __init__(self, repo: CardRepository, renderer: DocumentRenderer,
-                 compiler: PdfCompiler, cards_per_page: int = 8):
+    def __init__(self, repo: CardRepository,
+                 renderer: DocumentRenderer,
+                 compiler: PdfCompiler,
+                 cards_per_page: int = 8):
         self.repo = repo
         self.renderer = renderer
         self.compiler = compiler
@@ -132,7 +128,8 @@ class GenerateDocument:
 
     def execute(self) -> CompileResult:
         deck = self.repo.load()
-        source = self.renderer.render(deck)
+        padded = CardDeck(cards=deck.padded(self.cards_per_page))
+        source = self.renderer.render(padded)
         return self.compiler.compile(source)
 
 
@@ -146,5 +143,5 @@ class PreviewDocument:
 
     def execute(self) -> str:
         deck = self.repo.load()
-        padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
-        return self.renderer.render(padded_deck)
+        padded = CardDeck(cards=deck.padded(self.cards_per_page))
+        return self.renderer.render(padded)
