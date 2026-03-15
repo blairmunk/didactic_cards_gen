@@ -15,7 +15,6 @@ class CompileResult:
 
 
 class CardRepository(ABC):
-    """Хранилище рабочей коллекции (сессия)."""
 
     @abstractmethod
     def load(self) -> CardDeck:
@@ -27,7 +26,6 @@ class CardRepository(ABC):
 
 
 class StorageBackend(ABC):
-    """Персистентное хранилище карточек и колод (JSON-файл)."""
 
     @abstractmethod
     def load_all(self) -> dict:
@@ -71,7 +69,6 @@ class StorageBackend(ABC):
 
 
 class DocumentRenderer(ABC):
-    """Генерация LaTeX-документа из коллекции карточек."""
 
     @abstractmethod
     def render(self, deck: CardDeck) -> str:
@@ -79,8 +76,7 @@ class DocumentRenderer(ABC):
 
 
 class PdfCompiler(ABC):
-    """Компиляция LaTeX → PDF."""
 
     @abstractmethod
-    def compile(self, latex_source: str) -> tuple[bool, bytes, str]:
+    def compile(self, latex_source: str) -> CompileResult:
         ...

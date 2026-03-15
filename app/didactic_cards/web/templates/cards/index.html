@@ -5,6 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Дидактические карточки</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
+    <script>
+    window.MathJax = {
+        tex: {
+            inlineMath:  [['$', '$'], ['\$', '\$']],
+            displayMath: [['$$', '$$'], ['\$', '\$']]
+        },
+        startup: { typeset: false }
+    };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
 </head>
 <body>
     <h1>📇 Генератор дидактических карточек</h1>
@@ -31,7 +41,7 @@
         </span>
     </div>
 
-    <!-- ── Добавление одной карточки (AJAX) ── -->
+    <!-- ── Добавление одной карточки ── -->
     <h2>Добавить карточку</h2>
     <div class="card-form">
         <form id="single-card-form">
@@ -73,34 +83,68 @@
         </form>
     </div>
 
-    <!-- ── Таблица карточек ── -->
+    <!-- ── Карточки ── -->
     {% if cards %}
     <h2>Добавленные карточки</h2>
-    <table class="cards-table" id="cards-table">
-        <thead>
-            <tr>
-                <th style="width:30px"></th>
-                <th style="width:40px">#</th>
-                <th>Лицевая сторона</th>
-                <th>Оборотная сторона</th>
-                <th style="width:100px">Действия</th>
-            </tr>
-        </thead>
-        <tbody id="cards-tbody">
+
+    <div class="view-toggle">
+        <button id="btn-view-table" class="active" onclick="switchView('table')">📋 Таблица</button>
+        <button id="btn-view-preview" onclick="switchView('preview')">🃏 Превью</button>
+    </div>
+
+    <!-- Режим: таблица -->
+    <div id="view-table">
+        <table class="cards-table" id="cards-table">
+            <thead>
+                <tr>
+                    <th style="width:30px"></th>
+                    <th style="width:40px">#</th>
+                    <th>Лицевая сторона</th>
+                    <th>Оборотная сторона</th>
+                    <th style="width:100px">Действия</th>
+                </tr>
+            </thead>
+            <tbody id="cards-tbody">
+                {% for card in cards %}
+                <tr draggable="true" data-index="{{ loop.index0 }}">
+                    <td class="drag-handle" title="Перетащите для сортировки">⠿</td>
+                    <td class="row-number">{{ loop.index }}</td>
+                    <td class="card-text">{{ card.front }}</td>
+                    <td class="card-text">{{ card.back }}</td>
+                    <td class="actions">
+                        <a href="{{ url_for('cards.edit_card', index=loop.index0) }}" title="Редактировать">✏️</a>
+                        <a href="#" class="delete-btn" data-index="{{ loop.index0 }}" title="Удалить">🗑️</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Режим: визуальный превью -->
+    <div id="view-preview" style="display:none">
+        <div class="preview-grid" id="preview-grid">
             {% for card in cards %}
-            <tr draggable="true" data-index="{{ loop.index0 }}">
-                <td class="drag-handle" title="Перетащите для сортировки">⠿</td>
-                <td class="row-number">{{ loop.index }}</td>
-                <td class="card-text">{{ card.front }}</td>
-                <td class="card-text">{{ card.back }}</td>
-                <td class="actions">
+            <div class="preview-card" data-index="{{ loop.index0 }}">
+                <span class="card-number">#{{ loop.index }}</span>
+                <span class="card-actions">
                     <a href="{{ url_for('cards.edit_card', index=loop.index0) }}" title="Редактировать">✏️</a>
                     <a href="#" class="delete-btn" data-index="{{ loop.index0 }}" title="Удалить">🗑️</a>
-                </td>
-            </tr>
+                </span>
+                <div class="preview-card-inner">
+                    <div class="preview-side preview-front">
+                        <div class="preview-content">{{ card.front }}</div>
+                        <span class="preview-side-label">задание</span>
+                    </div>
+                    <div class="preview-side preview-back">
+                        <div class="preview-content">{{ card.back }}</div>
+                        <span class="preview-side-label">решение</span>
+                    </div>
+                </div>
+            </div>
             {% endfor %}
-        </tbody>
-    </table>
+        </div>
+    </div>
     {% endif %}
 
     <!-- ── Кнопки генерации ── -->
@@ -122,7 +166,6 @@
 
     <!-- ── JavaScript ── -->
     <script>
-        // ── URL-ы API (Blueprint-safe) ──
         const API = {
             addCard:    '{{ url_for("cards.api_add_card") }}',
             deleteCard: '{{ url_for("cards.api_delete_card", index=999) }}'.replace('999', ''),
@@ -130,6 +173,26 @@
             editPage:   '{{ url_for("cards.edit_card", index=999) }}'.replace('999', ''),
         };
         const CARDS_PER_PAGE = {{ cards_per_page }};
+
+        // ── Переключение режимов ──
+
+        let currentView = 'table';
+        let mathjaxRendered = false;
+
+        function switchView(view) {
+            currentView = view;
+            document.getElementById('view-table').style.display   = view === 'table'   ? '' : 'none';
+            document.getElementById('view-preview').style.display = view === 'preview' ? '' : 'none';
+            document.getElementById('btn-view-table').classList.toggle('active',   view === 'table');
+            document.getElementById('btn-view-preview').classList.toggle('active', view === 'preview');
+
+            if (view === 'preview' && !mathjaxRendered) {
+                mathjaxRendered = true;
+                if (window.MathJax && MathJax.typesetPromise) {
+                    MathJax.typesetPromise([document.getElementById('preview-grid')]);
+                }
+            }
+        }
 
         // ── Утилиты ──
 
@@ -162,10 +225,69 @@
             });
         }
 
+        function renumberPreviews() {
+            const cards = document.querySelectorAll('#preview-grid .preview-card');
+            cards.forEach((card, i) => {
+                card.dataset.index = i;
+                card.querySelector('.card-number').textContent = '#' + (i + 1);
+                const editLink = card.querySelector('a[href*="edit_card"]');
+                if (editLink) editLink.href = API.editPage + i;
+                const delBtn = card.querySelector('.delete-btn');
+                if (delBtn) delBtn.dataset.index = i;
+            });
+        }
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // ── Синхронное удаление из обоих режимов ──
+
+        function removeCardFromPreview(index) {
+            const card = document.querySelector(`#preview-grid .preview-card[data-index="${index}"]`);
+            if (card) card.remove();
+            renumberPreviews();
+        }
+
+        function addCardToPreview(index, cardData) {
+            let grid = document.getElementById('preview-grid');
+            if (!grid) {
+                const container = document.getElementById('view-preview');
+                grid = document.createElement('div');
+                grid.className = 'preview-grid';
+                grid.id = 'preview-grid';
+                container.appendChild(grid);
+            }
+
+            const div = document.createElement('div');
+            div.className = 'preview-card';
+            div.dataset.index = index;
+            div.innerHTML = `
+                <span class="card-number">#${index + 1}</span>
+                <span class="card-actions">
+                    <a href="${API.editPage}${index}" title="Редактировать">✏️</a>
+                    <a href="#" class="delete-btn" data-index="${index}" title="Удалить">🗑️</a>
+                </span>
+                <div class="preview-card-inner">
+                    <div class="preview-side preview-front">
+                        <div class="preview-content">${escapeHtml(cardData.front)}</div>
+                        <span class="preview-side-label">задание</span>
+                    </div>
+                    <div class="preview-side preview-back">
+                        <div class="preview-content">${escapeHtml(cardData.back)}</div>
+                        <span class="preview-side-label">решение</span>
+                    </div>
+                </div>
+            `;
+            grid.appendChild(div);
+            attachDeleteEvent(div.querySelector('.delete-btn'));
+
+            // Рендерим MathJax для новой карточки
+            if (mathjaxRendered && window.MathJax && MathJax.typesetPromise) {
+                MathJax.typesetPromise([div]);
+            }
         }
 
         // ── AJAX: добавление карточки ──
@@ -197,6 +319,7 @@
                 }
 
                 addCardRow(data.index, data.card);
+                addCardToPreview(data.index, data.card);
                 updateCounters(data.cards_count);
                 showSuccess('Карточка добавлена!');
 
@@ -204,38 +327,30 @@
                 backEl.value = '';
                 frontEl.focus();
 
+                // Показать блоки если это первая карточка
+                ensureViewSectionsExist();
+
             } catch (err) {
                 console.error(err);
                 alert('Ошибка сети');
             }
         });
 
+        function ensureViewSectionsExist() {
+            // Если секции переключения ещё нет — перезагружаем
+            // (проще, чем создавать весь DOM)
+            if (!document.getElementById('view-table')) {
+                location.reload();
+            }
+        }
+
         function addCardRow(index, card) {
             let tbody = document.getElementById('cards-tbody');
 
             if (!tbody) {
-                const container = document.getElementById('generate-buttons');
-                const h2 = document.createElement('h2');
-                h2.textContent = 'Добавленные карточки';
-                container.parentNode.insertBefore(h2, container);
-
-                const table = document.createElement('table');
-                table.className = 'cards-table';
-                table.id = 'cards-table';
-                table.innerHTML = `
-                    <thead>
-                        <tr>
-                            <th style="width:30px"></th>
-                            <th style="width:40px">#</th>
-                            <th>Лицевая сторона</th>
-                            <th>Оборотная сторона</th>
-                            <th style="width:100px">Действия</th>
-                        </tr>
-                    </thead>
-                    <tbody id="cards-tbody"></tbody>
-                `;
-                container.parentNode.insertBefore(table, container);
-                tbody = document.getElementById('cards-tbody');
+                // Первая карточка — перезагружаем для создания всей структуры
+                location.reload();
+                return;
             }
 
             const tr = document.createElement('tr');
@@ -259,6 +374,7 @@
         // ── AJAX: удаление карточки ──
 
         function attachDeleteEvent(btn) {
+            if (!btn) return;
             btn.addEventListener('click', async (e) => {
                 e.preventDefault();
                 const idx = parseInt(btn.dataset.index);
@@ -275,8 +391,14 @@
                         return;
                     }
 
-                    btn.closest('tr').remove();
+                    // Удаляем из таблицы
+                    const row = document.querySelector(`#cards-tbody tr[data-index="${idx}"]`);
+                    if (row) row.remove();
                     renumberRows();
+
+                    // Удаляем из превью
+                    removeCardFromPreview(idx);
+
                     updateCounters(data.cards_count);
                     showSuccess('Карточка удалена');
 
@@ -353,6 +475,8 @@
                     if (resp.ok) {
                         newRows.forEach((r, i) => { r.dataset.index = i; });
                         renumberRows();
+                        // Перестраиваем превью в том же порядке
+                        rebuildPreviewOrder();
                         showSuccess('Порядок сохранён');
                     } else {
                         alert(data.error || 'Ошибка сортировки');
@@ -363,6 +487,31 @@
                     location.reload();
                 }
             });
+        }
+
+        function rebuildPreviewOrder() {
+            const grid = document.getElementById('preview-grid');
+            if (!grid) return;
+            const tbody = document.getElementById('cards-tbody');
+            if (!tbody) return;
+
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            const previews = Array.from(grid.querySelectorAll('.preview-card'));
+
+            // Собираем превью по текущему data-index
+            const previewMap = {};
+            previews.forEach(p => { previewMap[p.dataset.index] = p; });
+
+            // Пересобираем в порядке таблицы
+            rows.forEach((row, i) => {
+                const oldIdx = row.dataset.index;
+                const preview = previewMap[oldIdx];
+                if (preview) {
+                    grid.appendChild(preview);
+                }
+            });
+
+            renumberPreviews();
         }
 
         function initDragAndDrop() {
