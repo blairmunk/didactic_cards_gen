@@ -128,13 +128,34 @@ def health_ready():
     except Exception:
         compiler_ok = False
 
-    ready = storage_ok and compiler_ok
+    trusted_enabled = current_app.config.get('TRUSTED_LATEX_ENABLED', False)
+    trusted_ok = True
+    if trusted_enabled:
+        try:
+            trusted_compiler = current_app.config.get('TRUSTED_COMPILER')
+            trusted_check = getattr(
+                trusted_compiler, 'readiness_check', None
+            ) or getattr(trusted_compiler, 'is_available', None)
+            trusted_ok = (
+                trusted_compiler is not None
+                and trusted_check is not None
+                and trusted_check()
+            )
+        except Exception:
+            trusted_ok = False
+
+    ready = storage_ok and compiler_ok and trusted_ok
+    components = {
+        'storage': 'ok' if storage_ok else 'unavailable',
+        'tex': 'ok' if compiler_ok else 'unavailable',
+    }
+    if trusted_enabled:
+        components['trusted-tex-sandbox'] = (
+            'ok' if trusted_ok else 'unavailable'
+        )
     return jsonify({
         'status': 'ready' if ready else 'unavailable',
-        'components': {
-            'storage': 'ok' if storage_ok else 'unavailable',
-            'tex': 'ok' if compiler_ok else 'unavailable',
-        },
+        'components': components,
     }), 200 if ready else 503
 
 

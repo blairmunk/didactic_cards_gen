@@ -1,3 +1,4 @@
+import shutil
 from pathlib import Path
 
 from flask import Flask
@@ -5,6 +6,9 @@ from config import AppConfig as Config
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 from didactic_cards.adapters.sqlite_repository import SqliteRepository
+from didactic_cards.adapters.sandboxed_pdflatex_compiler import (
+    SandboxedPdfLatexCompiler,
+)
 from didactic_cards.web.blueprint import cards_bp
 from didactic_cards.web.observability import configure_json_logging
 
@@ -67,6 +71,19 @@ def create_app(
     app.config['MAX_CARDS'] = cfg.max_cards
     app.config['MAX_CONTENT_LENGTH'] = cfg.max_request_bytes
     app.config['CSRF_ENABLED'] = cfg.csrf_enabled
+    app.config['TRUSTED_LATEX_ENABLED'] = cfg.trusted_latex_enabled
+    trusted_pdflatex_path = (
+        shutil.which(cfg.pdflatex_path) or cfg.pdflatex_path
+    )
+    trusted_bwrap_path = shutil.which(cfg.bwrap_path) or cfg.bwrap_path
+    app.config['TRUSTED_COMPILER'] = (
+        SandboxedPdfLatexCompiler(
+            pdflatex_path=trusted_pdflatex_path,
+            bwrap_path=trusted_bwrap_path,
+            timeout=cfg.trusted_pdflatex_timeout,
+        )
+        if cfg.trusted_latex_enabled else None
+    )
 
     app.register_blueprint(cards_bp)
     return app

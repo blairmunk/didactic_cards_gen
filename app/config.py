@@ -126,6 +126,13 @@ class AppConfig:
     max_cards: int = 200
     max_request_bytes: int = 2 * 1024 * 1024
     csrf_enabled: bool = True
+    trusted_latex_enabled: bool = field(
+        default_factory=lambda: _environment_bool(
+            'DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED'
+        )
+    )
+    bwrap_path: str = '/usr/bin/bwrap'
+    trusted_pdflatex_timeout: int = 10
     debug: bool = field(
         default_factory=lambda: _environment_bool('DIDACTIC_CARDS_DEBUG')
     )
@@ -137,6 +144,14 @@ class AppConfig:
     def __post_init__(self) -> None:
         if not isinstance(self.debug, bool):
             raise ValueError('debug must be boolean')
+        if not isinstance(self.trusted_latex_enabled, bool):
+            raise ValueError('trusted LaTeX feature flag must be boolean')
+        if (
+            isinstance(self.trusted_pdflatex_timeout, bool)
+            or not isinstance(self.trusted_pdflatex_timeout, int)
+            or self.trusted_pdflatex_timeout <= 0
+        ):
+            raise ValueError('trusted pdflatex timeout must be positive')
         keys = [profile.key for profile in self.printer_profiles]
         if len(keys) != len(set(keys)):
             raise ValueError('printer profile keys must be unique')

@@ -25,7 +25,8 @@ def test_create_app_registers_required_services(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path / 'data')
     assert {
         'REPO', 'RENDERER', 'RENDERER_FACTORY', 'PRINT_PROFILES',
-        'COMPILER', 'CARDS_PER_PAGE'
+        'COMPILER', 'CARDS_PER_PAGE', 'TRUSTED_LATEX_ENABLED',
+        'TRUSTED_COMPILER',
     } <= app.config.keys()
     assert app.url_map.bind('').match('/')[0] == 'cards.decks_list'
     assert app.config['REPO'].database_file == (tmp_path / 'data' / 'cards.sqlite3')
@@ -69,6 +70,43 @@ def test_debug_environment_rejects_ambiguous_value(monkeypatch):
     monkeypatch.setenv('DIDACTIC_CARDS_DEBUG', 'perhaps')
     with pytest.raises(ValueError, match='DIDACTIC_CARDS_DEBUG'):
         AppConfig()
+
+
+def test_trusted_latex_is_fail_closed_and_requires_explicit_boolean_env(
+    monkeypatch,
+):
+    monkeypatch.delenv('DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED', raising=False)
+    assert AppConfig().trusted_latex_enabled is False
+    monkeypatch.setenv('DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED', 'true')
+    assert AppConfig().trusted_latex_enabled is True
+    monkeypatch.setenv('DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED', 'maybe')
+    with pytest.raises(ValueError, match='TRUSTED_LATEX'):
+        AppConfig()
+
+
+def test_trusted_latex_configuration_builds_dedicated_sandbox(tmp_path):
+    config = AppConfig(
+        trusted_latex_enabled=True,
+        bwrap_path='/missing/bwrap',
+    )
+    app = create_app(config=config, data_dir=tmp_path / 'trusted')
+
+    assert app.config['TRUSTED_LATEX_ENABLED'] is True
+    assert app.config['TRUSTED_COMPILER'] is not app.config['COMPILER']
+    assert app.config['TRUSTED_COMPILER'].is_available() is False
+
+
+@pytest.mark.parametrize(
+    ('kwargs', 'message'),
+    [
+        ({'trusted_latex_enabled': 1}, 'feature flag'),
+        ({'trusted_pdflatex_timeout': 0}, 'timeout'),
+        ({'trusted_pdflatex_timeout': True}, 'timeout'),
+    ],
+)
+def test_trusted_latex_configuration_rejects_unsafe_values(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        AppConfig(**kwargs)
 
 
 def test_debug_configuration_must_be_boolean():

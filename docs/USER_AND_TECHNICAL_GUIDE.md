@@ -14,6 +14,7 @@
 - Flask 3.1;
 - `pdflatex` и LaTeX-пакеты `extarticle`, `amsmath`, `mathtext`, `babel` с русским языком, `geometry`, `graphicx`, `enumitem`, `multicol`, `xcolor`;
 - современный браузер; Chromium нужен только для регенерации скриншотов.
+- Linux `bubblewrap` нужен для будущего advanced/trusted LaTeX; обычный безопасный режим от него не зависит.
 
 Установка и запуск:
 
@@ -42,6 +43,8 @@ export DIDACTIC_CARDS_DATA_DIR='/srv/didactic-cards/data'
 ```
 
 TLS и аутентификацию следует завершать на reverse proxy. Liveness probe — `GET /health/live`; readiness probe — `GET /health/ready`. Readiness возвращает 503, если SQLite integrity/write-transaction check или поиск настроенного TeX executable не прошёл. Ответ показывает только `storage`/`tex: ok|unavailable` и не раскрывает внутренние пути.
+
+Advanced-инфраструктура по умолчанию закрыта. Явный `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true` требует установленный `bubblewrap` и добавляет в readiness компонент `trusted-tex-sandbox`; проверяется не только executable, но и реальное создание изолированных namespaces. На текущем этапе флаг не показывает редактор шаблона и не меняет PDF обычных колод.
 
 Каждый HTTP-ответ содержит новый UUID в `X-Request-ID`; страница ошибки показывает тот же код пользователю. Логи имеют однострочный JSON-формат. Событие `request_completed` содержит method/path/status/duration, а `pdf_compilation` — deck UUID, сторону (`duplex|front|back`), result/error kind и длительность. Содержимое карточек, TeX-log и filesystem paths в эти поля не записываются.
 
@@ -176,7 +179,9 @@ app/data/cards/<deck-id>.json # legacy-карточки, сохраняются 
 app/data/legacy-json-backup-v1/ # снимок источника перед первым импортом
 ```
 
-Активное хранилище — SQLite schema 5: `decks`, `cards`, упорядоченная связь `deck_cards(position)`, `deck_render_settings`, `printer_profiles` и служебная `repository_meta`. Старые schema 1–4 автоматически и транзакционно обновляются без изменения колод. При переходе с schema 2 long-edge профили получают восстановленный поворот 180°, short-edge — 0°; при переходе с schema 3 карточки получают пустую секцию, а существующие колоды — явный `legacy-top-left`; schema 4→5 назначает повтор колонтитула на каждой карточке и непрерывную раскладку без разрывов. Поэтому прежняя печатная вёрстка не меняется. Новые колоды получают безопасный центрированный preset. Foreign keys включаются для каждого соединения, journal работает в WAL, а изменения колоды, карточек, настроек оформления и профилей выполняются write-транзакциями. Поэтому конкурентные процессы не теряют добавления, а исключение внутри mutation откатывает всю операцию.
+Активное хранилище — SQLite schema 6: `decks`, `cards`, упорядоченная связь `deck_cards(position)`, `deck_render_settings`, `printer_profiles`, карантин `trusted_templates` и служебная `repository_meta`. Старые schema 1–5 автоматически и транзакционно обновляются без изменения колод. При переходе с schema 2 long-edge профили получают восстановленный поворот 180°, short-edge — 0°; при переходе с schema 3 карточки получают пустую секцию, а существующие колоды — явный `legacy-top-left`; schema 4→5 назначает повтор колонтитула на каждой карточке и непрерывную раскладку без разрывов; schema 5→6 создаёт пустой trusted-карантин. Поэтому прежняя печатная вёрстка не меняется. Новые колоды получают безопасный центрированный preset. Foreign keys включаются для каждого соединения, journal работает в WAL, а изменения выполняются write-транзакциями.
+
+Trusted-шаблон хранится отдельно как неизменяемая версия с SHA-256, provenance (`local-author`, `imported`, `cloned`) и состоянием `quarantined`, `approved` либо `revoked`. В колоде одновременно может быть не более одной явно одобренной версии. Клон сохраняет историю исходников, но все копии снова помещает в карантин; обычный JSON/CSV импорт trusted-код не принимает и не активирует. Integrity/readiness проверяет hash каждой сохранённой версии.
 
 Карточки во всех HTML/API URL адресуются стабильным UUID, а не текущим номером строки. Колода имеет монотонную `version`: UI отправляет прочитанную версию с add/edit/delete/reorder/reset, и устаревшая вкладка получает HTTP 409 вместо перезаписи более свежего состояния. Drag-and-drop отправляет упорядоченный список UUID; при сетевой/validation ошибке DOM возвращается в прежний порядок.
 
@@ -223,6 +228,8 @@ JSON files             PdfLatexCompiler
                         A4 PDF
 ```
 
+Отдельный, пока не подключённый к UI trusted-контур передаёт immutable job с UUID/schema/source hash в `SandboxedPdfLatexCompiler`. Тот запускает `pdflatex -no-shell-escape` через `bubblewrap`: новая сеть/PID/mount/user namespace, очищенное окружение, read-only TeX runtime, единственный writable job directory и отдельный tmpfs. Применяются wall/CPU/RAM/process/file-size/descriptor limits, ограничение source/PDF/log и гарантированная очистка временного каталога. Недоступная или неработающая изоляция даёт fail-closed отказ; обычный `PdfLatexCompiler` при этом остаётся неизменным.
+
 - `domain/entities.py`: карточка, метаданные колоды, рабочая `CardDeck`.
 - `use_cases/`: CRUD, импорт, padding, preview и generate.
 - `adapters/sqlite_repository.py`: активное transactional/WAL-хранилище и одноразовый legacy import.
@@ -252,7 +259,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 431 проходящий тест, 0 `xfail`, общий branch coverage 98,65%. В него входят schema 1/2/3/4→5 migrations, обратная совместимость JSON schema 1/2→3 и двух-/трёхколоночного CSV, version/clone-контракты секций и настроек оформления, физические row/sheet breaks, матрица безопасного PDF-выравнивания 3×3, отдельные header/body overflow и unit/HTTP-контракты observability/production health, сохраняемых профилей, независимого поворота оборота, auto-fit, раздельной печати и preflight. Реальные TeX-проверки подтверждают: section sheet-break создаёт полные пары front/back без смешивания соседних листов, два соседних body остаются в своих физических карточках при включённом колонтитуле, колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, длинная сторона уменьшается до `footnotesize`, чрезмерная оставляет адресный overflow-маркер, а калибровочный документ компилируется как двухстраничный A4 PDF. Raster regression калибровки проверяет все пять мишеней в ожидаемых координатах на обеих страницах; отдельный координатный oracle проверяет четыре регистрационных креста (восемь штрихов) на front/back уже после единственного прохода TeX. Обычные страницы дополнительно сравниваются с монохромными golden fixtures 596×842 с допуском 0.2% пикселей. Отдельный Chromium E2E проходит полный offline workflow, включая настройки presentation/section layout, скрытие повторного колонтитула и focus/scroll результата preflight, на временной SQLite-базе.
+Текущее состояние основного набора: 476 проходящих тестов, 0 `xfail`, обязательный общий branch coverage не ниже 98%. В него входят schema 1/2/3/4/5→6 migrations, обратная совместимость JSON schema 1/2→3 и двух-/трёхколоночного CSV, version/clone-контракты секций и настроек оформления, физические row/sheet breaks, матрица безопасного PDF-выравнивания 3×3, отдельные header/body overflow и unit/HTTP-контракты observability/production health. Hostile-набор trusted compiler проверяет реальные namespaces, отсутствие host/project mounts и сети, запрет host-записи и shell escape, timeout/рекурсию, лимит результата и очистку job directory. Отдельный Chromium E2E проходит полный offline workflow, включая настройки presentation/section layout, скрытие повторного колонтитула и focus/scroll результата preflight, на временной SQLite-базе.
 
 Golden fixtures обновляются осознанной отдельной командой после визуальной проверки изменения раскладки:
 

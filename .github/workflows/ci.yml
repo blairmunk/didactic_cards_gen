@@ -39,6 +39,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             poppler-utils \
+            bubblewrap \
             mupdf-tools \
             texlive-lang-cyrillic \
             texlive-latex-base \

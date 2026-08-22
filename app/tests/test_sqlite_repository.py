@@ -18,6 +18,11 @@ from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import ConcurrentModificationError
 from didactic_cards.domain.printing import PrinterProfile
 from didactic_cards.domain.rendering import DeckRenderSettings
+from didactic_cards.domain.trusted import TemplateStatus
+from didactic_cards.use_cases.trusted_template_use_cases import (
+    TrustedLatexDisabledError,
+    TrustedTemplateService,
+)
 from didactic_cards.use_cases.card_use_cases import AddCard
 
 
@@ -45,6 +50,7 @@ def test_database_initializes_wal_schema_and_foreign_keys(sqlite_repo):
     assert {
         'repository_meta', 'decks', 'cards', 'deck_cards', 'printer_profiles',
         'deck_render_settings',
+        'trusted_templates',
     } <= tables
     assert sqlite_repo.integrity_check() == []
     assert sqlite_repo.readiness_check() == []
@@ -251,7 +257,23 @@ def test_schema_four_adds_section_layout_settings_without_changing_behavior(
             )
         }
         assert {'header_repeat', 'section_break'} <= columns
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 5
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 6
+
+
+def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
+    data_dir = tmp_path / 'schema-five'
+    repository = SqliteRepository(data_dir)
+    deck = repository.create_deck('Existing')
+    with closing(repository._connect()) as connection:
+        connection.execute('DROP TABLE trusted_templates')
+        connection.execute('PRAGMA user_version = 5')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+
+    assert migrated.list_trusted_templates(deck.id) == []
+    with closing(migrated._connect()) as connection:
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 6
 
 
 def test_deck_and_ordered_card_round_trip(sqlite_repo):
@@ -328,6 +350,107 @@ def test_missing_deck_has_no_render_settings(sqlite_repo):
         sqlite_repo.save_render_settings(
             'missing', DeckRenderSettings.centered()
         )
+
+
+def test_trusted_templates_are_versioned_quarantined_and_explicitly_approved(
+    sqlite_repo,
+):
+    deck = sqlite_repo.create_deck('Trusted')
+    first = sqlite_repo.quarantine_trusted_template(
+        deck.id, r'\centering {{ content }}'
+    )
+    second = sqlite_repo.quarantine_trusted_template(
+        deck.id, r'\raggedleft {{ content }}'
+    )
+
+    assert (first.version, second.version) == (1, 2)
+    assert first.status is TemplateStatus.QUARANTINED
+    approved_first = sqlite_repo.approve_trusted_template(deck.id, first.id)
+    assert approved_first.status is TemplateStatus.APPROVED
+    assert sqlite_repo.get_approved_trusted_template(deck.id).id == first.id
+    sqlite_repo.approve_trusted_template(deck.id, second.id)
+    history = sqlite_repo.list_trusted_templates(deck.id)
+    assert [item.status for item in history] == [
+        TemplateStatus.REVOKED,
+        TemplateStatus.APPROVED,
+    ]
+    sqlite_repo.revoke_trusted_template(deck.id, second.id)
+    assert sqlite_repo.get_approved_trusted_template(deck.id) is None
+
+
+def test_cloned_trusted_history_never_inherits_approval(sqlite_repo):
+    source = sqlite_repo.create_deck('Source')
+    template = sqlite_repo.quarantine_trusted_template(
+        source.id, '{{ content }}'
+    )
+    sqlite_repo.approve_trusted_template(source.id, template.id)
+
+    clone = sqlite_repo.clone_deck(source.id)
+    cloned = sqlite_repo.list_trusted_templates(clone.id)
+
+    assert len(cloned) == 1
+    assert cloned[0].status is TemplateStatus.QUARANTINED
+    assert cloned[0].provenance.value == 'cloned'
+    assert cloned[0].origin_template_id == template.id
+    assert sqlite_repo.get_approved_trusted_template(clone.id) is None
+
+
+def test_trusted_service_denies_every_operation_until_feature_is_enabled(
+    sqlite_repo,
+):
+    deck = sqlite_repo.create_deck('Disabled')
+    disabled = TrustedTemplateService(sqlite_repo)
+    with pytest.raises(TrustedLatexDisabledError):
+        disabled.stage_local(deck.id, '{{ content }}')
+
+    enabled = TrustedTemplateService(sqlite_repo, enabled=True)
+    staged = enabled.stage_local(deck.id, '{{ content }}')
+    assert enabled.active(deck.id) is None
+    assert enabled.approve(deck.id, staged.id).status is TemplateStatus.APPROVED
+    assert enabled.active(deck.id).id == staged.id
+    assert enabled.revoke(deck.id, staged.id).status is TemplateStatus.REVOKED
+
+
+def test_storage_readiness_detects_tampered_trusted_template(sqlite_repo):
+    deck = sqlite_repo.create_deck('Tampered')
+    template = sqlite_repo.quarantine_trusted_template(
+        deck.id, '{{ content }}'
+    )
+    with closing(sqlite_repo._connect()) as connection:
+        connection.execute(
+            'UPDATE trusted_templates SET source_hash = ? WHERE id = ?',
+            ('0' * 64, template.id),
+        )
+        connection.commit()
+
+    assert sqlite_repo.integrity_check() == [
+        f'invalid-trusted-template: {template.id}'
+    ]
+    assert sqlite_repo.readiness_check() == [
+        f'invalid-trusted-template: {template.id}'
+    ]
+
+
+def test_trusted_template_repository_rejects_missing_deck_and_version(
+    sqlite_repo,
+):
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.list_trusted_templates('missing')
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.quarantine_trusted_template('missing', '{{ content }}')
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.get_approved_trusted_template('missing')
+
+    deck = sqlite_repo.create_deck('Present')
+    with pytest.raises(KeyError):
+        sqlite_repo.approve_trusted_template(deck.id, 'missing')
+    with pytest.raises(KeyError):
+        sqlite_repo.revoke_trusted_template(deck.id, 'missing')
+
+
+def test_trusted_service_flag_must_be_boolean(sqlite_repo):
+    with pytest.raises(TypeError, match='feature flag'):
+        TrustedTemplateService(sqlite_repo, enabled=1)
 
 
 def test_create_deck_with_cards_is_one_transaction(sqlite_repo, monkeypatch):

@@ -64,7 +64,7 @@
   - [x] Добавлен управляемый колонтитул из секции: front/back/both, top/bottom, собственное выравнивание и отдельный overflow.
   - [x] Добавлены безопасные presets и вертикальное/горизонтальное выравнивание 3×3 с единым HTML/PDF-контрактом.
   - [x] Добавлены повтор колонтитула на каждой карточке/только при смене секции и физические section breaks: continuous/new row/new sheet до duplex permutation.
-  - [ ] Реализовать trusted LaTeX только через изолированный compiler worker и явное включение владельцем.
+  - [x] Добавлен закрытый по умолчанию trusted foundation: feature flag, schema 6 quarantine/provenance, строгий job protocol, явное approval и изолированный bubblewrap compiler worker. Пользовательский advanced UI остаётся этапом 6.5.
 - [x] Production runtime.
   - [x] Debug выключен по умолчанию и включается только строгой env-переменной.
   - [x] Добавлены `/health/live` и sanitised `/health/ready` для SQLite/TeX.
@@ -355,6 +355,10 @@ Placeholder substitution выполняется собственным стро�
 
 Sandbox-контракт: отдельный непривилегированный процесс/контейнер; пустой одноразовый job directory; read-only минимальный TeX runtime; без mount проекта, базы, env secrets и сети; `-no-shell-escape`; timeout; CPU/RAM/PID/file-size limits; ограниченный размер source/output; гарантированная очистка job directory. Без этого контракта UI advanced mode не выпускается.
 
+**Выполнено в 6.4.** Deployment flag закрыт по умолчанию и не создаёт UI/routes. SQLite schema 6 хранит source/hash/provenance/status отдельно от безопасного JSON export; каждое новое значение сначала `quarantined`, approval явный, предыдущая активная версия отзывается, а clone никогда не наследует trust. Placeholder-язык допускает только точные `{{ content }}`, `{{ section }}`, `{{ card_number }}`, `{{ side }}` и требует ровно один `content`. Immutable job protocol фиксирует schema, UUID, source и SHA-256. Dedicated compiler запускает TeX через `bubblewrap --unshare-all --clearenv` с единственным writable job-dir, tmpfs `/tmp`, read-only runtime, `-no-shell-escape` и resource limits; readiness выполняет реальную namespace-пробу и закрывается при отказе. Hostile tests проверяют чтение `/etc`/проекта, host-write, `\write18`, рекурсию/timeout, output cap и очистку. CI устанавливает `bubblewrap` для обязательного интеграционного прогона.
+
+В 6.5 остаются интеграция с renderer/print snapshot, test compile и привязка ошибки к card/side, редактор/history/reset, raw/escaped switch, отдельный безопасный импорт/экспорт provenance и пользовательская документация согласия/рисков. До этого флаг лишь проверяет инфраструктуру, а обычный режим остаётся единственным доступным через web.
+
 ### 7.7. Обязательная тестовая матрица
 
 **Регистрационные метки и printable area**
@@ -394,8 +398,8 @@ Sandbox-контракт: отдельный непривилегированн�
 2. **6.1 — данные и совместимость:** ✅ schema 4, `DeckRenderSettings`, `Card.section`, JSON schema 2, расширенный CSV и clone/version/migration tests выполнены. UI и TeX semantics намеренно пока не включены; старый PDF остаётся неизменным.
 3. **6.2 — built-in presentation:** ✅ безопасные presets, 3×3 alignment, header/footer band, раздельный overflow и единый HTML/PDF semantic contract выполнены.
 4. **6.3 — секционирование:** ✅ bulk section, повтор колонтитула на каждой карточке/только при смене и физические row/sheet breaks выполнены; preflight показывает добавленные пустые slots, а schema 4→5 сохраняет прежнее поведение.
-5. **6.4 — trusted infrastructure:** feature flag, quarantine/provenance, job protocol и sandbox worker с hostile test suite.
+5. **6.4 — trusted infrastructure:** ✅ feature flag, schema 6 quarantine/provenance, job protocol, namespace readiness и sandbox worker с hostile test suite выполнены без выпуска UI.
 6. **6.5 — advanced UX:** редактор шаблона, raw/escaped content switch, test compile, PDF-preview, history/reset и документация рисков.
 7. **6.6 — физическая приёмка:** минимум один duplex-принтер в обоих flip modes и ручная подача; измерение меток/рамок после калибровки.
 
-Этап считается завершённым, когда миграция сохраняет прежний PDF существующей колоды, новые built-in функции проходят полную матрицу unit/integration/browser/PDF tests, а trusted mode недоступен без проверенного sandbox и явного согласия владельца. Следующий рабочий инкремент — 6.4: изолированный compiler worker и hostile test suite до появления любого UI trusted LaTeX.
+Этап считается завершённым, когда миграция сохраняет прежний PDF существующей колоды, новые built-in функции проходят полную матрицу unit/integration/browser/PDF tests, а trusted mode недоступен без проверенного sandbox и явного согласия владельца. Следующий рабочий инкремент — 6.5: advanced UX и print integration поверх уже проверенного sandbox, без ослабления обычного режима.

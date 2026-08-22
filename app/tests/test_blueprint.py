@@ -876,6 +876,27 @@ def test_health_endpoints_report_ready_components(client):
     }
 
 
+def test_readiness_requires_sandbox_only_when_trusted_feature_is_enabled(
+    client, app
+):
+    app.config['TRUSTED_LATEX_ENABLED'] = True
+    app.config['TRUSTED_COMPILER'] = None
+
+    unavailable = client.get('/health/ready')
+
+    assert unavailable.status_code == 503
+    assert unavailable.json['components']['trusted-tex-sandbox'] == 'unavailable'
+
+    class AvailableSandbox:
+        def is_available(self):
+            return True
+
+    app.config['TRUSTED_COMPILER'] = AvailableSandbox()
+    ready = client.get('/health/ready')
+    assert ready.status_code == 200
+    assert ready.json['components']['trusted-tex-sandbox'] == 'ok'
+
+
 def test_every_response_has_unique_request_id(client):
     first = client.get('/')
     second = client.get('/')

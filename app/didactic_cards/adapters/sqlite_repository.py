@@ -14,11 +14,16 @@ from ..domain.interfaces import (
 )
 from ..domain.printing import PrinterProfile
 from ..domain.rendering import DeckRenderSettings
+from ..domain.trusted import (
+    TemplateProvenance,
+    TemplateStatus,
+    TrustedTemplateVersion,
+)
 from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 5
+SQLITE_SCHEMA_VERSION = 6
 
 
 class LegacyMigrationError(ValueError):
@@ -66,7 +71,7 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _initialize_database(self) -> None:
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, SQLITE_SCHEMA_VERSION}:
+            if version not in {0, 1, 2, 3, 4, 5, SQLITE_SCHEMA_VERSION}:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
@@ -148,6 +153,26 @@ class SqliteRepository(DeckRepository, CardRepository):
                     registration_marks INTEGER NOT NULL
                         CHECK (registration_marks IN (0, 1))
                 );
+                CREATE TABLE IF NOT EXISTS trusted_templates (
+                    id TEXT PRIMARY KEY,
+                    deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+                    version INTEGER NOT NULL CHECK (version > 0),
+                    source TEXT NOT NULL,
+                    source_hash TEXT NOT NULL,
+                    provenance TEXT NOT NULL CHECK (
+                        provenance IN ('local-author', 'imported', 'cloned')
+                    ),
+                    status TEXT NOT NULL CHECK (
+                        status IN ('quarantined', 'approved', 'revoked')
+                    ),
+                    origin_template_id TEXT,
+                    created_at TEXT NOT NULL,
+                    approved_at TEXT,
+                    UNIQUE(deck_id, version)
+                );
+                CREATE UNIQUE INDEX IF NOT EXISTS
+                    idx_trusted_templates_one_approved
+                    ON trusted_templates(deck_id) WHERE status = 'approved';
                 '''
             )
             profile_columns = {
@@ -352,6 +377,55 @@ class SqliteRepository(DeckRepository, CardRepository):
             section=row['section'],
             created_at=datetime.fromisoformat(row['created_at']),
             updated_at=datetime.fromisoformat(row['updated_at']),
+        )
+
+    @staticmethod
+    def _trusted_template_from_row(
+        row: sqlite3.Row,
+    ) -> TrustedTemplateVersion:
+        if not row['source_hash']:
+            raise ValueError('trusted template source hash is missing')
+        return TrustedTemplateVersion(
+            id=row['id'],
+            deck_id=row['deck_id'],
+            version=row['version'],
+            source=row['source'],
+            source_hash=row['source_hash'],
+            provenance=row['provenance'],
+            status=row['status'],
+            origin_template_id=row['origin_template_id'],
+            created_at=datetime.fromisoformat(row['created_at']),
+            approved_at=(
+                datetime.fromisoformat(row['approved_at'])
+                if row['approved_at'] else None
+            ),
+        )
+
+    @staticmethod
+    def _insert_trusted_template(
+        connection: sqlite3.Connection,
+        template: TrustedTemplateVersion,
+    ) -> None:
+        connection.execute(
+            '''
+            INSERT INTO trusted_templates(
+                id, deck_id, version, source, source_hash, provenance,
+                status, origin_template_id, created_at, approved_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                template.id,
+                template.deck_id,
+                template.version,
+                template.source,
+                template.source_hash,
+                template.provenance.value,
+                template.status.value,
+                template.origin_template_id,
+                template.created_at.isoformat(),
+                template.approved_at.isoformat()
+                if template.approved_at else None,
+            ),
         )
 
     def _card_ids(self, connection: sqlite3.Connection, deck_id: str) -> list[str]:
@@ -578,6 +652,24 @@ class SqliteRepository(DeckRepository, CardRepository):
             )
             self._insert_deck(connection, clone)
             self._replace_cards(connection, clone.id, cloned_cards)
+            template_rows = connection.execute(
+                '''
+                SELECT * FROM trusted_templates
+                WHERE deck_id = ? ORDER BY version
+                ''',
+                (source.id,),
+            ).fetchall()
+            for version, row in enumerate(template_rows, start=1):
+                self._insert_trusted_template(
+                    connection,
+                    TrustedTemplateVersion(
+                        deck_id=clone.id,
+                        version=version,
+                        source=row['source'],
+                        provenance=TemplateProvenance.CLONED,
+                        origin_template_id=row['id'],
+                    ),
+                )
             return clone
 
     def create_deck_with_cards(
@@ -751,6 +843,126 @@ class SqliteRepository(DeckRepository, CardRepository):
             )
             return cursor.rowcount > 0
 
+    def list_trusted_templates(
+        self, deck_id: str
+    ) -> list[TrustedTemplateVersion]:
+        with self._transaction() as connection:
+            if self._get_deck(connection, deck_id) is None:
+                raise DeckNotFoundError(deck_id)
+            rows = connection.execute(
+                '''
+                SELECT * FROM trusted_templates
+                WHERE deck_id = ? ORDER BY version
+                ''',
+                (deck_id,),
+            ).fetchall()
+            return [self._trusted_template_from_row(row) for row in rows]
+
+    def quarantine_trusted_template(
+        self,
+        deck_id: str,
+        source: str,
+        *,
+        provenance: TemplateProvenance | str = TemplateProvenance.LOCAL_AUTHOR,
+        origin_template_id: str | None = None,
+    ) -> TrustedTemplateVersion:
+        with self._transaction(write=True) as connection:
+            if self._get_deck(connection, deck_id) is None:
+                raise DeckNotFoundError(deck_id)
+            version = connection.execute(
+                '''
+                SELECT COALESCE(MAX(version), 0) + 1
+                FROM trusted_templates WHERE deck_id = ?
+                ''',
+                (deck_id,),
+            ).fetchone()[0]
+            template = TrustedTemplateVersion(
+                deck_id=deck_id,
+                source=source,
+                version=version,
+                provenance=provenance,
+                origin_template_id=origin_template_id,
+            )
+            self._insert_trusted_template(connection, template)
+            return template
+
+    def approve_trusted_template(
+        self, deck_id: str, template_id: str
+    ) -> TrustedTemplateVersion:
+        with self._transaction(write=True) as connection:
+            row = connection.execute(
+                '''
+                SELECT * FROM trusted_templates
+                WHERE deck_id = ? AND id = ?
+                ''',
+                (deck_id, template_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(template_id)
+            template = self._trusted_template_from_row(row).approved()
+            connection.execute(
+                '''
+                UPDATE trusted_templates
+                SET status = ?, approved_at = NULL
+                WHERE deck_id = ? AND status = ?
+                ''',
+                (
+                    TemplateStatus.REVOKED.value,
+                    deck_id,
+                    TemplateStatus.APPROVED.value,
+                ),
+            )
+            connection.execute(
+                '''
+                UPDATE trusted_templates SET status = ?, approved_at = ?
+                WHERE id = ?
+                ''',
+                (
+                    template.status.value,
+                    template.approved_at.isoformat(),
+                    template.id,
+                ),
+            )
+            return template
+
+    def revoke_trusted_template(
+        self, deck_id: str, template_id: str
+    ) -> TrustedTemplateVersion:
+        with self._transaction(write=True) as connection:
+            row = connection.execute(
+                '''
+                SELECT * FROM trusted_templates
+                WHERE deck_id = ? AND id = ?
+                ''',
+                (deck_id, template_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError(template_id)
+            template = self._trusted_template_from_row(row).revoked()
+            connection.execute(
+                '''
+                UPDATE trusted_templates SET status = ?, approved_at = NULL
+                WHERE id = ?
+                ''',
+                (template.status.value, template.id),
+            )
+            return template
+
+    def get_approved_trusted_template(
+        self, deck_id: str
+    ) -> TrustedTemplateVersion | None:
+        with self._transaction() as connection:
+            if self._get_deck(connection, deck_id) is None:
+                raise DeckNotFoundError(deck_id)
+            row = connection.execute(
+                '''
+                SELECT * FROM trusted_templates
+                WHERE deck_id = ? AND status = 'approved'
+                ''',
+                (deck_id,),
+            ).fetchone()
+            return self._trusted_template_from_row(row) if row else None
+
     def integrity_check(self) -> list[str]:
         with self._transaction() as connection:
             issues = [row[0] for row in connection.execute('PRAGMA integrity_check')]
@@ -764,12 +976,20 @@ class SqliteRepository(DeckRepository, CardRepository):
                 ORDER BY decks.id
                 '''
             ).fetchall()
+            trusted_rows = connection.execute(
+                'SELECT * FROM trusted_templates ORDER BY id'
+            ).fetchall()
         if issues == ['ok']:
             issues = []
         issues.extend(f'foreign-key: {tuple(row)}' for row in foreign_keys)
         issues.extend(
             f"missing-render-settings: {row['id']}" for row in missing_settings
         )
+        for row in trusted_rows:
+            try:
+                self._trusted_template_from_row(row)
+            except (TypeError, ValueError):
+                issues.append(f"invalid-trusted-template: {row['id']}")
         return issues
 
     def readiness_check(self) -> list[str]:
