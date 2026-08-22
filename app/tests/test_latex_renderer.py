@@ -47,6 +47,17 @@ def _pixel_difference(first: Path, second: Path) -> float:
     return differing_bits / (width * height)
 
 
+def _has_ink_near(path: Path, x: int, y: int, radius: int = 12) -> bool:
+    width, height, pixels = _read_pbm(path)
+    row_bytes = (width + 7) // 8
+    for row in range(max(0, y - radius), min(height, y + radius + 1)):
+        for column in range(max(0, x - radius), min(width, x + radius + 1)):
+            byte = pixels[row * row_bytes + column // 8]
+            if byte & (0x80 >> (column % 8)):
+                return True
+    return False
+
+
 class TestEscapeLatex:
     def test_ampersand(self):
         assert escape_latex('A & B') == r'A \& B'
@@ -142,6 +153,8 @@ class TestLatexRenderer:
         assert r'\calibrationtargets{0.25}{0.0}{black}' in source
         assert r'\calibrationtargets{-1.5}{0.75}{magenta,dashed}' in source
         assert r'\texttt{short-edge}' in source
+        assert 'remember picture' not in source
+        assert r'\path[use as bounding box] (0,0) rectangle (186,225)' in source
 
     def test_render_contains_card_content(self):
         renderer = LatexRenderer()
@@ -460,8 +473,9 @@ def test_real_latex_marks_only_card_scoped_horizontal_overflow():
 
 @pytest.mark.integration
 def test_real_calibration_sheet_is_a_two_page_a4_pdf(tmp_path):
-    if not shutil.which('pdflatex') or not shutil.which('pdfinfo'):
-        pytest.skip('pdflatex and pdfinfo are required for calibration PDF test')
+    required = ('pdflatex', 'pdfinfo', 'mutool')
+    if not all(shutil.which(command) for command in required):
+        pytest.skip('pdflatex, pdfinfo and mutool are required for calibration test')
 
     result = PdfLatexCompiler().compile(
         LatexRenderer(back_offset_x_mm=1.25).render_calibration_sheet()
@@ -475,6 +489,26 @@ def test_real_calibration_sheet_is_a_two_page_a4_pdf(tmp_path):
     ).stdout
     assert 'Pages:           2' in info
     assert 'A4' in info
+
+    subprocess.run(
+        [
+            'mutool', 'draw', '-q', '-r', '72', '-F', 'pbm',
+            '-o', str(tmp_path / 'calibration-%d.pbm'), str(pdf_path),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    expected_targets = (
+        (85, 218), (510, 218),
+        (298, 452),
+        (85, 686), (510, 686),
+    )
+    for page_number in (1, 2):
+        raster = tmp_path / f'calibration-{page_number}.pbm'
+        assert _read_pbm(raster)[:2] == (596, 842)
+        assert all(
+            _has_ink_near(raster, x, y) for x, y in expected_targets
+        )
 
 
 @pytest.mark.integration

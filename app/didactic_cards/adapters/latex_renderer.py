@@ -194,42 +194,36 @@ class LatexRenderer(DocumentRenderer):
 \geometry{{a4paper,margin=12mm}}
 \pagestyle{{empty}}
 \newcommand{{\calibrationtargets}}[4]{{%
-  \begin{{tikzpicture}}[remember picture,overlay,x=1mm,y=1mm]
-    \begin{{scope}}[shift={{(current page.south west)}},xshift=#1mm,yshift=-#2mm]
-      \foreach \x/\y in {{25/25,185/25,25/272,185/272,105/148.5}}{{
+  \noindent\begin{{tikzpicture}}[x=1mm,y=1mm]
+    \path[use as bounding box] (0,0) rectangle (186,225);
+    \begin{{scope}}[shift={{(#1,-#2)}}]
+      \foreach \x/\y in {{18/30,168/30,18/195,168/195,93/112.5}}{{
         \draw[#3,line width=0.35pt] (\x-8,\y) -- (\x+8,\y);
         \draw[#3,line width=0.35pt] (\x,\y-8) -- (\x,\y+8);
         \draw[#3,line width=0.35pt] (\x,\y) circle (2);
       }}
-      \draw[#3,line width=0.35pt] (55,18) -- (155,18);
+      \draw[#3,line width=0.35pt] (43,12) -- (143,12);
       \foreach \x in {{55,60,...,155}}{{
-        \draw[#3,line width=0.25pt] (\x,16.5) -- (\x,19.5);
+        \draw[#3,line width=0.25pt] (\x-12,10.5) -- (\x-12,13.5);
       }}
-      \node[#3,anchor=south] at (105,20) {{контрольная длина 100 мм}};
-      \node[#3,anchor=north] at (105,143) {{#4}};
+      \node[#3,anchor=south] at (93,15) {{контрольная длина 100 мм}};
+      \node[#3,anchor=north] at (93,100) {{#4}};
     \end{{scope}}
   \end{{tikzpicture}}%
 }}
 \begin{{document}}
-\begin{{center}}
+\noindent\parbox[t][35mm][t]{{\textwidth}}{{\centering
   {{\Large\bfseries Калибровочный лист: лицевая сторона}}\\[2mm]
   Режим переворота: \texttt{{{mode}}}. Масштаб печати: 100\% / Actual size.\\
-  Сплошные чёрные мишени должны совпасть с пунктирными мишенями оборота.
-\end{{center}}
-\vfill
-\noindent Сначала измерьте контрольный отрезок: он должен быть ровно 100 мм.
-Затем держите лист лицом к себе напротив света и измерьте у центральной мишени
-горизонтальный и вертикальный сдвиг пунктирного креста относительно сплошного.
+  Сплошные чёрные мишени должны совпасть с пунктирными мишенями оборота.\\
+  На просвет измеряйте расхождение у центрального креста по горизонтали и вертикали.}}
 \calibrationtargets{{{front_x}}}{{{front_y}}}{{black}}{{ЛИЦО: сплошная линия}}
 \newpage
-\begin{{center}}
+\noindent\parbox[t][35mm][t]{{\textwidth}}{{\centering
   {{\Large\bfseries Калибровочный лист: оборотная сторона}}\\[2mm]
   Профиль: \texttt{{{mode}}}; offsets X={back_x} мм, Y={back_y} мм.\\
-  Эта страница должна печататься оборотом того же физического листа.
-\end{{center}}
-\vfill
-\noindent Не используйте Fit, Shrink или поля драйвера. После печати сравните
-пунктирные пурпурные мишени с чёрными мишенями лица на просвет.
+  Эта страница должна печататься оборотом того же физического листа.\\
+  Не используйте Fit, Shrink или дополнительное масштабирование драйвера.}}
 \calibrationtargets{{{back_x}}}{{{back_y}}}{{magenta,dashed}}{{ОБОРОТ: пунктирная линия}}
 \end{{document}}'''
 
