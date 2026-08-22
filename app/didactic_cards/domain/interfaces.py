@@ -12,6 +12,7 @@ class CompileResult:
     success: bool
     pdf_data: bytes
     log: str
+    error_kind: str | None = None
 
 
 class CardRepository(ABC):

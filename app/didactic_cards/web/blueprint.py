@@ -1,14 +1,16 @@
 import io
+import hmac
+import secrets
 
 from flask import (Blueprint, render_template, request, redirect,
-                   url_for, jsonify, current_app, send_file)
+                   url_for, jsonify, current_app, send_file, session, abort)
 
 from ..adapters.latex_renderer import UnsafeLatexError
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
     EditCard, ReorderCards, ResetCards, GetDeck,
-    GenerateDocument, PreviewDocument
+    GenerateDocument, PreviewDocument, CardLimitExceeded
 )
 from ..use_cases.deck_use_cases import (
     ListDecks, GetDeckInfo, CreateDeck, UpdateDeck,
@@ -37,6 +39,67 @@ def _compiler():
 
 def _cards_per_page():
     return current_app.config['CARDS_PER_PAGE']
+
+
+def _max_cards():
+    return current_app.config.get('MAX_CARDS')
+
+
+def _csrf_token() -> str:
+    token = session.get('_csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['_csrf_token'] = token
+    return token
+
+
+@cards_bp.context_processor
+def inject_csrf_token():
+    return {'csrf_token': _csrf_token}
+
+
+@cards_bp.before_app_request
+def protect_html_forms():
+    if not current_app.config.get('CSRF_ENABLED', True):
+        return None
+    if request.blueprint != cards_bp.name or request.path.startswith('/api/'):
+        return None
+    if request.method not in {'POST', 'PUT', 'PATCH', 'DELETE'}:
+        return None
+
+    submitted = request.form.get('_csrf_token', '')
+    expected = session.get('_csrf_token', '')
+    if not submitted or not expected or not hmac.compare_digest(submitted, expected):
+        abort(400, description='Недействительный CSRF-токен')
+    return None
+
+
+@cards_bp.after_app_request
+def add_security_headers(response):
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'DENY')
+    response.headers.setdefault('Referrer-Policy', 'no-referrer')
+    response.headers.setdefault(
+        'Content-Security-Policy',
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "font-src 'self' data: https://cdn.jsdelivr.net; object-src 'none'; "
+        "base-uri 'self'; frame-ancestors 'none'",
+    )
+    return response
+
+
+def _render_deck_error(deck_id: str, message: str, status: int = 409):
+    deck_info = GetDeckInfo(_repo()).execute(deck_id)
+    card_deck = GetDeck(_repo()).execute(deck_id)
+    return render_template(
+        'cards/index.html',
+        deck=deck_info,
+        cards=card_deck.to_list(),
+        cards_count=len(card_deck),
+        cards_per_page=_cards_per_page(),
+        error=message,
+    ), status
 
 
 # ─── Колоды ─────────────────────────────────────────────────────────
@@ -103,14 +166,20 @@ def add_card(deck_id):
     front = request.form.get('front', '').strip()
     back = request.form.get('back', '').strip()
     if front or back:
-        AddCard(_repo()).execute(deck_id, front, back)
+        try:
+            AddCard(_repo(), _max_cards()).execute(deck_id, front, back)
+        except CardLimitExceeded as error:
+            return _render_deck_error(deck_id, str(error))
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
 @cards_bp.route('/deck/<deck_id>/add_cards_bulk', methods=['POST'])
 def add_cards_bulk(deck_id):
     bulk = request.form.get('bulk', '')
-    AddCardsBulk(_repo()).execute(deck_id, bulk)
+    try:
+        AddCardsBulk(_repo(), _max_cards()).execute(deck_id, bulk)
+    except CardLimitExceeded as error:
+        return _render_deck_error(deck_id, str(error))
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
@@ -121,7 +190,9 @@ def import_csv(deck_id):
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
     try:
         file_bytes = file.stream.read()
-        ImportCsv(_repo()).execute(deck_id, file_bytes)
+        ImportCsv(_repo(), _max_cards()).execute(deck_id, file_bytes)
+    except CardLimitExceeded as error:
+        return _render_deck_error(deck_id, str(error))
     except UnicodeDecodeError:
         deck_info = GetDeckInfo(_repo()).execute(deck_id)
         card_deck = GetDeck(_repo()).execute(deck_id)
@@ -134,7 +205,7 @@ def import_csv(deck_id):
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-@cards_bp.route('/deck/<deck_id>/delete_card/<int:index>')
+@cards_bp.route('/deck/<deck_id>/delete_card/<int:index>', methods=['POST'])
 def delete_card(deck_id, index):
     DeleteCard(_repo()).execute(deck_id, index)
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
@@ -190,9 +261,19 @@ def generate(deck_id):
         ), 422
 
     if not result.success:
-        return render_template('cards/error.html', deck=deck_info,
-                               errors=[result.log],
-                               full_log=result.log), 422
+        status_by_kind = {'timeout': 504, 'unavailable': 503, 'compile-error': 422}
+        message_by_kind = {
+            'timeout': 'Компиляция PDF превысила допустимое время.',
+            'unavailable': 'Компилятор PDF недоступен на сервере.',
+            'compile-error': 'Не удалось скомпилировать PDF. Проверьте содержимое карточек.',
+        }
+        status = status_by_kind.get(result.error_kind, 500)
+        message = message_by_kind.get(result.error_kind, 'Внутренняя ошибка генерации PDF.')
+        return render_template(
+            'cards/error.html', deck=deck_info,
+            errors=[message],
+            full_log=result.log if current_app.debug else ''
+        ), status
 
     filename = f'{deck_info.name}.pdf' if deck_info else 'cards.pdf'
     return send_file(
@@ -238,7 +319,10 @@ def api_add_card(deck_id):
     if not front and not back:
         return jsonify({'error': 'Заполните хотя бы одно поле'}), 400
 
-    card, index = AddCard(_repo()).execute(deck_id, front, back)
+    try:
+        card, index = AddCard(_repo(), _max_cards()).execute(deck_id, front, back)
+    except CardLimitExceeded as error:
+        return jsonify({'error': str(error)}), 409
     card_deck = GetDeck(_repo()).execute(deck_id)
 
     return jsonify({

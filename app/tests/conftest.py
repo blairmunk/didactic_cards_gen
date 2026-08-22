@@ -18,7 +18,7 @@ class FakeCompiler(PdfCompiler):
         self.sources.append(latex_source)
         if self.success:
             return CompileResult(True, b"%PDF-1.7 fake", "")
-        return CompileResult(False, b"", "pdflatex error")
+        return CompileResult(False, b"", "pdflatex internal path", "compile-error")
 
 
 class FakeRenderer(DocumentRenderer):
@@ -39,6 +39,8 @@ def make_test_app(tmp_path, *, compiler_success: bool = True) -> Flask:
         RENDERER=FakeRenderer(),
         COMPILER=FakeCompiler(compiler_success),
         CARDS_PER_PAGE=8,
+        MAX_CARDS=200,
+        CSRF_ENABLED=False,
     )
     app.register_blueprint(cards_bp)
     return app

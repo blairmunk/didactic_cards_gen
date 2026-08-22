@@ -21,6 +21,7 @@
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+export DIDACTIC_CARDS_SECRET_KEY='replace-with-a-long-random-value'
 cd app
 ../.venv/bin/python run.py
 ```
@@ -94,6 +95,9 @@ MathJax в браузере загружается с jsDelivr. Без инте�
 - Страницы идут парами физических листов: `front-1, back-1, front-2, back-2, …`.
 - По умолчанию используется portrait long-edge: колонки оборота зеркальны, текст остаётся вертикальным. Short-edge доступен через `CardLayoutConfig.duplex_mode`.
 - Кириллические названия файлов передаются через RFC 5987 `filename*`; это проверено как Flask contract-тестом, так и реальным Werkzeug/curl запросом.
+- Колода ограничена 200 карточками, весь запрос — 2 MiB. Bulk/CSV при превышении лимита отклоняются целиком без частичной записи.
+- HTML-формы защищены CSRF-токеном; API принимает JSON и возвращает структурированные 4xx-ответы.
+- Ошибка содержимого возвращает 422, недоступный компилятор — 503, timeout — 504; внутренний TeX-лог в production-ответ не включается.
 
 Лицевая страница реального PDF из аудита:
 

@@ -27,6 +27,7 @@
 
     <div class="card-form">
         <form method="post">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <div class="form-row">
                 <div class="form-group">
                     <label for="front">Лицевая сторона:</label>

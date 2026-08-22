@@ -44,6 +44,7 @@ class TestPdfLatexCompiler:
         assert result.success is False
         assert result.pdf_data == b''
         assert 'Fatal error' in result.log
+        assert result.error_kind == 'compile-error'
 
     def test_compile_timeout(self):
         compiler = PdfLatexCompiler(pdflatex_path='pdflatex', timeout=1)
@@ -54,6 +55,7 @@ class TestPdfLatexCompiler:
 
         assert result.success is False
         assert result.pdf_data == b''
+        assert result.error_kind == 'timeout'
 
     def test_compile_file_not_found(self):
         compiler = PdfLatexCompiler(pdflatex_path='/nonexistent/pdflatex', timeout=1)
@@ -63,6 +65,7 @@ class TestPdfLatexCompiler:
 
         assert result.success is False
         assert 'not found' in result.log
+        assert result.error_kind == 'unavailable'
 
     def test_nonzero_exit_code_is_failure_even_if_partial_pdf_exists(self):
         compiler = PdfLatexCompiler()

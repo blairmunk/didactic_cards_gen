@@ -18,13 +18,14 @@
   - [x] Реальный PDF geometry test измеряет векторную рамку через `mutool` с допуском 0.1 мм.
   - [ ] Добавить overflow preflight.
   - [ ] Выполнить raster golden tests и физический прогон.
-- [ ] Этап 2: безопасная граница TeX/HTTP.
+- [x] Этап 2: безопасная граница TeX/HTTP на уровне приложения.
   - [x] Математические команды ограничены allowlist; malicious/malformed fixtures отклоняются до компиляции.
   - [x] `pdflatex`/`xelatex` используют `-no-shell-escape -halt-on-error -file-line-error`.
   - [x] Non-zero return code не считается успешным даже при наличии partial PDF.
   - [x] Unicode download names отдаются через RFC 5987; проверены реальным Werkzeug/curl запросом.
   - [x] Validation/compile errors больше не маскируются HTTP 200.
-  - [ ] Добавить CSRF, quotas, safe external logs и security headers.
+  - [x] Добавлены CSRF, quotas, safe external logs и security headers.
+  - [ ] Для production deployment изолировать TeX отдельным непривилегированным worker/container.
 - [ ] Этап 3: транзакционное persistence.
 - [ ] Этап 4: импорт и web UX.
 - [ ] Этап 5: функциональное развитие.
@@ -51,7 +52,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 147 проходящих тестов и 19 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 99.60% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 159 проходящих тестов и 16 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 98.71% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -80,14 +81,14 @@
 | BUG-IMP-001 | UI обещает `||`, parser делит по первому одиночному `|`. | Единый parser с exact delimiter `||`, escaping/quoting и preview результата до commit. |
 | BUG-IMP-002 | UI обещает `;`, `csv.reader` использует `,`. | `csv.Sniffer` с явным выбором delimiter; UTF-8/UTF-8-BOM; header toggle; preview и отчёт rejected rows. |
 | ~~BUG-PDF-001~~ ✅ | Partial PDF считался успехом даже при non-zero exit code. | Выполнено: обязательный return code 0, наличие PDF, safe failure flags и fallback stdout/stderr log. |
-| BUG-LIMIT-001 | `max_cards=200` не используется. | Централизованный quota в use case для single/bulk/CSV/API; транзакционно отклонять превышение. |
+| ~~BUG-LIMIT-001~~ ✅ | `max_cards=200` не использовался. | Выполнено: единый quota в use cases и web/API; bulk/CSV проверяют будущую ёмкость до сохранения. |
 | BUG-CONF-001 | База зависит от process CWD. | Абсолютный `DATA_DIR` из env/Flask instance path; миграционная диагностика найденных `data/`. |
 | ~~BUG-CONF-002~~ ✅ / BUG-VAL-001 | Layout теперь проверяет positive/finite dimensions, frame inset и попадание сетки в printable A4. Прямой вызов use case с `cards_per_page=0` ещё требует отдельной защиты. | Config/renderer validation выполнена; добавить invariant в `CardDeck.padded`/use case. |
 | BUG-CONF-003 | `create_app()` не принимает config/dependencies. | `create_app(config=None, repo=None, renderer=None, compiler=None)`; env mapping; production/test profiles. |
-| BUG-HTTP-001 | Удаление карточки доступно через GET. | Только `DELETE`/POST + CSRF; ссылки заменить form/button. |
+| ~~BUG-HTTP-001~~ ✅ | Удаление карточки было доступно через GET. | Выполнено: HTML fallback принимает только POST + CSRF, AJAX использует DELETE JSON API. |
 | ~~BUG-HTTP-002~~ ✅ | Ошибка компиляции возвращала 200. | Validation и compile failure теперь возвращают 422. Разделение tool failure на 503/504 и sanitization log остаются в этапе 2. |
 | BUG-WEB-002/003 | Число вместо string и `order=None` дают необработанные исключения. | Schema validation (dataclass/Pydantic/ручная) до use case; единый JSON error handler. |
-| BUG-SEC-003 | HTML-формы не имеют CSRF. | CSRF token, SameSite cookie, POST/DELETE only; contract-тест без token получает 400/403. |
+| ~~BUG-SEC-003~~ ✅ | HTML-формы не имели CSRF. | Выполнено: per-session token, constant-time comparison, 400 без token; JSON API отделён по Content-Type/method contract. |
 
 ### P2 — надёжность, эксплуатация и качество UX
 
@@ -100,12 +101,12 @@
 - Routes адресуют карточки индексом. При параллельной сортировке/редактировании индекс указывает уже на другой объект; перейти на UUID.
 - Времена сохраняются UTC, но UI форматирует без зоны и без явной конвертации в локальную.
 - Полный LaTeX log показывается пользователю и может раскрыть пути/служебные детали.
-- Нет `MAX_CONTENT_LENGTH`, ограничения CSV, количества строк, длины card side и имени колоды.
+- `MAX_CONTENT_LENGTH=2 MiB` и `max_cards=200` реализованы; отдельные ограничения длины стороны/имени ещё нужны.
 - Нет structured logging, healthcheck (`pdflatex`/write access), error IDs и метрик времени компиляции.
 - Нет backup/restore/export всей колоды и schema version/migrations.
 - JSON read-modify-write не масштабируется и теряет обновления при параллельных запросах. После стабилизации перейти на SQLite с transactions/WAL.
 - Dev entrypoint всегда запускается с `debug=True`; production должен использовать WSGI server и env-controlled debug.
-- Hardcoded secret должен идти из env, даже если текущий JSON flow почти не использует session.
+- Secret берётся из `DIDACTIC_CARDS_SECRET_KEY`, без env генерируется случайный для локального запуска; production должен задавать стабильное значение.
 - UI: emoji-only actions без accessible names, слабая keyboard DnD, таблица не имеет mobile overflow, focus/disabled/loading states неполны.
 - Нет favicon (реальный browser audit получил 404), CSP и стандартных security headers.
 - Массовая случайная смена executable-битов у исходников загрязняет diff; нормализовать modes отдельным механическим коммитом после согласования.
@@ -144,12 +145,12 @@
 
 ### Этап 2. Закрыть TeX/HTTP security boundary
 
-1. Определить поддерживаемый язык карточки: plain text + allowlisted math, а не произвольный TeX.
-2. Разбирать формулы; выдавать validation errors с позицией, не компилировать опасный input.
-3. Запускать TeX с `-no-shell-escape -halt-on-error`, очищенным env, лимитами CPU/RAM/file size и отдельным непривилегированным пользователем.
-4. Исправить Unicode filename через framework API и RFC 5987.
-5. Ввести CSRF, request size/card quotas, safe error pages, security headers.
-6. Не возвращать полный log наружу; хранить sanitized excerpt и internal request ID.
+1. [x] Определить поддерживаемый язык карточки: plain text + allowlisted math, а не произвольный TeX.
+2. [x] Разбирать формулы; выдавать validation errors, не компилировать опасный input.
+3. [x] Запускать TeX с `-no-shell-escape -halt-on-error`; отдельный непривилегированный worker/container остаётся deployment-задачей.
+4. [x] Исправить Unicode filename через framework API и RFC 5987.
+5. [x] Ввести CSRF, request size/card quotas, safe error pages, security headers.
+6. [x] Не возвращать полный log наружу; debug-лог остаётся только при явно включённом Flask debug.
 
 Выход: malicious fixture suite проходит, timeout и compile failure имеют корректные статусы, русский PDF скачивается во всех целевых браузерах.
 

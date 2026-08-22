@@ -31,8 +31,14 @@ class XelatexCompiler(PdfCompiler):
                     timeout=self.timeout,
                     cwd=tmpdir,
                 )
-            except (subprocess.TimeoutExpired, FileNotFoundError) as e:
-                return CompileResult(success=False, pdf_data=b'', log=str(e))
+            except subprocess.TimeoutExpired as error:
+                return CompileResult(
+                    success=False, pdf_data=b'', log=str(error), error_kind='timeout'
+                )
+            except FileNotFoundError as error:
+                return CompileResult(
+                    success=False, pdf_data=b'', log=str(error), error_kind='unavailable'
+                )
 
             log = ''
             if os.path.exists(log_path):
@@ -51,4 +57,6 @@ class XelatexCompiler(PdfCompiler):
                     pdf_data = f.read()
                 return CompileResult(success=True, pdf_data=pdf_data, log=log)
 
-            return CompileResult(success=False, pdf_data=b'', log=log)
+            return CompileResult(
+                success=False, pdf_data=b'', log=log, error_kind='compile-error'
+            )

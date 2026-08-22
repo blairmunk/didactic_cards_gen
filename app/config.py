@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 import math
+import os
+import secrets
 
 from didactic_cards.domain.printing import DuplexMode
 
@@ -68,9 +70,12 @@ class CardLayoutConfig:
 @dataclass
 class AppConfig:
     """Конфигурация приложения."""
-    secret_key: str = 'change-me-in-production-use-env-variable'
+    secret_key: str = field(default_factory=lambda: os.environ.get(
+        'DIDACTIC_CARDS_SECRET_KEY', secrets.token_urlsafe(32)
+    ))
     pdflatex_path: str = 'pdflatex'
     pdflatex_timeout: int = 30
     max_cards: int = 200
+    max_request_bytes: int = 2 * 1024 * 1024
+    csrf_enabled: bool = True
     layout: CardLayoutConfig = field(default_factory=CardLayoutConfig)
-    #layout: CardLayoutConfig = field(default_factory=lambda: CardLayoutConfig(back_border=True))

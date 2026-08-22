@@ -8,12 +8,23 @@ from ..domain.interfaces import (
 from ..domain.entities import Card, CardDeck
 
 
+class CardLimitExceeded(ValueError):
+    pass
+
+
+def _ensure_capacity(deck: CardDeck, incoming: int, max_cards: int | None) -> None:
+    if max_cards is not None and len(deck) + incoming > max_cards:
+        raise CardLimitExceeded(f'Максимум карточек в колоде: {max_cards}')
+
+
 class AddCard:
-    def __init__(self, repo: DeckRepository):
+    def __init__(self, repo: DeckRepository, max_cards: int | None = None):
         self.repo = repo
+        self.max_cards = max_cards
 
     def execute(self, deck_id: str, front: str, back: str) -> tuple[Card, int]:
         deck = self.repo.load_cards(deck_id)
+        _ensure_capacity(deck, 1, self.max_cards)
         card = Card(front=front, back=back)
         index = deck.add(card)
         self.repo.save_cards(deck_id, deck)
@@ -21,12 +32,13 @@ class AddCard:
 
 
 class AddCardsBulk:
-    def __init__(self, repo: DeckRepository):
+    def __init__(self, repo: DeckRepository, max_cards: int | None = None):
         self.repo = repo
+        self.max_cards = max_cards
 
     def execute(self, deck_id: str, bulk_text: str) -> int:
         deck = self.repo.load_cards(deck_id)
-        count = 0
+        new_cards = []
         for line in bulk_text.strip().splitlines():
             line = line.strip()
             if not line:
@@ -36,31 +48,36 @@ class AddCardsBulk:
                 front, back = parts[0].strip(), parts[1].strip()
             else:
                 front, back = line, ''
-            deck.add(Card(front=front, back=back))
-            count += 1
+            new_cards.append(Card(front=front, back=back))
+        _ensure_capacity(deck, len(new_cards), self.max_cards)
+        for card in new_cards:
+            deck.add(card)
         self.repo.save_cards(deck_id, deck)
-        return count
+        return len(new_cards)
 
 
 class ImportCsv:
-    def __init__(self, repo: DeckRepository):
+    def __init__(self, repo: DeckRepository, max_cards: int | None = None):
         self.repo = repo
+        self.max_cards = max_cards
 
     def execute(self, deck_id: str, file_bytes: bytes) -> int:
         deck = self.repo.load_cards(deck_id)
         text = file_bytes.decode('utf-8-sig')
         reader = csv.reader(io.StringIO(text))
-        count = 0
+        new_cards = []
         for row in reader:
             if not row:
                 continue
             front = row[0].strip() if len(row) > 0 else ''
             back = row[1].strip() if len(row) > 1 else ''
             if front or back:
-                deck.add(Card(front=front, back=back))
-                count += 1
+                new_cards.append(Card(front=front, back=back))
+        _ensure_capacity(deck, len(new_cards), self.max_cards)
+        for card in new_cards:
+            deck.add(card)
         self.repo.save_cards(deck_id, deck)
-        return count
+        return len(new_cards)
 
 
 class DeleteCard:

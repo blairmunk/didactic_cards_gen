@@ -13,6 +13,7 @@
     <h2>Создать новую колоду</h2>
     <div class="card-form">
         <form method="post" action="{{ url_for('cards.create_deck') }}">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <div class="form-row">
                 <div class="form-group">
                     <label for="name">Название:</label>
@@ -55,10 +56,12 @@
                 <td class="actions">
                     <a href="{{ url_for('cards.edit_deck', deck_id=deck.id) }}" title="Редактировать">✏️</a>
                     <form method="post" action="{{ url_for('cards.clone_deck', deck_id=deck.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn-small btn-secondary" title="Копировать">📋</button>
                     </form>
                     <form method="post" action="{{ url_for('cards.delete_deck', deck_id=deck.id) }}"
                           onsubmit="return confirm('Удалить колоду «{{ deck.name }}»?')">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn-small btn-danger" title="Удалить">🗑️</button>
                     </form>
                 </td>

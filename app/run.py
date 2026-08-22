@@ -35,6 +35,9 @@ def create_app() -> Flask:
         timeout=cfg.pdflatex_timeout,
     )
     app.config['CARDS_PER_PAGE'] = layout.cards_per_page
+    app.config['MAX_CARDS'] = cfg.max_cards
+    app.config['MAX_CONTENT_LENGTH'] = cfg.max_request_bytes
+    app.config['CSRF_ENABLED'] = cfg.csrf_enabled
 
     app.register_blueprint(cards_bp)
     return app

@@ -7,6 +7,7 @@ import io
 import pytest
 
 from didactic_cards.adapters.latex_renderer import LatexRenderer
+from didactic_cards.domain.interfaces import CompileResult
 
 
 def test_deck_crud_pages(client, repo):
@@ -60,7 +61,7 @@ def test_card_html_workflow(client, repo, deck_id):
     )
     assert repo.load_cards(deck_id).cards[1].front == "Q2+"
 
-    response = client.get(f"/deck/{deck_id}/delete_card/0", follow_redirects=True)
+    response = client.post(f"/deck/{deck_id}/delete_card/0", follow_redirects=True)
     assert "Question" not in response.text
 
     client.post(f"/deck/{deck_id}/reset")
@@ -157,7 +158,8 @@ def test_generate_preview_success_and_failure(client, repo, deck_id, app, app_fa
     )
     failure = failing_client.post(f"/deck/{failing_deck.id}/generate")
     assert failure.status_code == 422
-    assert "pdflatex error" in failure.text
+    assert "Не удалось скомпилировать PDF" in failure.text
+    assert "internal path" not in failure.text
 
 
 def test_missing_and_invalid_html_resources_redirect(client, deck_id):
@@ -186,10 +188,6 @@ def test_api_rejects_unknown_deck(client, repo):
     assert not repo._cards_path("missing").exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-HTTP-001: destructive card deletion is exposed through GET",
-)
 def test_delete_card_requires_non_get_method(client, deck_id):
     client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
     response = client.get(f"/deck/{deck_id}/delete_card/0")
@@ -216,19 +214,23 @@ def test_api_rejects_non_list_reorder_payload(client, deck_id):
     assert response.status_code == 400
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-SEC-003: state-changing HTML forms have no CSRF protection",
-)
-def test_state_changing_form_requires_csrf_token(client):
+def test_state_changing_form_requires_csrf_token(client, app):
+    app.config['CSRF_ENABLED'] = True
     response = client.post('/create_deck', data={"name": "CSRF"})
     assert response.status_code == 400
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-LIMIT-001: AppConfig.max_cards is never enforced",
-)
+def test_state_changing_form_accepts_valid_csrf_token(client, app):
+    app.config['CSRF_ENABLED'] = True
+    client.get('/')
+    with client.session_transaction() as flask_session:
+        token = flask_session['_csrf_token']
+    response = client.post(
+        '/create_deck', data={"name": "CSRF", "_csrf_token": token}
+    )
+    assert response.status_code == 302
+
+
 def test_card_limit_is_enforced(client, app, deck_id):
     app.config["MAX_CARDS"] = 1
     assert client.post(
@@ -253,6 +255,46 @@ def test_pdf_content_disposition_is_latin1_safe(client, deck_id):
     disposition = response.headers["Content-Disposition"]
     disposition.encode("latin-1")
     assert "filename*=" in disposition
+
+
+def test_security_headers_are_added(client):
+    response = client.get('/')
+    assert response.headers['X-Content-Type-Options'] == 'nosniff'
+    assert response.headers['X-Frame-Options'] == 'DENY'
+    assert response.headers['Referrer-Policy'] == 'no-referrer'
+    assert "object-src 'none'" in response.headers['Content-Security-Policy']
+
+
+def test_request_size_limit_is_enforced(client, app, deck_id):
+    app.config['MAX_CONTENT_LENGTH'] = 64
+    response = client.post(
+        f"/api/deck/{deck_id}/add_card",
+        json={"front": "X" * 1000, "back": ""},
+    )
+    assert response.status_code == 413
+
+
+@pytest.mark.parametrize(
+    ('error_kind', 'status', 'message'),
+    [
+        ('timeout', 504, 'превысила допустимое время'),
+        ('unavailable', 503, 'недоступен'),
+        ('compile-error', 422, 'Не удалось скомпилировать'),
+    ],
+)
+def test_compiler_errors_are_classified_without_log_leak(
+    client, app, deck_id, error_kind, status, message
+):
+    class FailingCompiler:
+        def compile(self, _source):
+            return CompileResult(False, b'', '/private/server/path', error_kind)
+
+    app.config['COMPILER'] = FailingCompiler()
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
+    response = client.post(f"/deck/{deck_id}/generate")
+    assert response.status_code == status
+    assert message in response.text
+    assert '/private/server/path' not in response.text
 
 
 def test_unsafe_math_is_rejected_before_compilation(client, app, deck_id):

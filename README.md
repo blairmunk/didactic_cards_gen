@@ -21,11 +21,12 @@ sudo apt install texlive-latex-base texlive-latex-extra texlive-lang-cyrillic
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+export DIDACTIC_CARDS_SECRET_KEY='replace-with-a-long-random-value'
 cd app
 ../.venv/bin/python run.py
 ```
 
-Откройте <http://127.0.0.1:5000>. Запуск именно из каталога `app` важен для текущей версии: путь к `data/` вычисляется относительно рабочего каталога процесса.
+Откройте <http://127.0.0.1:5000>. Для одноразового локального запуска secret можно не задавать — он будет создан автоматически, но браузерная сессия сбросится после рестарта. Запуск именно из каталога `app` важен для текущей версии: путь к `data/` вычисляется относительно рабочего каталога процесса.
 
 Если существующий `venv` не запускается с `Exec format error`, не переиспользуйте его: это непереносимый Windows/WSL link-файл. Создайте `.venv` командами выше.
 

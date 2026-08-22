@@ -29,6 +29,7 @@ def test_xelatex_timeout_is_failure():
         result = XelatexCompiler(timeout=1).compile('source')
     assert result.success is False
     assert result.pdf_data == b''
+    assert result.error_kind == 'timeout'
 
 
 def test_xelatex_no_output_is_failure():
@@ -39,6 +40,7 @@ def test_xelatex_no_output_is_failure():
         result = XelatexCompiler().compile('broken')
     assert result.success is False
     assert result.log == ''
+    assert result.error_kind == 'compile-error'
 
 
 def test_xelatex_uses_process_output_when_log_is_missing():
@@ -60,6 +62,7 @@ def test_xelatex_missing_binary_is_failure():
         result = XelatexCompiler().compile('source')
     assert result.success is False
     assert 'missing' in result.log
+    assert result.error_kind == 'unavailable'
 
 
 def test_xelatex_uses_safe_failure_flags():

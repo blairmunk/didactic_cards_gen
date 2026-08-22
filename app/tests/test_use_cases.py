@@ -13,6 +13,7 @@ from didactic_cards.use_cases.card_use_cases import (
     PreviewDocument,
     ReorderCards,
     ResetCards,
+    CardLimitExceeded,
 )
 
 
@@ -40,6 +41,20 @@ def test_bulk_import_accepts_single_pipe(repo, deck_id):
     assert [(card.front, card.back) for card in cards] == [
         ("q1", "a1"), ("q2", ""), ("q3", "a3")
     ]
+
+
+def test_single_card_limit_is_enforced_without_partial_write(repo, deck_id):
+    AddCard(repo, max_cards=1).execute(deck_id, 'Q1', 'A1')
+    with pytest.raises(CardLimitExceeded):
+        AddCard(repo, max_cards=1).execute(deck_id, 'Q2', 'A2')
+    assert [card.front for card in repo.load_cards(deck_id).cards] == ['Q1']
+
+
+def test_bulk_limit_is_atomic(repo, deck_id):
+    AddCard(repo).execute(deck_id, 'existing', '')
+    with pytest.raises(CardLimitExceeded):
+        AddCardsBulk(repo, max_cards=2).execute(deck_id, 'Q1 | A1\nQ2 | A2')
+    assert [card.front for card in repo.load_cards(deck_id).cards] == ['existing']
 
 
 @pytest.mark.xfail(
@@ -77,6 +92,12 @@ def test_csv_import_matches_documented_semicolon(repo, deck_id):
 def test_csv_import_rejects_non_utf8(repo, deck_id):
     with pytest.raises(UnicodeDecodeError):
         ImportCsv(repo).execute(deck_id, b"\xff\xfe")
+
+
+def test_csv_limit_is_atomic(repo, deck_id):
+    with pytest.raises(CardLimitExceeded):
+        ImportCsv(repo, max_cards=1).execute(deck_id, b'Q1,A1\nQ2,A2')
+    assert len(repo.load_cards(deck_id)) == 0
 
 
 def test_generate_and_preview_pad_to_whole_sheet(repo, deck_id, app):
