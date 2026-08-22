@@ -68,7 +68,7 @@ label {
     font-weight: bold;
 }
 
-textarea, input[type="file"] {
+textarea, input[type="text"], input[type="file"] {
     width: 100%;
     padding: 10px;
     border-radius: 5px;
@@ -197,13 +197,6 @@ summary {
     color: #2c3e50;
 }
 
-/* ─── Адаптивность ─── */
-@media (max-width: 700px) {
-    .form-row {
-        flex-direction: column;
-        gap: 10px;
-    }
-}
 /* ─── Переключатель режимов ─── */
 .view-toggle {
     display: flex;
@@ -228,11 +221,10 @@ summary {
 
 /* ─── Превью-сетка ─── */
 .preview-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
     margin-bottom: 20px;
-    max-width: 720px;
 }
 
 .preview-card {
@@ -246,20 +238,18 @@ summary {
 
 .preview-card .card-number {
     position: absolute;
-    top: 6px;
-    left: 8px;
-    font-size: 12px;
+    top: 4px;
+    left: 6px;
+    font-size: 11px;
     color: #999;
     font-weight: bold;
-    z-index: 1;
 }
 
 .preview-card .card-actions {
     position: absolute;
-    top: 6px;
-    right: 8px;
-    font-size: 18px;
-    z-index: 1;
+    top: 4px;
+    right: 6px;
+    font-size: 16px;
 }
 
 .preview-card .card-actions a {
@@ -269,19 +259,20 @@ summary {
 
 .preview-card-inner {
     display: flex;
-    min-height: 180px;
+    min-height: 120px;
 }
 
 .preview-side {
     flex: 1;
-    padding: 32px 16px 24px 16px;
+    padding: 24px 12px 12px 12px;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
     text-align: center;
     word-break: break-word;
-    font-size: 16px;
-    line-height: 1.5;
+    font-size: 14px;
+    line-height: 1.4;
     overflow: hidden;
     position: relative;
 }
@@ -302,9 +293,81 @@ summary {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     position: absolute;
-    bottom: 6px;
+    bottom: 4px;
 }
 
 .preview-front .preview-side-label { left: 12px; }
 .preview-back .preview-side-label  { right: 12px; }
 
+/* ─── Список колод ─── */
+.decks-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 20px;
+}
+
+.decks-table th,
+.decks-table td {
+    border: 1px solid #ddd;
+    padding: 10px 12px;
+    text-align: left;
+    vertical-align: middle;
+}
+
+.decks-table th {
+    background: #34495e;
+    color: white;
+}
+
+.decks-table tr:nth-child(even) { background: #f9f9f9; }
+.decks-table tr:hover { background: #eaf2f8; }
+
+.decks-table .deck-name-link {
+    font-weight: bold;
+    font-size: 15px;
+}
+
+.decks-table .deck-description {
+    color: #777;
+    font-size: 13px;
+}
+
+.decks-table .actions {
+    white-space: nowrap;
+}
+
+.decks-table .actions a,
+.decks-table .actions button {
+    margin-right: 4px;
+}
+
+.decks-table .actions form {
+    display: inline;
+}
+
+/* ─── Навигация (хлебные крошки) ─── */
+.breadcrumb {
+    font-size: 14px;
+    color: #999;
+    margin-bottom: 10px;
+}
+
+.breadcrumb a {
+    color: #2196F3;
+    text-decoration: none;
+}
+
+.breadcrumb a:hover {
+    text-decoration: underline;
+}
+
+/* ─── Адаптивность ─── */
+@media (max-width: 700px) {
+    .form-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+    .preview-grid {
+        grid-template-columns: 1fr;
+    }
+}

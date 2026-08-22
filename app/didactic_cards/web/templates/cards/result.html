@@ -7,13 +7,22 @@
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
 </head>
 <body>
+    <div class="breadcrumb">
+        <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a>
+        {% if deck %} → <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}">{{ deck.name }}</a>{% endif %}
+        → LaTeX
+    </div>
+
     <h1>👁 Предпросмотр LaTeX-кода</h1>
 
     <pre id="latex-code">{{ latex_content }}</pre>
 
-    <div class="buttons">
-        <a href="{{ url_for('cards.index') }}" class="btn btn-secondary">← Назад к карточкам</a>
-        <button class="btn btn-copy" onclick="copyLatex()">📋 Копировать код</button>
+    <div class="buttons" style="margin-top:16px">
+        <button class="btn-copy" onclick="copyLatex()">📋 Копировать код</button>
+        {% if deck %}
+        <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}" class="btn-secondary" style="text-decoration:none;">← Назад к колоде</a>
+        {% endif %}
+        <a href="{{ url_for('cards.decks_list') }}" class="btn-secondary" style="text-decoration:none;">← Все колоды</a>
     </div>
 
     <script>

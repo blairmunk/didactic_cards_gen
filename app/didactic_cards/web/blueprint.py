@@ -6,6 +6,10 @@ from ..use_cases.card_use_cases import (
     EditCard, ReorderCards, ResetCards, GetDeck,
     GenerateDocument, PreviewDocument
 )
+from ..use_cases.deck_use_cases import (
+    ListDecks, GetDeckInfo, CreateDeck, UpdateDeck,
+    DeleteDeck, CloneDeck
+)
 
 cards_bp = Blueprint(
     'cards', __name__,
@@ -31,120 +35,182 @@ def _cards_per_page():
     return current_app.config['CARDS_PER_PAGE']
 
 
-# ─── Страницы ───────────────────────────────────────────────────────
+# ─── Колоды ─────────────────────────────────────────────────────────
 
 @cards_bp.route('/', methods=['GET'])
-def index():
-    deck = GetDeck(_repo()).execute()
+def decks_list():
+    decks = ListDecks(_repo()).execute()
+    return render_template('cards/decks.html', decks=decks)
+
+
+@cards_bp.route('/create_deck', methods=['POST'])
+def create_deck():
+    name = request.form.get('name', '').strip()
+    desc = request.form.get('description', '').strip()
+    CreateDeck(_repo()).execute(name, desc)
+    return redirect(url_for('cards.decks_list'))
+
+
+@cards_bp.route('/deck/<deck_id>/edit', methods=['GET', 'POST'])
+def edit_deck(deck_id):
+    deck_info = GetDeckInfo(_repo()).execute(deck_id)
+    if not deck_info:
+        return redirect(url_for('cards.decks_list'))
+
+    if request.method == 'POST':
+        name = request.form.get('name', '').strip()
+        desc = request.form.get('description', '').strip()
+        UpdateDeck(_repo()).execute(deck_id, name, desc)
+        return redirect(url_for('cards.decks_list'))
+
+    return render_template('cards/edit_deck.html', deck=deck_info)
+
+
+@cards_bp.route('/deck/<deck_id>/delete', methods=['POST'])
+def delete_deck(deck_id):
+    DeleteDeck(_repo()).execute(deck_id)
+    return redirect(url_for('cards.decks_list'))
+
+
+@cards_bp.route('/deck/<deck_id>/clone', methods=['POST'])
+def clone_deck(deck_id):
+    CloneDeck(_repo()).execute(deck_id)
+    return redirect(url_for('cards.decks_list'))
+
+
+# ─── Карточки внутри колоды ─────────────────────────────────────────
+
+@cards_bp.route('/deck/<deck_id>', methods=['GET'])
+def deck_view(deck_id):
+    deck_info = GetDeckInfo(_repo()).execute(deck_id)
+    if not deck_info:
+        return redirect(url_for('cards.decks_list'))
+
+    card_deck = GetDeck(_repo()).execute(deck_id)
     return render_template('cards/index.html',
-                           cards=deck.to_list(),
-                           cards_count=len(deck),
+                           deck=deck_info,
+                           cards=card_deck.to_list(),
+                           cards_count=len(card_deck),
                            cards_per_page=_cards_per_page())
 
 
-@cards_bp.route('/add_card', methods=['POST'])
-def add_card():
+@cards_bp.route('/deck/<deck_id>/add_card', methods=['POST'])
+def add_card(deck_id):
     front = request.form.get('front', '').strip()
     back = request.form.get('back', '').strip()
     if front or back:
-        AddCard(_repo()).execute(front, back)
-    return redirect(url_for('cards.index'))
+        AddCard(_repo()).execute(deck_id, front, back)
+    return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-@cards_bp.route('/add_cards_bulk', methods=['POST'])
-def add_cards_bulk():
+@cards_bp.route('/deck/<deck_id>/add_cards_bulk', methods=['POST'])
+def add_cards_bulk(deck_id):
     bulk = request.form.get('bulk', '')
-    AddCardsBulk(_repo()).execute(bulk)
-    return redirect(url_for('cards.index'))
+    AddCardsBulk(_repo()).execute(deck_id, bulk)
+    return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-@cards_bp.route('/import_csv', methods=['POST'])
-def import_csv():
+@cards_bp.route('/deck/<deck_id>/import_csv', methods=['POST'])
+def import_csv(deck_id):
     file = request.files.get('csv_file')
     if not file or file.filename == '':
-        return redirect(url_for('cards.index'))
+        return redirect(url_for('cards.deck_view', deck_id=deck_id))
     try:
         file_bytes = file.stream.read()
-        ImportCsv(_repo()).execute(file_bytes)
+        ImportCsv(_repo()).execute(deck_id, file_bytes)
     except UnicodeDecodeError:
-        deck = GetDeck(_repo()).execute()
+        deck_info = GetDeckInfo(_repo()).execute(deck_id)
+        card_deck = GetDeck(_repo()).execute(deck_id)
         return render_template('cards/index.html',
-                               cards=deck.to_list(),
-                               cards_count=len(deck),
+                               deck=deck_info,
+                               cards=card_deck.to_list(),
+                               cards_count=len(card_deck),
                                cards_per_page=_cards_per_page(),
                                error='Ошибка кодировки. Сохраните CSV в UTF-8.')
-    return redirect(url_for('cards.index'))
+    return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-@cards_bp.route('/delete_card/<int:index>')
-def delete_card(index):
-    DeleteCard(_repo()).execute(index)
-    return redirect(url_for('cards.index'))
+@cards_bp.route('/deck/<deck_id>/delete_card/<int:index>')
+def delete_card(deck_id, index):
+    DeleteCard(_repo()).execute(deck_id, index)
+    return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-@cards_bp.route('/edit_card/<int:index>', methods=['GET', 'POST'])
-def edit_card(index):
-    deck = GetDeck(_repo()).execute()
-    if index < 0 or index >= len(deck):
-        return redirect(url_for('cards.index'))
+@cards_bp.route('/deck/<deck_id>/edit_card/<int:index>', methods=['GET', 'POST'])
+def edit_card(deck_id, index):
+    deck_info = GetDeckInfo(_repo()).execute(deck_id)
+    if not deck_info:
+        return redirect(url_for('cards.decks_list'))
+
+    card_deck = GetDeck(_repo()).execute(deck_id)
+    if index < 0 or index >= len(card_deck):
+        return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
     if request.method == 'POST':
         front = request.form.get('front', '')
         back = request.form.get('back', '')
-        EditCard(_repo()).execute(index, front, back)
-        return redirect(url_for('cards.index'))
+        EditCard(_repo()).execute(deck_id, index, front, back)
+        return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
-    card = deck.cards[index].to_dict()
-    return render_template('cards/edit_card.html', card=card, index=index)
-
-
-@cards_bp.route('/reset', methods=['POST'])
-def reset():
-    ResetCards(_repo()).execute()
-    return redirect(url_for('cards.index'))
+    card = card_deck.cards[index].to_dict()
+    return render_template('cards/edit_card.html',
+                           deck=deck_info, card=card, index=index)
 
 
-@cards_bp.route('/generate', methods=['POST'])
-def generate():
-    deck = GetDeck(_repo()).execute()
-    if not len(deck):
+@cards_bp.route('/deck/<deck_id>/reset', methods=['POST'])
+def reset(deck_id):
+    ResetCards(_repo()).execute(deck_id)
+    return redirect(url_for('cards.deck_view', deck_id=deck_id))
+
+
+@cards_bp.route('/deck/<deck_id>/generate', methods=['POST'])
+def generate(deck_id):
+    deck_info = GetDeckInfo(_repo()).execute(deck_id)
+    card_deck = GetDeck(_repo()).execute(deck_id)
+
+    if not len(card_deck):
         return render_template('cards/index.html',
+                               deck=deck_info,
                                cards=[], cards_count=0,
                                cards_per_page=_cards_per_page(),
                                error='Добавьте хотя бы одну карточку!')
 
     result = GenerateDocument(
         _repo(), _renderer(), _compiler(), _cards_per_page()
-    ).execute()
+    ).execute(deck_id)
 
     if not result.success:
-        return render_template('cards/error.html',
+        return render_template('cards/error.html', deck=deck_info,
                                errors=[result.log],
                                full_log=result.log)
 
+    filename = f'{deck_info.name}.pdf' if deck_info else 'cards.pdf'
     response = make_response(result.pdf_data)
     response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = 'attachment; filename=didactic_cards.pdf'
+    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
 
 
-@cards_bp.route('/preview_latex', methods=['POST'])
-def preview_latex():
-    deck = GetDeck(_repo()).execute()
-    if not len(deck):
+@cards_bp.route('/deck/<deck_id>/preview_latex', methods=['POST'])
+def preview_latex(deck_id):
+    deck_info = GetDeckInfo(_repo()).execute(deck_id)
+    card_deck = GetDeck(_repo()).execute(deck_id)
+
+    if not len(card_deck):
         return render_template('cards/index.html',
+                               deck=deck_info,
                                cards=[], cards_count=0,
                                cards_per_page=_cards_per_page(),
                                error='Добавьте хотя бы одну карточку!')
 
-    latex = PreviewDocument(_repo(), _renderer(), _cards_per_page()).execute()
-    return render_template('cards/result.html', latex_content=latex)
+    latex = PreviewDocument(_repo(), _renderer(), _cards_per_page()).execute(deck_id)
+    return render_template('cards/result.html', deck=deck_info, latex_content=latex)
 
 
 # ─── AJAX API ───────────────────────────────────────────────────────
 
-@cards_bp.route('/api/add_card', methods=['POST'])
-def api_add_card():
+@cards_bp.route('/api/deck/<deck_id>/add_card', methods=['POST'])
+def api_add_card(deck_id):
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Нет данных'}), 400
@@ -154,45 +220,45 @@ def api_add_card():
     if not front and not back:
         return jsonify({'error': 'Заполните хотя бы одно поле'}), 400
 
-    card, index = AddCard(_repo()).execute(front, back)
-    deck = GetDeck(_repo()).execute()
+    card, index = AddCard(_repo()).execute(deck_id, front, back)
+    card_deck = GetDeck(_repo()).execute(deck_id)
 
     return jsonify({
         'ok': True,
         'card': card.to_dict(),
         'index': index,
-        'cards_count': len(deck)
+        'cards_count': len(card_deck)
     })
 
 
-@cards_bp.route('/api/delete_card/<int:index>', methods=['DELETE'])
-def api_delete_card(index):
-    result = DeleteCard(_repo()).execute(index)
+@cards_bp.route('/api/deck/<deck_id>/delete_card/<int:index>', methods=['DELETE'])
+def api_delete_card(deck_id, index):
+    result = DeleteCard(_repo()).execute(deck_id, index)
     if not result:
         return jsonify({'error': 'Неверный индекс'}), 404
-    deck = GetDeck(_repo()).execute()
-    return jsonify({'ok': True, 'cards_count': len(deck)})
+    card_deck = GetDeck(_repo()).execute(deck_id)
+    return jsonify({'ok': True, 'cards_count': len(card_deck)})
 
 
-@cards_bp.route('/api/reorder', methods=['POST'])
-def api_reorder():
+@cards_bp.route('/api/deck/<deck_id>/reorder', methods=['POST'])
+def api_reorder(deck_id):
     data = request.get_json()
     if not data or 'order' not in data:
         return jsonify({'error': 'Нет данных'}), 400
-    result = ReorderCards(_repo()).execute(data['order'])
+    result = ReorderCards(_repo()).execute(deck_id, data['order'])
     if not result:
         return jsonify({'error': 'Некорректный порядок'}), 400
     return jsonify({'ok': True})
 
 
-@cards_bp.route('/api/edit_card/<int:index>', methods=['PUT'])
-def api_edit_card(index):
+@cards_bp.route('/api/deck/<deck_id>/edit_card/<int:index>', methods=['PUT'])
+def api_edit_card(deck_id, index):
     data = request.get_json()
     if not data:
         return jsonify({'error': 'Нет данных'}), 400
     result = EditCard(_repo()).execute(
-        index, data.get('front', ''), data.get('back', ''))
+        deck_id, index, data.get('front', ''), data.get('back', ''))
     if not result:
         return jsonify({'error': 'Неверный индекс'}), 404
-    deck = GetDeck(_repo()).execute()
-    return jsonify({'ok': True, 'card': deck.cards[index].to_dict()})
+    card_deck = GetDeck(_repo()).execute(deck_id)
+    return jsonify({'ok': True, 'card': card_deck.cards[index].to_dict()})

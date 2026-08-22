@@ -1,202 +1,261 @@
-"""Тесты web-слоя: routes и API endpoints."""
+"""Contract tests for HTML routes and the JSON API."""
+
+from __future__ import annotations
+
 import io
 
-
-class TestIndexPage:
-
-    def test_index_empty(self, client):
-        resp = client.get('/')
-        assert resp.status_code == 200
-
-    def test_index_with_cards(self, client):
-        client.post('/add_card', data={'front': 'Q1', 'back': 'A1'})
-        resp = client.get('/')
-        assert resp.status_code == 200
-        assert 'Q1' in resp.data.decode()
+import pytest
 
 
-class TestAddCard:
+def test_deck_crud_pages(client, repo):
+    assert client.get("/").status_code == 200
 
-    def test_add_card_redirect(self, client):
-        resp = client.post('/add_card', data={'front': 'Q', 'back': 'A'})
-        assert resp.status_code == 302
+    response = client.post(
+        "/create_deck",
+        data={"name": "Физика", "description": "Механика"},
+        follow_redirects=True,
+    )
+    assert "Физика" in response.text
+    deck = repo.list_decks()[0]
 
-    def test_add_card_appears(self, client):
-        client.post('/add_card', data={'front': 'Hello', 'back': 'World'})
-        resp = client.get('/')
-        assert 'Hello' in resp.data.decode()
+    response = client.get(f"/deck/{deck.id}")
+    assert response.status_code == 200
+    assert "Механика" in response.text
 
-    def test_add_empty_ignored(self, client):
-        client.post('/add_card', data={'front': '', 'back': ''})
-        resp = client.get('/')
-        assert resp.status_code == 200
+    edit_page = client.get(f"/deck/{deck.id}/edit")
+    assert edit_page.status_code == 200
+    assert "Редактирование колоды" in edit_page.text
 
+    client.post(f"/deck/{deck.id}/edit", data={"name": "Физика 2", "description": ""})
+    assert repo.get_deck(deck.id).name == "Физика 2"
 
-class TestAddCardsBulk:
+    client.post(f"/deck/{deck.id}/clone")
+    assert len(repo.list_decks()) == 2
 
-    def test_bulk_add(self, client):
-        bulk = "front1||back1\nfront2||back2\nfront3||back3"
-        client.post('/add_cards_bulk', data={'bulk': bulk})
-        resp = client.get('/')
-        html = resp.data.decode()
-        assert 'front1' in html
-        assert 'front3' in html
-
-
-class TestDeleteCard:
-
-    def test_delete_card(self, client):
-        client.post('/add_card', data={'front': 'XREMOVE', 'back': 'XGONE'})
-        resp = client.get('/delete_card/0', follow_redirects=True)
-        assert 'XREMOVE' not in resp.data.decode()
-
-    def test_delete_invalid_index(self, client):
-        resp = client.get('/delete_card/999')
-        assert resp.status_code == 302
+    client.post(f"/deck/{deck.id}/delete")
+    assert repo.get_deck(deck.id) is None
 
 
-class TestEditCard:
+def test_card_html_workflow(client, repo, deck_id):
+    client.post(f"/deck/{deck_id}/add_card", data={"front": "", "back": ""})
+    assert len(repo.load_cards(deck_id)) == 0
 
-    def test_edit_get(self, client):
-        client.post('/add_card', data={'front': 'Old', 'back': 'Data'})
-        resp = client.get('/edit_card/0')
-        assert resp.status_code == 200
-        assert 'Old' in resp.data.decode()
+    response = client.post(
+        f"/deck/{deck_id}/add_card",
+        data={"front": "  Question  ", "back": "  Answer  "},
+    )
+    assert response.status_code == 302
+    assert repo.load_cards(deck_id).cards[0].front == "Question"
 
-    def test_edit_post(self, client):
-        client.post('/add_card', data={'front': 'Old', 'back': 'Data'})
-        client.post('/edit_card/0', data={'front': 'New', 'back': 'Info'})
-        resp = client.get('/')
-        assert 'New' in resp.data.decode()
+    client.post(f"/deck/{deck_id}/add_cards_bulk", data={"bulk": "Q2 | A2"})
+    edit_page = client.get(f"/deck/{deck_id}/edit_card/1")
+    assert edit_page.status_code == 200
+    assert "Q2" in edit_page.text
 
-    def test_edit_invalid_index(self, client):
-        resp = client.get('/edit_card/999')
-        assert resp.status_code == 302
+    client.post(
+        f"/deck/{deck_id}/edit_card/1",
+        data={"front": "Q2+", "back": "A2+"},
+    )
+    assert repo.load_cards(deck_id).cards[1].front == "Q2+"
 
+    response = client.get(f"/deck/{deck_id}/delete_card/0", follow_redirects=True)
+    assert "Question" not in response.text
 
-class TestReset:
-
-    def test_reset_clears_all(self, client):
-        client.post('/add_card', data={'front': 'Q', 'back': 'A'})
-        client.post('/reset')
-        resp = client.get('/')
-        assert resp.status_code == 200
-
-
-class TestGenerate:
-
-    def test_generate_empty_deck(self, client):
-        resp = client.post('/generate')
-        assert resp.status_code == 200
-        assert 'Добавьте' in resp.data.decode()
-
-    def test_generate_success(self, client):
-        client.post('/add_card', data={'front': 'Q', 'back': 'A'})
-        resp = client.post('/generate')
-        assert resp.status_code == 200
-        assert resp.content_type == 'application/pdf'
-        assert resp.data.startswith(b'%PDF')
-
-    def test_generate_compile_failure(self, app_fail_compiler):
-        c = app_fail_compiler.test_client()
-        c.post('/add_card', data={'front': 'Q', 'back': 'A'})
-        resp = c.post('/generate')
-        assert resp.status_code == 200
-        assert 'pdflatex error' in resp.data.decode()
+    client.post(f"/deck/{deck_id}/reset")
+    assert len(repo.load_cards(deck_id)) == 0
 
 
-class TestPreviewLatex:
-
-    def test_preview_empty(self, client):
-        resp = client.post('/preview_latex')
-        assert resp.status_code == 200
-        assert 'Добавьте' in resp.data.decode()
-
-    def test_preview_success(self, client):
-        client.post('/add_card', data={'front': 'Q', 'back': 'A'})
-        resp = client.post('/preview_latex')
-        assert resp.status_code == 200
-        assert 'documentclass' in resp.data.decode()
+def test_html_escapes_user_content(client, deck_id):
+    client.post(
+        f"/deck/{deck_id}/add_card",
+        data={"front": "<script>alert(1)</script>", "back": "A"},
+    )
+    page = client.get(f"/deck/{deck_id}")
+    assert "<script>alert(1)</script>" not in page.text
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page.text
 
 
-class TestImportCsv:
+def test_csv_import_and_encoding_error(client, repo, deck_id):
+    assert client.post(f"/deck/{deck_id}/import_csv").status_code == 302
+    response = client.post(
+        f"/deck/{deck_id}/import_csv",
+        data={"csv_file": (io.BytesIO("front,back".encode()), "cards.csv")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 302
+    assert repo.load_cards(deck_id).cards[0].back == "back"
 
-    def test_import_csv(self, client):
-        csv_data = "front1;back1\nfront2;back2"
-        data = {
-            'csv_file': (io.BytesIO(csv_data.encode('utf-8')), 'cards.csv')
-        }
-        client.post('/import_csv', data=data, content_type='multipart/form-data')
-        resp = client.get('/')
-        assert 'front1' in resp.data.decode()
-
-    def test_import_no_file(self, client):
-        resp = client.post('/import_csv')
-        assert resp.status_code == 302
-
-
-# ─── API endpoints ──────────────────────────────────────────────────
-
-class TestApiAddCard:
-
-    def test_api_add_card(self, client):
-        resp = client.post('/api/add_card',
-                           json={'front': 'Q', 'back': 'A'})
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data['ok'] is True
-        assert data['card']['front'] == 'Q'
-
-    def test_api_add_empty(self, client):
-        resp = client.post('/api/add_card',
-                           json={'front': '', 'back': ''})
-        assert resp.status_code == 400
-
-    def test_api_add_no_json(self, client):
-        resp = client.post('/api/add_card',
-                           data='not json',
-                           content_type='application/json')
-        assert resp.status_code == 400
+    response = client.post(
+        f"/deck/{deck_id}/import_csv",
+        data={"csv_file": (io.BytesIO(b"\xff\xfe"), "broken.csv")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    assert "Ошибка кодировки" in response.text
 
 
-class TestApiDeleteCard:
+def test_api_card_workflow(client, deck_id):
+    added = client.post(
+        f"/api/deck/{deck_id}/add_card", json={"front": "A", "back": "1"}
+    )
+    assert added.status_code == 200
+    assert added.json["cards_count"] == 1
 
-    def test_api_delete(self, client):
-        client.post('/api/add_card', json={'front': 'Q', 'back': 'A'})
-        resp = client.delete('/api/delete_card/0')
-        assert resp.status_code == 200
-        assert resp.get_json()['ok'] is True
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "B", "back": "2"})
+    reordered = client.post(f"/api/deck/{deck_id}/reorder", json={"order": [1, 0]})
+    assert reordered.status_code == 200
 
-    def test_api_delete_invalid(self, client):
-        resp = client.delete('/api/delete_card/999')
-        assert resp.status_code == 404
+    edited = client.put(
+        f"/api/deck/{deck_id}/edit_card/0", json={"front": "B+", "back": "2+"}
+    )
+    assert edited.json["card"]["front"] == "B+"
 
-
-class TestApiEditCard:
-
-    def test_api_edit(self, client):
-        client.post('/api/add_card', json={'front': 'Old', 'back': 'Data'})
-        resp = client.put('/api/edit_card/0',
-                          json={'front': 'New', 'back': 'Info'})
-        assert resp.status_code == 200
-        assert resp.get_json()['card']['front'] == 'New'
-
-    def test_api_edit_invalid(self, client):
-        resp = client.put('/api/edit_card/999',
-                          json={'front': 'X', 'back': 'Y'})
-        assert resp.status_code == 404
+    deleted = client.delete(f"/api/deck/{deck_id}/delete_card/1")
+    assert deleted.status_code == 200
+    assert deleted.json["cards_count"] == 1
 
 
-class TestApiReorder:
+@pytest.mark.parametrize(
+    ("method", "path", "payload", "status"),
+    [
+        ("post", "/api/deck/{deck}/add_card", {}, 415),
+        ("post", "/api/deck/{deck}/add_card", {"json": {"front": "", "back": ""}}, 400),
+        ("delete", "/api/deck/{deck}/delete_card/99", {}, 404),
+        ("put", "/api/deck/{deck}/edit_card/99", {"json": {"front": "X"}}, 404),
+        ("post", "/api/deck/{deck}/reorder", {"json": {"order": [99]}}, 400),
+    ],
+)
+def test_api_validation(client, deck_id, method, path, payload, status):
+    response = getattr(client, method)(path.format(deck=deck_id), **payload)
+    assert response.status_code == status
 
-    def test_api_reorder(self, client):
-        client.post('/api/add_card', json={'front': 'A', 'back': '1'})
-        client.post('/api/add_card', json={'front': 'B', 'back': '2'})
-        resp = client.post('/api/reorder', json={'order': [1, 0]})
-        assert resp.status_code == 200
-        assert resp.get_json()['ok'] is True
 
-    def test_api_reorder_invalid(self, client):
-        client.post('/api/add_card', json={'front': 'A', 'back': '1'})
-        resp = client.post('/api/reorder', json={'order': [5, 0]})
-        assert resp.status_code == 400
+def test_generate_preview_success_and_failure(client, repo, deck_id, app, app_fail_compiler):
+    empty = client.post(f"/deck/{deck_id}/generate")
+    assert "Добавьте хотя бы одну карточку" in empty.text
+    assert "Добавьте хотя бы одну карточку" in client.post(
+        f"/deck/{deck_id}/preview_latex"
+    ).text
+
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
+    preview = client.post(f"/deck/{deck_id}/preview_latex")
+    assert "documentclass" in preview.text
+
+    generated = client.post(f"/deck/{deck_id}/generate")
+    assert generated.status_code == 200
+    assert generated.mimetype == "application/pdf"
+    assert generated.data.startswith(b"%PDF")
+    assert len(app.config["RENDERER"].decks[-1]) == 8
+
+    failing_repo = app_fail_compiler.config["REPO"]
+    failing_deck = failing_repo.create_deck("Fail")
+    failing_client = app_fail_compiler.test_client()
+    failing_client.post(
+        f"/api/deck/{failing_deck.id}/add_card", json={"front": "Q", "back": "A"}
+    )
+    failure = failing_client.post(f"/deck/{failing_deck.id}/generate")
+    assert failure.status_code == 200
+    assert "pdflatex error" in failure.text
+
+
+def test_missing_and_invalid_html_resources_redirect(client, deck_id):
+    assert client.get("/deck/missing").status_code == 302
+    assert client.get("/deck/missing/edit").status_code == 302
+    assert client.get("/deck/missing/edit_card/0").status_code == 302
+    assert client.get(f"/deck/{deck_id}/edit_card/99").status_code == 302
+
+
+def test_api_empty_json_contracts(client, deck_id):
+    headers = {"content_type": "application/json", "data": "null"}
+    assert client.post(f"/api/deck/{deck_id}/add_card", **headers).status_code == 400
+    assert client.post(f"/api/deck/{deck_id}/reorder", **headers).status_code == 400
+    assert client.put(f"/api/deck/{deck_id}/edit_card/0", **headers).status_code == 400
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-WEB-001: unknown deck writes create orphan JSON instead of returning 404",
+)
+def test_api_rejects_unknown_deck(client, repo):
+    response = client.post(
+        "/api/deck/missing/add_card", json={"front": "orphan", "back": ""}
+    )
+    assert response.status_code == 404
+    assert not repo._cards_path("missing").exists()
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-HTTP-001: destructive card deletion is exposed through GET",
+)
+def test_delete_card_requires_non_get_method(client, deck_id):
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
+    response = client.get(f"/deck/{deck_id}/delete_card/0")
+    assert response.status_code == 405
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-WEB-002: non-string JSON values cause an unhandled AttributeError",
+)
+def test_api_rejects_non_string_card_fields(client, deck_id):
+    response = client.post(
+        f"/api/deck/{deck_id}/add_card", json={"front": 123, "back": None}
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-WEB-003: malformed reorder types can raise TypeError instead of a validation response",
+)
+def test_api_rejects_non_list_reorder_payload(client, deck_id):
+    response = client.post(f"/api/deck/{deck_id}/reorder", json={"order": None})
+    assert response.status_code == 400
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-SEC-003: state-changing HTML forms have no CSRF protection",
+)
+def test_state_changing_form_requires_csrf_token(client):
+    response = client.post('/create_deck', data={"name": "CSRF"})
+    assert response.status_code == 400
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-LIMIT-001: AppConfig.max_cards is never enforced",
+)
+def test_card_limit_is_enforced(client, app, deck_id):
+    app.config["MAX_CARDS"] = 1
+    assert client.post(
+        f"/api/deck/{deck_id}/add_card", json={"front": "1", "back": ""}
+    ).status_code == 200
+    assert client.post(
+        f"/api/deck/{deck_id}/add_card", json={"front": "2", "back": ""}
+    ).status_code == 409
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-HTTP-002: compilation failures are returned as HTTP 200",
+)
+def test_compile_failure_has_error_status(app_fail_compiler):
+    repo = app_fail_compiler.config["REPO"]
+    deck = repo.create_deck("Fail")
+    client = app_fail_compiler.test_client()
+    client.post(f"/api/deck/{deck.id}/add_card", json={"front": "Q", "back": "A"})
+    assert client.post(f"/deck/{deck.id}/generate").status_code >= 400
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-HTTP-003: Cyrillic filename is not encoded as RFC 5987 and breaks a real WSGI server",
+)
+def test_pdf_content_disposition_is_latin1_safe(client, deck_id):
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
+    response = client.post(f"/deck/{deck_id}/generate")
+    disposition = response.headers["Content-Disposition"]
+    disposition.encode("latin-1")
+    assert "filename*=" in disposition

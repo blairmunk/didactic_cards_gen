@@ -7,6 +7,12 @@
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
 </head>
 <body>
+    <div class="breadcrumb">
+        <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a>
+        {% if deck %} → <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}">{{ deck.name }}</a>{% endif %}
+        → Ошибка
+    </div>
+
     <h1>⚠️ Ошибка компиляции LaTeX</h1>
 
     {% if errors %}
@@ -31,7 +37,11 @@
     </details>
     {% endif %}
 
-    <br>
-    <a href="{{ url_for('cards.index') }}" class="btn btn-secondary">← Вернуться к карточкам</a>
+    <div class="buttons" style="margin-top:16px">
+        {% if deck %}
+        <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}" class="btn-secondary" style="text-decoration:none;">← Вернуться к колоде</a>
+        {% endif %}
+        <a href="{{ url_for('cards.decks_list') }}" class="btn-secondary" style="text-decoration:none;">← Все колоды</a>
+    </div>
 </body>
 </html>

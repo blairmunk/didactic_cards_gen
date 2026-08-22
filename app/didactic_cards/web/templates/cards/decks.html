@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Мои колоды</title>
+    <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
+</head>
+<body>
+    <h1>📚 Мои колоды</h1>
+
+    <!-- Создать колоду -->
+    <h2>Создать новую колоду</h2>
+    <div class="card-form">
+        <form method="post" action="{{ url_for('cards.create_deck') }}">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="name">Название:</label>
+                    <input type="text" name="name" id="name" placeholder="Название колоды" required>
+                </div>
+                <div class="form-group">
+                    <label for="description">Описание (необязательно):</label>
+                    <input type="text" name="description" id="description" placeholder="Краткое описание">
+                </div>
+            </div>
+            <button type="submit" class="btn-primary">➕ Создать колоду</button>
+        </form>
+    </div>
+
+    <!-- Список колод -->
+    {% if decks %}
+    <h2>Все колоды</h2>
+    <table class="decks-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Колода</th>
+                <th>Карточек</th>
+                <th>Обновлено</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for deck in decks %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>
+                    <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}" class="deck-name-link">{{ deck.name }}</a>
+                    {% if deck.description %}
+                    <br><span class="deck-description">{{ deck.description }}</span>
+                    {% endif %}
+                </td>
+                <td>{{ deck.card_ids | length }}</td>
+                <td>{{ deck.updated_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                <td class="actions">
+                    <a href="{{ url_for('cards.edit_deck', deck_id=deck.id) }}" title="Редактировать">✏️</a>
+                    <form method="post" action="{{ url_for('cards.clone_deck', deck_id=deck.id) }}">
+                        <button type="submit" class="btn-small btn-secondary" title="Копировать">📋</button>
+                    </form>
+                    <form method="post" action="{{ url_for('cards.delete_deck', deck_id=deck.id) }}"
+                          onsubmit="return confirm('Удалить колоду «{{ deck.name }}»?')">
+                        <button type="submit" class="btn-small btn-danger" title="Удалить">🗑️</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#999; margin-top:30px;">Пока нет колод. Создайте первую! ☝️</p>
+    {% endif %}
+</body>
+</html>
+HTML

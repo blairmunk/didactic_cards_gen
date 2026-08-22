@@ -1,0 +1,59 @@
+"""Capture documentation screenshots from a running local application."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import shutil
+from pathlib import Path
+
+from pyppeteer import launch
+
+
+async def capture(base_url: str, deck_id: str, output_dir: Path) -> None:
+    executable = shutil.which("chromium") or shutil.which("chromium-browser")
+    if not executable:
+        raise RuntimeError("Chromium executable was not found")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    browser = await launch(
+        executablePath=executable,
+        headless=True,
+        args=["--no-sandbox", "--disable-dev-shm-usage"],
+    )
+    try:
+        page = await browser.newPage()
+        await page.setViewport({"width": 1440, "height": 1000, "deviceScaleFactor": 1})
+
+        await page.goto(f"{base_url}/", {"waitUntil": "domcontentloaded"})
+        await page.screenshot({"path": str(output_dir / "decks.png"), "fullPage": True})
+
+        await page.goto(f"{base_url}/deck/{deck_id}", {"waitUntil": "domcontentloaded"})
+        await page.screenshot({"path": str(output_dir / "deck-editor.png"), "fullPage": True})
+
+        await page.click("#btn-view-preview")
+        await asyncio.sleep(1)
+        preview = await page.querySelector("#view-preview")
+        await preview.screenshot({"path": str(output_dir / "card-preview.png")})
+
+        await page.goto(
+            f"{base_url}/deck/{deck_id}/edit_card/0",
+            {"waitUntil": "domcontentloaded"},
+        )
+        await asyncio.sleep(1)
+        await page.screenshot({"path": str(output_dir / "edit-card.png"), "fullPage": True})
+    finally:
+        await browser.close()
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--base-url", default="http://127.0.0.1:5055")
+    parser.add_argument("--deck-id", required=True)
+    parser.add_argument("--output-dir", type=Path, default=Path("docs/images"))
+    args = parser.parse_args()
+    asyncio.run(capture(args.base_url.rstrip("/"), args.deck_id, args.output_dir))
+
+
+if __name__ == "__main__":
+    main()

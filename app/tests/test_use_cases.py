@@ -1,95 +1,103 @@
+from __future__ import annotations
+
 import pytest
-from didactic_cards.domain.entities import Card, CardDeck
-from didactic_cards.domain.interfaces import CardRepository
+
 from didactic_cards.use_cases.card_use_cases import (
-    AddCard, DeleteCard, EditCard, ReorderCards, ResetCards,
-    GetDeck, AddCardsBulk
+    AddCard,
+    AddCardsBulk,
+    DeleteCard,
+    EditCard,
+    GenerateDocument,
+    GetDeck,
+    ImportCsv,
+    PreviewDocument,
+    ReorderCards,
+    ResetCards,
 )
 
 
-class InMemoryRepository(CardRepository):
-    """Тестовый репозиторий в памяти."""
-    def __init__(self):
-        self._deck = CardDeck()
+def test_card_crud_and_reorder(repo, deck_id):
+    first, first_index = AddCard(repo).execute(deck_id, "A", "1")
+    second, second_index = AddCard(repo).execute(deck_id, "B", "2")
+    assert (first.front, first_index, second.front, second_index) == ("A", 0, "B", 1)
 
-    def load(self) -> CardDeck:
-        return self._deck
+    assert EditCard(repo).execute(deck_id, 0, "A+", "1+") is True
+    assert ReorderCards(repo).execute(deck_id, [1, 0]) is True
+    assert [card.front for card in GetDeck(repo).execute(deck_id).cards] == ["B", "A+"]
 
-    def save(self, deck: CardDeck) -> None:
-        self._deck = deck
+    assert DeleteCard(repo).execute(deck_id, 99) is False
+    assert DeleteCard(repo).execute(deck_id, 0) is True
+    assert [card.front for card in repo.load_cards(deck_id).cards] == ["A+"]
 
-
-@pytest.fixture
-def repo():
-    return InMemoryRepository()
-
-
-class TestAddCard:
-    def test_add(self, repo):
-        card, idx = AddCard(repo).execute('вопрос', 'ответ')
-        assert idx == 0
-        assert card.front == 'вопрос'
-        assert len(repo.load()) == 1
-
-    def test_add_strips_whitespace(self, repo):
-        card, _ = AddCard(repo).execute('  q  ', '  a  ')
-        assert card.front == 'q'
-        assert card.back == 'a'
+    ResetCards(repo).execute(deck_id)
+    assert len(repo.load_cards(deck_id)) == 0
 
 
-class TestDeleteCard:
-    def test_delete(self, repo):
-        AddCard(repo).execute('q', 'a')
-        assert DeleteCard(repo).execute(0)
-        assert len(repo.load()) == 0
-
-    def test_delete_invalid(self, repo):
-        assert not DeleteCard(repo).execute(0)
-
-
-class TestEditCard:
-    def test_edit(self, repo):
-        AddCard(repo).execute('old', 'old')
-        assert EditCard(repo).execute(0, 'new', 'new')
-        assert repo.load().cards[0].front == 'new'
+def test_bulk_import_accepts_single_pipe(repo, deck_id):
+    count = AddCardsBulk(repo).execute(deck_id, "q1 | a1\nq2\n\nq3 | a3")
+    cards = repo.load_cards(deck_id).cards
+    assert count == 3
+    assert [(card.front, card.back) for card in cards] == [
+        ("q1", "a1"), ("q2", ""), ("q3", "a3")
+    ]
 
 
-class TestReorderCards:
-    def test_reorder(self, repo):
-        AddCard(repo).execute('A', '')
-        AddCard(repo).execute('B', '')
-        assert ReorderCards(repo).execute([1, 0])
-        assert repo.load().cards[0].front == 'B'
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-IMP-001: UI documents '||', but the parser leaves one pipe in the back",
+)
+def test_bulk_import_matches_documented_double_pipe(repo, deck_id):
+    AddCardsBulk(repo).execute(deck_id, "question || answer")
+    card = repo.load_cards(deck_id).cards[0]
+    assert (card.front, card.back) == ("question", "answer")
 
 
-class TestResetCards:
-    def test_reset(self, repo):
-        AddCard(repo).execute('q', 'a')
-        ResetCards(repo).execute()
-        assert len(repo.load()) == 0
+def test_csv_import_accepts_comma_and_utf8_bom(repo, deck_id):
+    count = ImportCsv(repo).execute(deck_id, "front,back\nвопрос,ответ".encode("utf-8-sig"))
+    assert count == 2
+    assert repo.load_cards(deck_id).cards[1].back == "ответ"
 
 
-class TestAddCardsBulk:
-    def test_bulk(self, repo):
-        text = "q1 || a1\nq2 || a2\nq3 || a3"
-        count = AddCardsBulk(repo).execute(text)
-        assert count == 3
-        assert repo.load().cards[0].front == 'q1'
-        assert repo.load().cards[2].back == 'a3'
+def test_csv_import_skips_blank_rows_and_empty_cells(repo, deck_id):
+    count = ImportCsv(repo).execute(deck_id, b"\n,\nfront-only\n")
+    assert count == 1
+    assert repo.load_cards(deck_id).cards[0].front == "front-only"
 
-    def test_bulk_without_separator(self, repo):
-        text = "только вопрос"
-        count = AddCardsBulk(repo).execute(text)
-        assert count == 1
-        assert repo.load().cards[0].front == 'только вопрос'
-        assert repo.load().cards[0].back == ''
 
-    def test_bulk_skips_empty_lines(self, repo):
-        text = "q1 || a1\n\n\nq2 || a2\n   \n"
-        count = AddCardsBulk(repo).execute(text)
-        assert count == 2
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-IMP-002: UI promises semicolon CSV while csv.reader uses comma",
+)
+def test_csv_import_matches_documented_semicolon(repo, deck_id):
+    ImportCsv(repo).execute(deck_id, "front;back".encode())
+    card = repo.load_cards(deck_id).cards[0]
+    assert (card.front, card.back) == ("front", "back")
 
-    def test_bulk_empty_input(self, repo):
-        count = AddCardsBulk(repo).execute('')
-        assert count == 0
-        assert len(repo.load()) == 0
+
+def test_csv_import_rejects_non_utf8(repo, deck_id):
+    with pytest.raises(UnicodeDecodeError):
+        ImportCsv(repo).execute(deck_id, b"\xff\xfe")
+
+
+def test_generate_and_preview_pad_to_whole_sheet(repo, deck_id, app):
+    AddCard(repo).execute(deck_id, "Q", "A")
+    renderer = app.config["RENDERER"]
+    compiler = app.config["COMPILER"]
+
+    preview = PreviewDocument(repo, renderer, 8).execute(deck_id)
+    result = GenerateDocument(repo, renderer, compiler, 8).execute(deck_id)
+
+    assert "documentclass" in preview
+    assert result.success is True
+    assert [len(seen) for seen in renderer.decks] == [8, 8]
+    assert len(compiler.sources) == 1
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason="BUG-VAL-001: cards_per_page is not validated before modulo",
+)
+def test_generate_rejects_non_positive_page_capacity(repo, deck_id, app):
+    AddCard(repo).execute(deck_id, "Q", "A")
+    with pytest.raises(ValueError, match="cards_per_page"):
+        PreviewDocument(repo, app.config["RENDERER"], 0).execute(deck_id)

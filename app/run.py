@@ -1,38 +1,35 @@
 from flask import Flask
-from config import AppConfig
-from didactic_cards.adapters.session_repository import FlaskSessionRepository
+from config import AppConfig as Config
+from didactic_cards.adapters.json_repository import JsonRepository
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 from didactic_cards.web.blueprint import cards_bp
 
 
-def create_app(config: AppConfig = None) -> Flask:
-    if config is None:
-        config = AppConfig()
-
+def create_app() -> Flask:
+    cfg = Config()
     app = Flask(__name__)
-    app.secret_key = config.secret_key
+    app.secret_key = cfg.secret_key
 
-    app.config['REPO'] = FlaskSessionRepository()
+    repo = JsonRepository(data_dir='data')
 
+    layout = cfg.layout
+    app.config['REPO'] = repo
     app.config['RENDERER'] = LatexRenderer(
-        card_width_cm=config.layout.card_width_cm,
-        card_height_cm=config.layout.card_height_cm,
-        cards_per_row=config.layout.cards_per_row,
-        rows_per_page=config.layout.rows_per_page,
-        fbox_sep_pt=config.layout.fbox_sep_pt,
-        back_border=config.layout.back_border,
+        card_width_cm=layout.card_width_cm,
+        card_height_cm=layout.card_height_cm,
+        cards_per_row=layout.cards_per_row,
+        rows_per_page=layout.rows_per_page,
+        fbox_sep_pt=layout.fbox_sep_pt,
+        back_border=layout.back_border,
     )
-
     app.config['COMPILER'] = PdfLatexCompiler(
-        pdflatex_path=config.pdflatex_path,
-        timeout=config.pdflatex_timeout,
+        pdflatex_path=cfg.pdflatex_path,
+        timeout=cfg.pdflatex_timeout,
     )
+    app.config['CARDS_PER_PAGE'] = layout.cards_per_page
 
-    app.config['CARDS_PER_PAGE'] = config.layout.cards_per_page
-
-    app.register_blueprint(cards_bp, url_prefix='/')
-
+    app.register_blueprint(cards_bp)
     return app
 
 

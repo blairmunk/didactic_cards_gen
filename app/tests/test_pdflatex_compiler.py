@@ -1,6 +1,7 @@
 """Тесты PdfLatexCompiler с mock subprocess."""
 
 import os
+import pytest
 from unittest.mock import patch, MagicMock
 from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 
@@ -62,3 +63,36 @@ class TestPdfLatexCompiler:
 
         assert result.success is False
         assert 'not found' in result.log
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason='BUG-PDF-001: a partial PDF is reported as success even when pdflatex exits non-zero',
+    )
+    def test_nonzero_exit_code_is_failure_even_if_partial_pdf_exists(self):
+        compiler = PdfLatexCompiler()
+
+        def fake_run(cmd, **kwargs):
+            output_dir = cmd[cmd.index('-output-directory') + 1]
+            with open(os.path.join(output_dir, 'document.pdf'), 'wb') as stream:
+                stream.write(b'%PDF-partial')
+            return MagicMock(returncode=1, stdout=b'failure', stderr=b'failure')
+
+        with patch('didactic_cards.adapters.pdflatex_compiler.subprocess.run', side_effect=fake_run):
+            result = compiler.compile('broken')
+        assert result.success is False
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason='BUG-SEC-002: compiler does not explicitly disable TeX shell escape',
+    )
+    def test_shell_escape_is_explicitly_disabled(self):
+        compiler = PdfLatexCompiler()
+        seen = {}
+
+        def fake_run(cmd, **kwargs):
+            seen['cmd'] = cmd
+            return MagicMock(returncode=1)
+
+        with patch('didactic_cards.adapters.pdflatex_compiler.subprocess.run', side_effect=fake_run):
+            compiler.compile('source')
+        assert '-no-shell-escape' in seen['cmd']

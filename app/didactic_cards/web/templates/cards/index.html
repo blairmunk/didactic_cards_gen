@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Дидактические карточки</title>
+    <title>{{ deck.name }} — Карточки</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
     <script>
     window.MathJax = {
@@ -16,8 +16,15 @@
     </script>
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
 </head>
-<body>
-    <h1>📇 Генератор дидактических карточек</h1>
+<body data-deck-id="{{ deck.id }}" data-cards-per-page="{{ cards_per_page }}">
+    <div class="breadcrumb">
+        <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> → {{ deck.name }}
+    </div>
+
+    <h1>📇 {{ deck.name }}</h1>
+    {% if deck.description %}
+    <p style="color:#777;">{{ deck.description }}</p>
+    {% endif %}
 
     {% if error %}
     <div class="error-message">{{ error }}</div>
@@ -25,23 +32,17 @@
 
     <div class="success-message" id="success-msg"></div>
 
-    <!-- ── Информационная панель ── -->
+    <!-- Информационная панель -->
     <div class="info-panel">
-        <strong>Карточек добавлено:</strong> <span id="cards-count">{{ cards_count }}</span>
+        <strong>Карточек:</strong> <span id="cards-count">{{ cards_count }}</span>
         &nbsp;|&nbsp;
         <strong>Листов A4:</strong> <span id="pages-count">{{ ((cards_count + cards_per_page - 1) // cards_per_page) if cards_count > 0 else 0 }}</span>
         &nbsp;|&nbsp;
         <strong>Пустых ячеек:</strong>
-        <span id="empty-count">
-            {% if cards_count > 0 %}
-                {{ ((((cards_count + cards_per_page - 1) // cards_per_page) * cards_per_page) - cards_count) }}
-            {% else %}
-                0
-            {% endif %}
-        </span>
+        <span id="empty-count">{% if cards_count > 0 %}{{ ((((cards_count + cards_per_page - 1) // cards_per_page) * cards_per_page) - cards_count) }}{% else %}0{% endif %}</span>
     </div>
 
-    <!-- ── Добавление одной карточки ── -->
+    <!-- Добавление одной карточки -->
     <h2>Добавить карточку</h2>
     <div class="card-form">
         <form id="single-card-form">
@@ -59,23 +60,22 @@
         </form>
     </div>
 
-    <!-- ── Пакетное добавление ── -->
+    <!-- Пакетное добавление -->
     <h2>Пакетное добавление</h2>
     <div class="card-form">
-        <form action="{{ url_for('cards.add_cards_bulk') }}" method="post">
+        <form action="{{ url_for('cards.add_cards_bulk', deck_id=deck.id) }}" method="post">
             <label for="bulk">Формат: <code>лицевая || оборотная</code>, каждая с новой строки:</label>
             <textarea name="bulk" id="bulk" rows="8"
-                      placeholder="Найти ускорение тела массой 5кг || a = F/m = 10/5 = 2 м/с²
-Чему равна сила тяжести тела 3кг || F = mg = 3·10 = 30 Н"></textarea>
+                      placeholder="Найти ускорение тела массой 5кг || a = F/m = 10/5 = 2 м/с²&#10;Чему равна сила тяжести тела 3кг || F = mg = 3·10 = 30 Н"></textarea>
             <br><br>
             <button type="submit" class="btn-primary">➕ Добавить все</button>
         </form>
     </div>
 
-    <!-- ── Импорт CSV ── -->
+    <!-- Импорт CSV -->
     <h2>Импорт из CSV</h2>
     <div class="card-form">
-        <form action="{{ url_for('cards.import_csv') }}" method="post" enctype="multipart/form-data">
+        <form action="{{ url_for('cards.import_csv', deck_id=deck.id) }}" method="post" enctype="multipart/form-data">
             <label for="csv_file">Файл CSV (<code>лицевая;оборотная</code>):</label>
             <input type="file" name="csv_file" id="csv_file" accept=".csv">
             <br><br>
@@ -83,7 +83,7 @@
         </form>
     </div>
 
-    <!-- ── Карточки ── -->
+    <!-- Карточки -->
     {% if cards %}
     <h2>Добавленные карточки</h2>
 
@@ -92,7 +92,7 @@
         <button id="btn-view-preview" onclick="switchView('preview')">🃏 Превью</button>
     </div>
 
-    <!-- Режим: таблица -->
+    <!-- Таблица -->
     <div id="view-table">
         <table class="cards-table" id="cards-table">
             <thead>
@@ -112,7 +112,7 @@
                     <td class="card-text">{{ card.front }}</td>
                     <td class="card-text">{{ card.back }}</td>
                     <td class="actions">
-                        <a href="{{ url_for('cards.edit_card', index=loop.index0) }}" title="Редактировать">✏️</a>
+                        <a href="{{ url_for('cards.edit_card', deck_id=deck.id, index=loop.index0) }}" title="Редактировать">✏️</a>
                         <a href="#" class="delete-btn" data-index="{{ loop.index0 }}" title="Удалить">🗑️</a>
                     </td>
                 </tr>
@@ -121,14 +121,14 @@
         </table>
     </div>
 
-    <!-- Режим: визуальный превью -->
+    <!-- Превью -->
     <div id="view-preview" style="display:none">
         <div class="preview-grid" id="preview-grid">
             {% for card in cards %}
             <div class="preview-card" data-index="{{ loop.index0 }}">
                 <span class="card-number">#{{ loop.index }}</span>
                 <span class="card-actions">
-                    <a href="{{ url_for('cards.edit_card', index=loop.index0) }}" title="Редактировать">✏️</a>
+                    <a href="{{ url_for('cards.edit_card', deck_id=deck.id, index=loop.index0) }}" title="Редактировать">✏️</a>
                     <a href="#" class="delete-btn" data-index="{{ loop.index0 }}" title="Удалить">🗑️</a>
                 </span>
                 <div class="preview-card-inner">
@@ -147,378 +147,23 @@
     </div>
     {% endif %}
 
-    <!-- ── Кнопки генерации ── -->
+    <!-- Генерация -->
     <div id="generate-buttons" {% if not cards %}style="display:none"{% endif %}>
         <h2>Генерация</h2>
         <div class="buttons">
-            <form action="{{ url_for('cards.preview_latex') }}" method="post" style="display:inline">
+            <form action="{{ url_for('cards.preview_latex', deck_id=deck.id) }}" method="post" style="display:inline">
                 <button type="submit" class="btn-secondary">👁 Предпросмотр LaTeX</button>
             </form>
-            <form action="{{ url_for('cards.generate') }}" method="post" style="display:inline">
+            <form action="{{ url_for('cards.generate', deck_id=deck.id) }}" method="post" style="display:inline">
                 <button type="submit" class="btn-primary">📄 Сгенерировать PDF</button>
             </form>
-            <form action="{{ url_for('cards.reset') }}" method="post" style="display:inline">
+            <form action="{{ url_for('cards.reset', deck_id=deck.id) }}" method="post" style="display:inline">
                 <button type="submit" class="btn-danger"
                         onclick="return confirm('Удалить все карточки?')">🗑 Очистить всё</button>
             </form>
         </div>
     </div>
 
-    <!-- ── JavaScript ── -->
-    <script>
-        const API = {
-            addCard:    '{{ url_for("cards.api_add_card") }}',
-            deleteCard: '{{ url_for("cards.api_delete_card", index=999) }}'.replace('999', ''),
-            reorder:    '{{ url_for("cards.api_reorder") }}',
-            editPage:   '{{ url_for("cards.edit_card", index=999) }}'.replace('999', ''),
-        };
-        const CARDS_PER_PAGE = {{ cards_per_page }};
-
-        // ── Переключение режимов ──
-
-        let currentView = 'table';
-        let mathjaxRendered = false;
-
-        function switchView(view) {
-            currentView = view;
-            document.getElementById('view-table').style.display   = view === 'table'   ? '' : 'none';
-            document.getElementById('view-preview').style.display = view === 'preview' ? '' : 'none';
-            document.getElementById('btn-view-table').classList.toggle('active',   view === 'table');
-            document.getElementById('btn-view-preview').classList.toggle('active', view === 'preview');
-
-            if (view === 'preview' && !mathjaxRendered) {
-                mathjaxRendered = true;
-                if (window.MathJax && MathJax.typesetPromise) {
-                    MathJax.typesetPromise([document.getElementById('preview-grid')]);
-                }
-            }
-        }
-
-        // ── Утилиты ──
-
-        function showSuccess(text) {
-            const el = document.getElementById('success-msg');
-            el.textContent = text;
-            el.style.display = 'block';
-            setTimeout(() => { el.style.display = 'none'; }, 2500);
-        }
-
-        function updateCounters(count) {
-            document.getElementById('cards-count').textContent = count;
-            const pages = count > 0 ? Math.ceil(count / CARDS_PER_PAGE) : 0;
-            document.getElementById('pages-count').textContent = pages;
-            document.getElementById('empty-count').textContent =
-                count > 0 ? (pages * CARDS_PER_PAGE - count) : 0;
-            document.getElementById('generate-buttons').style.display =
-                count > 0 ? '' : 'none';
-        }
-
-        function renumberRows() {
-            const rows = document.querySelectorAll('#cards-tbody tr');
-            rows.forEach((row, i) => {
-                row.dataset.index = i;
-                row.querySelector('.row-number').textContent = i + 1;
-                const editLink = row.querySelector('a[href*="edit_card"]');
-                if (editLink) editLink.href = API.editPage + i;
-                const delBtn = row.querySelector('.delete-btn');
-                if (delBtn) delBtn.dataset.index = i;
-            });
-        }
-
-        function renumberPreviews() {
-            const cards = document.querySelectorAll('#preview-grid .preview-card');
-            cards.forEach((card, i) => {
-                card.dataset.index = i;
-                card.querySelector('.card-number').textContent = '#' + (i + 1);
-                const editLink = card.querySelector('a[href*="edit_card"]');
-                if (editLink) editLink.href = API.editPage + i;
-                const delBtn = card.querySelector('.delete-btn');
-                if (delBtn) delBtn.dataset.index = i;
-            });
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        // ── Синхронное удаление из обоих режимов ──
-
-        function removeCardFromPreview(index) {
-            const card = document.querySelector(`#preview-grid .preview-card[data-index="${index}"]`);
-            if (card) card.remove();
-            renumberPreviews();
-        }
-
-        function addCardToPreview(index, cardData) {
-            let grid = document.getElementById('preview-grid');
-            if (!grid) {
-                const container = document.getElementById('view-preview');
-                grid = document.createElement('div');
-                grid.className = 'preview-grid';
-                grid.id = 'preview-grid';
-                container.appendChild(grid);
-            }
-
-            const div = document.createElement('div');
-            div.className = 'preview-card';
-            div.dataset.index = index;
-            div.innerHTML = `
-                <span class="card-number">#${index + 1}</span>
-                <span class="card-actions">
-                    <a href="${API.editPage}${index}" title="Редактировать">✏️</a>
-                    <a href="#" class="delete-btn" data-index="${index}" title="Удалить">🗑️</a>
-                </span>
-                <div class="preview-card-inner">
-                    <div class="preview-side preview-front">
-                        <div class="preview-content">${escapeHtml(cardData.front)}</div>
-                        <span class="preview-side-label">задание</span>
-                    </div>
-                    <div class="preview-side preview-back">
-                        <div class="preview-content">${escapeHtml(cardData.back)}</div>
-                        <span class="preview-side-label">решение</span>
-                    </div>
-                </div>
-            `;
-            grid.appendChild(div);
-            attachDeleteEvent(div.querySelector('.delete-btn'));
-
-            // Рендерим MathJax для новой карточки
-            if (mathjaxRendered && window.MathJax && MathJax.typesetPromise) {
-                MathJax.typesetPromise([div]);
-            }
-        }
-
-        // ── AJAX: добавление карточки ──
-
-        document.getElementById('single-card-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const frontEl = document.getElementById('front');
-            const backEl = document.getElementById('back');
-            const front = frontEl.value.trim();
-            const back = backEl.value.trim();
-
-            if (!front && !back) {
-                alert('Заполните хотя бы одно поле');
-                return;
-            }
-
-            try {
-                const resp = await fetch(API.addCard, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ front, back })
-                });
-                const data = await resp.json();
-
-                if (!resp.ok) {
-                    alert(data.error || 'Ошибка');
-                    return;
-                }
-
-                addCardRow(data.index, data.card);
-                addCardToPreview(data.index, data.card);
-                updateCounters(data.cards_count);
-                showSuccess('Карточка добавлена!');
-
-                frontEl.value = '';
-                backEl.value = '';
-                frontEl.focus();
-
-                // Показать блоки если это первая карточка
-                ensureViewSectionsExist();
-
-            } catch (err) {
-                console.error(err);
-                alert('Ошибка сети');
-            }
-        });
-
-        function ensureViewSectionsExist() {
-            // Если секции переключения ещё нет — перезагружаем
-            // (проще, чем создавать весь DOM)
-            if (!document.getElementById('view-table')) {
-                location.reload();
-            }
-        }
-
-        function addCardRow(index, card) {
-            let tbody = document.getElementById('cards-tbody');
-
-            if (!tbody) {
-                // Первая карточка — перезагружаем для создания всей структуры
-                location.reload();
-                return;
-            }
-
-            const tr = document.createElement('tr');
-            tr.draggable = true;
-            tr.dataset.index = index;
-            tr.innerHTML = `
-                <td class="drag-handle" title="Перетащите для сортировки">⠿</td>
-                <td class="row-number">${index + 1}</td>
-                <td class="card-text">${escapeHtml(card.front)}</td>
-                <td class="card-text">${escapeHtml(card.back)}</td>
-                <td class="actions">
-                    <a href="${API.editPage}${index}" title="Редактировать">✏️</a>
-                    <a href="#" class="delete-btn" data-index="${index}" title="Удалить">🗑️</a>
-                </td>
-            `;
-            tbody.appendChild(tr);
-            attachRowDragEvents(tr);
-            attachDeleteEvent(tr.querySelector('.delete-btn'));
-        }
-
-        // ── AJAX: удаление карточки ──
-
-        function attachDeleteEvent(btn) {
-            if (!btn) return;
-            btn.addEventListener('click', async (e) => {
-                e.preventDefault();
-                const idx = parseInt(btn.dataset.index);
-                if (!confirm(`Удалить карточку №${idx + 1}?`)) return;
-
-                try {
-                    const resp = await fetch(API.deleteCard + idx, {
-                        method: 'DELETE'
-                    });
-                    const data = await resp.json();
-
-                    if (!resp.ok) {
-                        alert(data.error || 'Ошибка');
-                        return;
-                    }
-
-                    // Удаляем из таблицы
-                    const row = document.querySelector(`#cards-tbody tr[data-index="${idx}"]`);
-                    if (row) row.remove();
-                    renumberRows();
-
-                    // Удаляем из превью
-                    removeCardFromPreview(idx);
-
-                    updateCounters(data.cards_count);
-                    showSuccess('Карточка удалена');
-
-                } catch (err) {
-                    console.error(err);
-                    alert('Ошибка сети');
-                }
-            });
-        }
-
-        document.querySelectorAll('.delete-btn').forEach(attachDeleteEvent);
-
-        // ── Drag & Drop ──
-
-        let dragSrcRow = null;
-
-        function attachRowDragEvents(row) {
-            row.addEventListener('dragstart', (e) => {
-                dragSrcRow = row;
-                row.classList.add('dragging');
-                e.dataTransfer.effectAllowed = 'move';
-                e.dataTransfer.setData('text/plain', row.dataset.index);
-            });
-
-            row.addEventListener('dragend', () => {
-                row.classList.remove('dragging');
-                document.querySelectorAll('#cards-tbody tr').forEach(r => {
-                    r.classList.remove('drag-over');
-                });
-            });
-
-            row.addEventListener('dragover', (e) => {
-                e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                if (row !== dragSrcRow) {
-                    row.classList.add('drag-over');
-                }
-            });
-
-            row.addEventListener('dragleave', () => {
-                row.classList.remove('drag-over');
-            });
-
-            row.addEventListener('drop', async (e) => {
-                e.preventDefault();
-                row.classList.remove('drag-over');
-
-                if (dragSrcRow === row) return;
-
-                const tbody = document.getElementById('cards-tbody');
-                const rows = Array.from(tbody.querySelectorAll('tr'));
-                const fromIdx = rows.indexOf(dragSrcRow);
-                const toIdx = rows.indexOf(row);
-
-                if (fromIdx < toIdx) {
-                    tbody.insertBefore(dragSrcRow, row.nextSibling);
-                } else {
-                    tbody.insertBefore(dragSrcRow, row);
-                }
-
-                renumberRows();
-
-                const newRows = Array.from(tbody.querySelectorAll('tr'));
-                const order = newRows.map(r => parseInt(r.dataset.index));
-
-                try {
-                    const resp = await fetch(API.reorder, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ order })
-                    });
-                    const data = await resp.json();
-
-                    if (resp.ok) {
-                        newRows.forEach((r, i) => { r.dataset.index = i; });
-                        renumberRows();
-                        // Перестраиваем превью в том же порядке
-                        rebuildPreviewOrder();
-                        showSuccess('Порядок сохранён');
-                    } else {
-                        alert(data.error || 'Ошибка сортировки');
-                        location.reload();
-                    }
-                } catch (err) {
-                    console.error(err);
-                    location.reload();
-                }
-            });
-        }
-
-        function rebuildPreviewOrder() {
-            const grid = document.getElementById('preview-grid');
-            if (!grid) return;
-            const tbody = document.getElementById('cards-tbody');
-            if (!tbody) return;
-
-            const rows = Array.from(tbody.querySelectorAll('tr'));
-            const previews = Array.from(grid.querySelectorAll('.preview-card'));
-
-            // Собираем превью по текущему data-index
-            const previewMap = {};
-            previews.forEach(p => { previewMap[p.dataset.index] = p; });
-
-            // Пересобираем в порядке таблицы
-            rows.forEach((row, i) => {
-                const oldIdx = row.dataset.index;
-                const preview = previewMap[oldIdx];
-                if (preview) {
-                    grid.appendChild(preview);
-                }
-            });
-
-            renumberPreviews();
-        }
-
-        function initDragAndDrop() {
-            document.querySelectorAll('#cards-tbody tr').forEach(attachRowDragEvents);
-        }
-
-        initDragAndDrop();
-    </script>
+    <script src="{{ url_for('cards.static', filename='cards/deck.js') }}"></script>
 </body>
 </html>

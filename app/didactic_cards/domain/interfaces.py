@@ -15,40 +15,24 @@ class CompileResult:
 
 
 class CardRepository(ABC):
+    """Легаси-интерфейс для обратной совместимости."""
 
     @abstractmethod
-    def load(self) -> CardDeck:
+    def load(self, deck_id: str = 'default') -> CardDeck:
         ...
 
     @abstractmethod
-    def save(self, deck: CardDeck) -> None:
+    def save(self, deck: CardDeck, deck_id: str = 'default') -> None:
         ...
 
 
-class StorageBackend(ABC):
+class DeckRepository(ABC):
+    """Интерфейс для множественных колод с персистентным хранением."""
+
+    # ─── Колоды ───
 
     @abstractmethod
-    def load_all(self) -> dict:
-        ...
-
-    @abstractmethod
-    def save_all(self, data: dict) -> None:
-        ...
-
-    @abstractmethod
-    def get_card(self, card_id: str) -> Optional[Card]:
-        ...
-
-    @abstractmethod
-    def save_card(self, card: Card) -> None:
-        ...
-
-    @abstractmethod
-    def delete_card(self, card_id: str) -> bool:
-        ...
-
-    @abstractmethod
-    def list_cards(self) -> list[Card]:
+    def list_decks(self) -> list[Deck]:
         ...
 
     @abstractmethod
@@ -56,7 +40,11 @@ class StorageBackend(ABC):
         ...
 
     @abstractmethod
-    def save_deck(self, deck: Deck) -> None:
+    def create_deck(self, name: str, description: str = '') -> Deck:
+        ...
+
+    @abstractmethod
+    def update_deck(self, deck_id: str, name: str, description: str = '') -> Optional[Deck]:
         ...
 
     @abstractmethod
@@ -64,7 +52,17 @@ class StorageBackend(ABC):
         ...
 
     @abstractmethod
-    def list_decks(self) -> list[Deck]:
+    def clone_deck(self, deck_id: str) -> Optional[Deck]:
+        ...
+
+    # ─── Карточки внутри колоды ───
+
+    @abstractmethod
+    def load_cards(self, deck_id: str) -> CardDeck:
+        ...
+
+    @abstractmethod
+    def save_cards(self, deck_id: str, card_deck: CardDeck) -> None:
         ...
 
 

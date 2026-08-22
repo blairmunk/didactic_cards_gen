@@ -73,6 +73,9 @@ class Deck:
     def __len__(self) -> int:
         return len(self.card_ids)
 
+    def __bool__(self) -> bool:
+        return True
+
     def add_card_id(self, card_id: str) -> int:
         self.card_ids.append(card_id)
         self.updated_at = _now()

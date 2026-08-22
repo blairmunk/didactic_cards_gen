@@ -1,0 +1,26 @@
+[
+  {
+    "id": "e187ba2a-93fe-45ea-9fbf-71017cc400e3",
+    "parent_id": null,
+    "front": "asdf",
+    "back": "",
+    "created_at": "2026-03-15T15:42:49.318172+00:00",
+    "updated_at": "2026-03-15T15:42:49.318176+00:00"
+  },
+  {
+    "id": "85490a55-92de-484f-aead-c1b48ea0143b",
+    "parent_id": null,
+    "front": "asdfasdf",
+    "back": "asdfasdf",
+    "created_at": "2026-03-15T15:42:54.989823+00:00",
+    "updated_at": "2026-03-15T15:42:54.989829+00:00"
+  },
+  {
+    "id": "f77eb715-0eb4-43e7-977b-f917c131b7f7",
+    "parent_id": null,
+    "front": "asdfasd",
+    "back": "asdfadsf",
+    "created_at": "2026-03-15T15:42:57.227048+00:00",
+    "updated_at": "2026-03-15T15:42:57.227052+00:00"
+  }
+]

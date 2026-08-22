@@ -1,54 +1,52 @@
-import os
+from __future__ import annotations
+
 import pytest
-
-from didactic_cards.domain.interfaces import CompileResult, PdfCompiler, DocumentRenderer
-from didactic_cards.domain.entities import CardDeck
-from didactic_cards.web.blueprint import cards_bp
-from didactic_cards.adapters.session_repository import FlaskSessionRepository
-
 from flask import Flask
+
+from didactic_cards.adapters.json_repository import JsonRepository
+from didactic_cards.domain.entities import CardDeck
+from didactic_cards.domain.interfaces import CompileResult, DocumentRenderer, PdfCompiler
+from didactic_cards.web.blueprint import cards_bp
 
 
 class FakeCompiler(PdfCompiler):
-    def __init__(self, success=True):
-        self._success = success
+    def __init__(self, success: bool = True):
+        self.success = success
+        self.sources: list[str] = []
 
     def compile(self, latex_source: str) -> CompileResult:
-        if self._success:
-            return CompileResult(success=True, pdf_data=b'%PDF-fake', log='')
-        return CompileResult(success=False, pdf_data=b'', log='pdflatex error')
+        self.sources.append(latex_source)
+        if self.success:
+            return CompileResult(True, b"%PDF-1.7 fake", "")
+        return CompileResult(False, b"", "pdflatex error")
 
 
 class FakeRenderer(DocumentRenderer):
+    def __init__(self):
+        self.decks: list[CardDeck] = []
+
     def render(self, deck: CardDeck) -> str:
-        return '\\documentclass{article}\\begin{document}fake\\end{document}'
+        self.decks.append(deck)
+        return r"\documentclass{article}\begin{document}fake\end{document}"
 
 
-def _create_test_app(compiler_success=True):
-    """Создаёт Flask app с правильными путями к шаблонам blueprint."""
-    # Корень пакета didactic_cards/web — там лежат templates/
-    web_dir = os.path.join(os.path.dirname(__file__),
-                           '..', 'didactic_cards', 'web')
-    web_dir = os.path.abspath(web_dir)
-
-    app = Flask(__name__,
-                template_folder=os.path.join(web_dir, 'templates'))
-    app.secret_key = 'test-secret'
-    app.config['TESTING'] = True
-
-    app.config['REPO'] = FlaskSessionRepository()
-    app.config['RENDERER'] = FakeRenderer()
-    app.config['COMPILER'] = FakeCompiler(success=compiler_success)
-    app.config['CARDS_PER_PAGE'] = 8
-
-    app.register_blueprint(cards_bp, url_prefix='/')
-
+def make_test_app(tmp_path, *, compiler_success: bool = True) -> Flask:
+    app = Flask(__name__)
+    app.config.update(
+        TESTING=True,
+        SECRET_KEY="test-secret",
+        REPO=JsonRepository(str(tmp_path / "data")),
+        RENDERER=FakeRenderer(),
+        COMPILER=FakeCompiler(compiler_success),
+        CARDS_PER_PAGE=8,
+    )
+    app.register_blueprint(cards_bp)
     return app
 
 
 @pytest.fixture
-def app():
-    return _create_test_app(compiler_success=True)
+def app(tmp_path):
+    return make_test_app(tmp_path)
 
 
 @pytest.fixture
@@ -57,5 +55,20 @@ def client(app):
 
 
 @pytest.fixture
-def app_fail_compiler():
-    return _create_test_app(compiler_success=False)
+def repo(app) -> JsonRepository:
+    return app.config["REPO"]
+
+
+@pytest.fixture
+def deck(repo):
+    return repo.create_deck("Физика", "Тестовая колода")
+
+
+@pytest.fixture
+def deck_id(deck) -> str:
+    return deck.id
+
+
+@pytest.fixture
+def app_fail_compiler(tmp_path):
+    return make_test_app(tmp_path, compiler_success=False)
