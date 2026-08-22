@@ -33,7 +33,7 @@
   - [x] Corrupt/missing/invalid JSON останавливает запись и даёт безопасную HTTP-ошибку.
   - [x] Устранены stale `card_ids`, orphan writes и потеря ancestry при clone.
   - [x] Добавлены schema version 1, read-only startup integrity report и управляемое CLI-восстановление backup с сохранением `.broken-*`.
-  - [ ] Мигрировать JSON в SQLite с FK, WAL, транзакциями и одноразовым backup/import.
+  - [x] Активное хранилище мигрировано в SQLite schema 1 с FK, WAL, транзакциями и одноразовым backup/import legacy JSON.
   - [ ] Перевести карточные операции с индексов на UUID + optimistic version.
 - [ ] Этап 4: импорт и web UX.
 - [ ] Этап 5: функциональное развитие.
@@ -60,7 +60,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 198 проходящих тестов и 8 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 99.10% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 210 проходящих тестов и 8 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 98.76% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -112,7 +112,7 @@
 - `MAX_CONTENT_LENGTH=2 MiB` и `max_cards=200` реализованы; отдельные ограничения длины стороны/имени ещё нужны.
 - Нет structured logging, healthcheck (`pdflatex`/write access), error IDs и метрик времени компиляции.
 - Нет backup/restore/export всей колоды и schema version/migrations.
-- JSON read-modify-write не масштабируется и теряет обновления при параллельных запросах. После стабилизации перейти на SQLite с transactions/WAL.
+- ✅ Активный backend переведён с JSON read-modify-write на SQLite transactions/WAL; thread/process stress tests не теряют обновления. Legacy JSON оставлен read-only источником миграции и recovery.
 - Dev entrypoint всегда запускается с `debug=True`; production должен использовать WSGI server и env-controlled debug.
 - Secret берётся из `DIDACTIC_CARDS_SECRET_KEY`, без env генерируется случайный для локального запуска; production должен задавать стабильное значение.
 - UI: emoji-only actions без accessible names, слабая keyboard DnD, таблица не имеет mobile overflow, focus/disabled/loading states неполны.
@@ -167,7 +167,7 @@
 1. [x] Исправить текущий JSON: absolute path, atomic replace, lock, backup, безопасный отказ при corruption, управляемое recovery и schema version.
 2. [x] Проверять точное равенство `card_ids` и целостность при каждой транзакции.
 3. [x] Добавить startup integrity scan: missing/orphan/duplicate IDs, invalid timestamps, recovery report без автоматической потери данных.
-4. [ ] Перейти на SQLite: `decks`, `cards`, `deck_cards(position)`, foreign keys, transactions, migrations.
+4. [x] Перейти на SQLite: `decks`, `cards`, `deck_cards(position)`, foreign keys, transactions, schema version и одноразовая миграция JSON с backup. Реальная рабочая база сверена 4/4 колоды и 8/8 карточек; legacy `card-id-mismatch` перенесён как warning без изменения источника.
 5. [ ] Все UI/API операции адресовать card UUID + optimistic version, а не индексом.
 
 Выход: concurrent add/edit/reorder stress test без lost updates; kill/fault injection не портит последнюю подтверждённую версию; старые JSON мигрируются один раз с backup.

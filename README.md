@@ -1,6 +1,6 @@
 # Didactic Cards Generator
 
-Локальное Flask-приложение для создания колод дидактических карточек и сборки A4 PDF через LaTeX. У карточки есть лицевая сторона (задание) и оборотная сторона (ответ); данные сохраняются в JSON, поддерживаются пакетный ввод, CSV, формулы, сортировка, клонирование колод и PDF на 8 карточек на лист.
+Локальное Flask-приложение для создания колод дидактических карточек и сборки A4 PDF через LaTeX. У карточки есть лицевая сторона (задание) и оборотная сторона (ответ); данные сохраняются транзакционно в SQLite, поддерживаются пакетный ввод, CSV, формулы, сортировка, клонирование колод и PDF на 8 карточек на лист.
 
 > Статус после начала remediation 22.08.2026: программный порядок duplex-страниц исправлен (`front-1, back-1, front-2, back-2`), добавлены long-edge/short-edge transforms, X/Y calibration offsets и registration marks, а заданный размер проверяется по векторной геометрии PDF. Формулы ограничены безопасным учебным подмножеством TeX, русский filename отдаётся по RFC 5987. Гарантия точности всё ещё требует физического прогона; актуальный прогресс — в [плане ревизии](docs/REMEDIATION_PLAN.md).
 
@@ -37,7 +37,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Подтверждённые дефекты зафиксированы строгими `xfail`-тестами, а их актуальный статус отмечается непосредственно в [плане ревизии](docs/REMEDIATION_PLAN.md). Текущая база — 198 проходящих тестов, 8 строгих `xfail`, branch coverage 99.10%. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с порогом branch coverage 98%.
+Подтверждённые дефекты зафиксированы строгими `xfail`-тестами, а их актуальный статус отмечается непосредственно в [плане ревизии](docs/REMEDIATION_PLAN.md). Текущая база — 210 проходящих тестов, 8 строгих `xfail`, branch coverage 98.76%. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с порогом branch coverage 98%.
 
 Проверить целостность хранилища без автоматического исправления:
 
@@ -45,7 +45,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 python scripts/check_storage.py
 ```
 
-Команда печатает JSON-отчёт и возвращает код `1`, если найдены missing/orphan/duplicate ID, неверные timestamps, рассинхронизация метаданных, повреждение файлов или неподдерживаемая версия схемы. Порядок контролируемого восстановления описан в руководстве.
+Команда автоматически проверяет активный `cards.sqlite3` через SQLite integrity/foreign-key checks и возвращает код `1` при проблеме. До первой миграции она проверяет legacy JSON: missing/orphan/duplicate ID, timestamps, метаданные и версию схемы. Порядок контролируемого восстановления JSON описан в руководстве.
 
 ## Структура
 
@@ -56,9 +56,9 @@ app/
   didactic_cards/
     domain/                  # Card, Deck, CardDeck и интерфейсы
     use_cases/               # операции над колодами и документом
-    adapters/                # JSON, LaTeX, pdflatex/xelatex
+    adapters/                # SQLite, legacy JSON/recovery, LaTeX, compilers
     web/                     # routes, шаблоны, CSS и JavaScript
-  data/                      # versioned JSON, lock, backup и recovery-файлы
+  data/                      # cards.sqlite3 и сохранённый legacy JSON
   tests/                     # unit, web, integration и xfail-контракты
 docs/
   USER_AND_TECHNICAL_GUIDE.md

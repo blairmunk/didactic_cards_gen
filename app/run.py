@@ -2,9 +2,9 @@ from pathlib import Path
 
 from flask import Flask
 from config import AppConfig as Config
-from didactic_cards.adapters.json_repository import JsonRepository
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
+from didactic_cards.adapters.sqlite_repository import SqliteRepository
 from didactic_cards.web.blueprint import cards_bp
 
 
@@ -21,7 +21,7 @@ def create_app(
     app = Flask(__name__)
     app.secret_key = cfg.secret_key
 
-    repo = repo if repo is not None else JsonRepository(
+    repo = repo if repo is not None else SqliteRepository(
         data_dir=data_dir if data_dir is not None else cfg.data_dir
     )
 

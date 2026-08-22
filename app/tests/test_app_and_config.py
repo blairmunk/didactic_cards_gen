@@ -24,9 +24,9 @@ def test_create_app_registers_required_services(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path / 'data')
     assert {'REPO', 'RENDERER', 'COMPILER', 'CARDS_PER_PAGE'} <= app.config.keys()
     assert app.url_map.bind('').match('/')[0] == 'cards.decks_list'
-    assert app.config['REPO'].decks_file == (tmp_path / 'data' / 'decks.json')
-    assert app.config['REPO'].decks_file.exists()
-    assert app.config['INTEGRITY_REPORT'].healthy
+    assert app.config['REPO'].database_file == (tmp_path / 'data' / 'cards.sqlite3')
+    assert app.config['REPO'].database_file.exists()
+    assert app.config['REPO'].integrity_check() == []
 
 
 def test_data_location_is_independent_of_current_working_directory(tmp_path, monkeypatch):
@@ -38,9 +38,9 @@ def test_data_location_is_independent_of_current_working_directory(tmp_path, mon
     monkeypatch.setenv('DIDACTIC_CARDS_DATA_DIR', str(stable_data))
 
     monkeypatch.chdir(first_cwd)
-    first_path = create_app().config['REPO'].decks_file.resolve()
+    first_path = create_app().config['REPO'].database_file.resolve()
     monkeypatch.chdir(second_cwd)
-    second_path = create_app().config['REPO'].decks_file.resolve()
+    second_path = create_app().config['REPO'].database_file.resolve()
     assert first_path == second_path
 
 

@@ -115,25 +115,29 @@ MathJax в браузере загружается с jsDelivr. Без инте�
 Независимо от текущего рабочего каталога:
 
 ```text
-app/data/decks.json           # метаданные и card_ids
-app/data/cards/<deck-id>.json # содержимое карточек колоды
-app/data/repository.json      # версия схемы JSON-хранилища
+app/data/cards.sqlite3        # активная транзакционная база
+app/data/decks.json           # legacy JSON, сохраняется после миграции
+app/data/cards/<deck-id>.json # legacy-карточки, сохраняются после миграции
+app/data/legacy-json-backup-v1/ # снимок источника перед первым импортом
 ```
 
-Каждая операция read–modify–write защищена общей межпоточной и межпроцессной блокировкой. Новый JSON сначала полностью записывается и синхронизируется во временный файл в том же каталоге, затем атомарно заменяет рабочий файл; предыдущая валидная версия сохраняется рядом с суффиксом `.bak`. Повреждённый, отсутствующий или структурно неверный JSON больше не трактуется как пустая колода: приложение прекращает запись и показывает безопасную ошибку.
+Активное хранилище — SQLite schema 1: `decks`, `cards`, упорядоченная связь `deck_cards(position)` и служебная `repository_meta`. Foreign keys включаются для каждого соединения, journal работает в WAL, а изменения колоды и карточек выполняются одной `BEGIN IMMEDIATE` транзакцией. Поэтому конкурентные процессы не теряют добавления, а исключение внутри mutation откатывает всю операцию.
 
-Текущая JSON-схема имеет версию `1`. При первом открытии legacy-каталога без manifest приложение создаёт `repository.json` и одноразовые `*.pre-schema-v1.bak`, не меняя исходные JSON. При старте выполняется read-only integrity scan: missing/orphan files, duplicate deck/card IDs, повтор ID между колодами, invalid timestamps и несовпадение `card_ids` попадают в отчёт без автоматического удаления или восстановления.
+Если `cards.sqlite3` ещё нет, а `decks.json` существует, приложение сначала запускает полный read-only JSON integrity scan. Набор импортируется в одной SQLite-транзакции с сохранением UUID, порядка, timestamps и clone lineage. Единственное безопасно восстанавливаемое расхождение — устаревший денормализованный `card_ids`: порядок берётся из канонического card-файла, JSON не переписывается, а warning сохраняется в `repository_meta`. Любая structural/missing/orphan/duplicate ошибка блокирует импорт. Перед импортом исходники копируются в `legacy-json-backup-v1`; исходные JSON не удаляются. Метка в SQLite не позволяет повторно импортировать позднее изменённый JSON. База с более новой неизвестной версией схемы отклоняется без downgrade.
+
+Legacy JSON schema 1 и его инструменты atomic replace/lock/`.bak` сохранены для аудита и восстановления миграционного источника. Они больше не являются рабочим backend после успешного импорта.
 
 Проверка и контролируемое восстановление:
 
 ```bash
 python scripts/check_storage.py
 python scripts/check_storage.py \
+  --backend json \
   --recover 'cards/<deck-id>.json' \
   --yes
 ```
 
-Recovery разрешён только для `decks.json`, `repository.json` и JSON внутри `cards/`. Перед заменой команда проверяет соседний `.bak`, а текущий повреждённый файл перемещает в `.broken-<UTC timestamp>`. После операции повторно печатается полный integrity report. Это локальная последняя версия, а не полноценная стратегия backup: перед миграциями по-прежнему копируйте весь `app/data` во внешнее хранилище.
+В auto-режиме утилита выбирает SQLite, если `cards.sqlite3` уже существует. Recovery разрешён только с `--backend json` и только для `decks.json`, `repository.json` и JSON внутри `cards/`. Перед заменой команда проверяет соседний `.bak`, а текущий повреждённый файл перемещает в `.broken-<UTC timestamp>`. Это локальная последняя версия, а не полноценная стратегия backup: перед миграциями по-прежнему копируйте весь `app/data` во внешнее хранилище.
 
 ## 5. Архитектура
 
@@ -146,7 +150,7 @@ Browser / HTML / JSON API
           |
   +-------+----------------+
   |                        |
-JsonRepository       LatexRenderer
+SqliteRepository     LatexRenderer
   |                        |
 JSON files             PdfLatexCompiler
                            |
@@ -155,7 +159,8 @@ JSON files             PdfLatexCompiler
 
 - `domain/entities.py`: карточка, метаданные колоды, рабочая `CardDeck`.
 - `use_cases/`: CRUD, импорт, padding, preview и generate.
-- `adapters/json_repository.py`: активное файловое хранилище.
+- `adapters/sqlite_repository.py`: активное transactional/WAL-хранилище и одноразовый legacy import.
+- `adapters/json_repository.py`: проверка, backup и recovery исходного JSON.
 - `adapters/latex_renderer.py`: физическая сетка и зеркалирование.
 - `web/blueprint.py`: HTML и AJAX endpoints.
 - `xelatex_compiler.py`: протестированная альтернативная реализация компилятора; активная конфигурация пока использует `pdflatex`.
@@ -180,7 +185,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 `xfail(strict=True)` — не пропущенные тесты, а исполнимые спецификации известных дефектов. После исправления соответствующий тест неожиданно пройдёт (`XPASS`) и заставит удалить метку, сохранив сценарий как обычную регрессию.
 
-Текущее состояние набора: 198 проходящих тестов, 8 строгих `xfail`, общий branch coverage 99.10%. В persistence-набор входят fault injection атомарной записи/recovery, schema/integrity contracts, traversal ID, а также межпоточные и настоящие межпроцессные read–modify–write stress tests.
+Текущее состояние набора: 210 проходящих тестов, 8 строгих `xfail`, общий branch coverage 98.76%. В persistence-набор входят SQLite rollback/FK/WAL/migration contracts, JSON fault injection/recovery/schema checks, а также межпоточные и настоящие межпроцессные stress tests для обоих adapters.
 
 Скриншоты можно переснять на запущенном приложении:
 
