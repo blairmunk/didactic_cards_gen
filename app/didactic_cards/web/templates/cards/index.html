@@ -82,7 +82,7 @@
         <form id="csv-import-form" action="{{ url_for('cards.import_csv', deck_id=deck.id) }}" method="post" enctype="multipart/form-data">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="version" value="{{ deck.version }}">
-            <label for="csv_file">Файл CSV (<code>лицевая;оборотная</code>):</label>
+            <label for="csv_file">Файл CSV (<code>секция;лицевая;оборотная</code>, старый формат из двух колонок тоже поддерживается):</label>
             <input type="file" name="csv_file" id="csv_file" accept=".csv">
             <label for="delimiter">Разделитель:</label>
             <select name="delimiter" id="delimiter">

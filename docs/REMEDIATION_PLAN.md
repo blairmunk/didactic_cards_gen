@@ -34,7 +34,7 @@
   - [x] Corrupt/missing/invalid JSON останавливает запись и даёт безопасную HTTP-ошибку.
   - [x] Устранены stale `card_ids`, orphan writes и потеря ancestry при clone.
   - [x] Добавлены schema version 1, read-only startup integrity report и управляемое CLI-восстановление backup с сохранением `.broken-*`.
-  - [x] Активное хранилище мигрировано в SQLite schema 3 с FK, WAL, транзакциями, одноразовым backup/import legacy JSON и профилями принтера; schema 3 сохраняет независимый поворот оборота.
+  - [x] Активное хранилище мигрировано в SQLite schema 4 с FK, WAL, транзакциями, одноразовым backup/import legacy JSON, профилями принтера, секциями карточек и настройками оформления; schema 3 добавила независимый поворот оборота.
   - [x] Карточные HTML/API операции переведены с индексов на UUID; deck version даёт HTTP 409 при stale mutation.
 - [ ] Этап 4: импорт и web UX.
   - [x] Bulk использует exact `||` и документированное escaping.
@@ -59,8 +59,9 @@
   - [x] Исправлены обычные регистрационные метки; независимый raster oracle проверяет четыре креста/восемь штрихов на обеих страницах при одном проходе TeX.
   - [x] Восстановлен legacy long-edge 180° и добавлена независимая настройка поворота оборота 0°/180° в профилях и калибровочном листе.
   - [x] Printable-area warning учитывает полный bounding box на физическом A4 и оба знака offsets.
-  - [ ] Отделить физический профиль принтера от настроек оформления колоды.
-  - [ ] Добавить секцию/тему карточки и управляемый колонтитул.
+  - [x] Физический профиль принтера отделён от versioned `DeckRenderSettings` колоды на уровне модели и schema 4.
+  - [x] Добавлена сохраняемая секция/тема карточки с clone/import/export/migration-контрактами.
+  - [ ] Добавить управляемый колонтитул из секции.
   - [ ] Добавить вертикальное и горизонтальное выравнивание с точным PDF-preview.
   - [ ] Реализовать trusted LaTeX только через изолированный compiler worker и явное включение владельцем.
 - [x] Production runtime.
@@ -91,7 +92,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 349 проходящих основных тестов, 0 `xfail`, один отдельно успешно пройденный browser E2E; общий branch coverage составляет 98.33% при обязательном CI-пороге 98%. Chromium-сценарий проверяет в том числе focus/scroll результата preflight и подтверждает только локальные resource URLs. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF/raster-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 393 проходящих основных теста, 0 `xfail`, один отдельно запускаемый browser E2E; общий branch coverage составляет 98,43% при обязательном CI-пороге 98%. Chromium-сценарий проверяет в том числе focus/scroll результата preflight и подтверждает только локальные resource URLs. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF/raster-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -222,7 +223,7 @@
 1. [x] Config-defined и сохраняемые SQLite-профили, выбор на print job, двухстраничный калибровочный PDF и web workflow с X/Y offsets. Фактические значения пользователь получает по пяти парам мишеней и контрольному отрезку 100 мм.
 2. Выбор формата A4/Letter, ориентации, сетки, внешнего размера карточки, margins/gaps/bleed/safe area.
 3. [x] Двусторонний PDF и два отдельных файла front/back для принтеров без duplex. Раздельные документы сохраняют одинаковую нумерацию физических листов, back permutation и калибровочные offsets; unit, HTTP и реальный `pdflatex` page-count test проходят.
-4. [x] Импорт/экспорт колоды в versioned JSON schema 1 и UTF-8-BOM CSV; импорт создаёт транзакционную копию с lineage, validation/quota и без перезаписи существующих данных. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
+4. [x] Импорт/экспорт колоды обновлён до versioned JSON schema 2 и UTF-8-BOM CSV с секцией; schema 1 и двухколоночный CSV обратно совместимы. Импорт создаёт транзакционную копию с lineage, validation/quota и без перезаписи существующих данных. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
 5. Шаблоны оформления: шрифт, выравнивание, размер, фон, изображения/QR после отдельной security-модели.
 6. [x] Auto-fit и preflight: 12pt → small → footnotesize → scriptsize, адресный vertical/horizontal overflow, missing glyphs, unsupported formulas и printable-area warning. Результат получает focus и прокручивается в видимую область; layout-only `Overfull hbox` игнорируется. Silent clipping отклонён как риск потери текста.
 7. Поиск, теги, массовое редактирование, undo/trash вместо немедленного удаления.
@@ -280,7 +281,7 @@ Definition of Done для релиза двусторонней печати:
 | ~~**P2 `BUG-PRINT-011`**~~ ✅ | `printable_area_warnings()` считал любое отрицательное X/Y-смещение выходом за область, даже если сетка оставалась на листе. Положительное смещение той же величины могло не дать предупреждения. | Выполнено: полный bounding box после offset сравнивается со всеми четырьмя границами физического A4 с учётом базового поля 5 мм. Несимметричные аппаратные поля остаются будущим расширением printer profile. | Boundary-тесты покрывают оба знака, обе оси и обе стороны; −5 мм допустим, фактическое пересечение каждого края предупреждается. |
 | **P2 `BUG-PREVIEW-004`** | HTML-preview показывает центрированный текст, PDF — top-left. Пользователь принимает декоративный preview за результат печати. | Использовать те же semantic style settings в HTML и TeX; подписать декоративный preview как приблизительный, а PDF — как точный. | E2E проверяет выбранное выравнивание; raster/vector oracle подтверждает положение текста в PDF. |
 | **P2 `BUG-OBS-002`** | Калибровочный route вызывает compiler напрямую и не пишет унифицированное структурированное событие `pdf_compilation` с duration/result, используемое для обычной печати. | Провести calibration job через общий сервис/observability wrapper без логирования содержимого или внутренних путей. | Success, validation, timeout и compiler failure дают одинаково коррелируемые безопасные события. |
-| **P2 `BUG-DATA-006`** | У доменной модели и SQLite schema 3 нет секции карточки и versioned render settings колоды. JSON schema 1 и CSV сохраняют только прежнее представление. Добавление полей только в форму приведёт к их потере при clone/import/export. | Выполнить schema 4 migration и schema 2 export contract до UI-функций; все изменения настроек увеличивают `deck.version`. | Старые базы мигрируются без изменения вывода, clone и JSON round-trip сохраняют всё, legacy JSON/CSV импортируется детерминированно. |
+| ~~**P2 `BUG-DATA-006`**~~ ✅ | У доменной модели и SQLite schema 3 не было секции карточки и versioned render settings колоды. JSON schema 1 и CSV сохраняли только прежнее представление. | Выполнено: schema 4 хранит `Card.section` и отдельные safe `DeckRenderSettings`; JSON schema 2 и CSV с `section;front;back` сохраняют их, а schema 1/две колонки остаются совместимыми. Каждая запись настроек увеличивает `deck.version`. | Migration 3→4 назначает существующим колодам `legacy-top-left`; новые получают `centered`; SQLite/JSON clone, JSON round-trip, CSV и stale-version tests проходят. |
 | **P1 `BUG-SEC-004` при наивной реализации** | Простое отключение escaping для advanced возвращает возможность `\input`, `\openout`, закрытия app-owned environments, бесконечных макросов и resource exhaustion. `-no-shell-escape` запрещает shell, но не делает произвольный TeX безопасным. | Не смешивать trusted fragments с обычным renderer. Включать raw TeX только отдельным deployment flag и компилировать непривилегированным sandbox worker без сети, секретов и доступного host filesystem, с CPU/RAM/PID/time/output limits. | Негативные fixtures не читают локальные файлы, не пишут вне job-dir, не достигают сети, завершаются по лимиту; обычный режим остаётся безопасным и неизменным. |
 
 Дополнительный долг, который следует закрыть вместе с этапом:
@@ -300,14 +301,14 @@ Definition of Done для релиза двусторонней печати:
 | `DeckRenderSettings` | preset, шрифт/размер, внутренние отступы, border/background, horizontal/vertical alignment, правила колонтитула | принадлежит колоде и входит в экспорт |
 | `PrintJobOptions` | registration/crop marks, split front/back, debug overlay, выбранные profile/style versions | snapshot одной генерации |
 
-Предлагаемая schema 4 (schema 3 уже занята независимым поворотом оборота в printer profile):
+Реализованная в этапе 6.1 schema 4 (schema 3 уже занята независимым поворотом оборота в printer profile):
 
 - `cards.section TEXT NOT NULL DEFAULT ''` — семантическая тема карточки, общая для front/back;
 - `deck_render_settings` — одна versioned запись на колоду: `mode`, preset и безопасные presentation-поля;
 - trusted template source/version/hash хранится отдельно от безопасных полей, чтобы его нельзя было случайно активировать обычным импортом;
 - существующие колоды получают явный preset `legacy-top-left`, чтобы миграция не изменила уже отлаженную печать; для новых колод рекомендуемый default — `centered`.
 
-JSON export повышается до schema 2 и сохраняет section/render settings/template source вместе с признаком `trusted_enabled: false`. Импортированный trusted-код всегда попадает в карантин и требует отдельного локального подтверждения владельцем. CSV остаётся совместимым с `front;back` и дополнительно принимает/выдаёт `section;front;back`. В bulk-форме безопасный первый шаг — одно поле «раздел/тема для всей пачки», без нового неочевидного delimiter.
+JSON export schema 2 сохраняет section и только безопасные render settings. Trusted template source не входит в этот контракт до появления отдельной модели карантина/provenance: в будущем импортированный trusted-код всегда должен быть выключен и требовать отдельного локального подтверждения владельцем. CSV совместим с `front;back` и дополнительно принимает/выдаёт `section;front;back`. В bulk-форме безопасный следующий шаг — одно поле «раздел/тема для всей пачки», без нового неочевидного delimiter.
 
 ### 7.4. Фича: колонтитулы и секционирование
 
@@ -387,11 +388,11 @@ Sandbox-контракт: отдельный непривилегированн�
 ### 7.8. Очерёдность реализации и критерии завершения
 
 1. **6.0 — геометрические багфиксы:** ✅ `BUG-PRINT-010`, `BUG-PRINT-011` и восстановление независимого поворота оборота выполнены через падающие контракты → исправление → координатный oracle → обновление golden. Физическая проверка профилей остаётся в 6.6.
-2. **6.1 — данные и совместимость:** schema 4, `DeckRenderSettings`, `Card.section`, JSON schema 2, расширенный CSV, clone/snapshot/version tests. UI пока не включается.
+2. **6.1 — данные и совместимость:** ✅ schema 4, `DeckRenderSettings`, `Card.section`, JSON schema 2, расширенный CSV и clone/version/migration tests выполнены. UI и TeX semantics намеренно пока не включены; старый PDF остаётся неизменным.
 3. **6.2 — built-in presentation:** безопасные presets, 3×3 alignment, header/footer band, раздельный overflow, единый HTML/PDF semantic contract.
 4. **6.3 — секционирование:** bulk section, повтор/смена колонтитула и физические row/sheet breaks.
 5. **6.4 — trusted infrastructure:** feature flag, quarantine/provenance, job protocol и sandbox worker с hostile test suite.
 6. **6.5 — advanced UX:** редактор шаблона, raw/escaped content switch, test compile, PDF-preview, history/reset и документация рисков.
 7. **6.6 — физическая приёмка:** минимум один duplex-принтер в обоих flip modes и ручная подача; измерение меток/рамок после калибровки.
 
-Этап считается завершённым, когда миграция сохраняет прежний PDF существующей колоды, новые built-in функции проходят полную матрицу unit/integration/browser/PDF tests, а trusted mode недоступен без проверенного sandbox и явного согласия владельца. Следующий рабочий инкремент — 6.1: модель данных и обратная совместимость для секций/оформления до добавления UI.
+Этап считается завершённым, когда миграция сохраняет прежний PDF существующей колоды, новые built-in функции проходят полную матрицу unit/integration/browser/PDF tests, а trusted mode недоступен без проверенного sandbox и явного согласия владельца. Следующий рабочий инкремент — 6.2: единый безопасный presentation contract для HTML/PDF, 3×3-выравнивание и колонтитульная полоса.

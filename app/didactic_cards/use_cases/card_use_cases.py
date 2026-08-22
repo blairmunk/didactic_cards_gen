@@ -131,16 +131,20 @@ def preview_csv_import(
             continue
         if not row or not any(cell.strip() for cell in row):
             continue
-        if len(row) > 2:
+        if len(row) > 3:
             rejected.append({
                 'row': row_index,
-                'reason': 'Ожидалось не более двух колонок',
+                'reason': 'Ожидалось не более трёх колонок',
             })
             continue
-        front = row[0].strip() if row else ''
-        back = row[1].strip() if len(row) > 1 else ''
+        if len(row) == 3:
+            section, front, back = (cell.strip() for cell in row)
+        else:
+            section = ''
+            front = row[0].strip() if row else ''
+            back = row[1].strip() if len(row) > 1 else ''
         if front or back:
-            cards.append(Card(front=front, back=back))
+            cards.append(Card(front=front, back=back, section=section))
     return CsvImportPreview(tuple(cards), tuple(rejected), selected_delimiter)
 
 
@@ -152,10 +156,11 @@ class AddCard:
     def execute(
         self, deck_id: str, front: str, back: str,
         expected_version: int | None = None,
+        section: str = '',
     ) -> tuple[Card, int]:
         def add(deck: CardDeck):
             _ensure_capacity(deck, 1, self.max_cards)
-            card = Card(front=front, back=back)
+            card = Card(front=front, back=back, section=section)
             return (card, deck.add(card)), True
 
         return self.repo.mutate_cards(
@@ -169,7 +174,8 @@ class AddCardsBulk:
         self.max_cards = max_cards
 
     def execute(
-        self, deck_id: str, bulk_text: str, expected_version: int | None = None
+        self, deck_id: str, bulk_text: str, expected_version: int | None = None,
+        section: str = '',
     ) -> int:
         new_cards = []
         for line in bulk_text.strip().splitlines():
@@ -177,7 +183,7 @@ class AddCardsBulk:
             if not line:
                 continue
             front, back = _parse_bulk_line(line)
-            new_cards.append(Card(front=front, back=back))
+            new_cards.append(Card(front=front, back=back, section=section))
         def add_all(deck: CardDeck):
             _ensure_capacity(deck, len(new_cards), self.max_cards)
             for card in new_cards:
@@ -238,9 +244,10 @@ class EditCard:
     def execute(
         self, deck_id: str, card_id: str, front: str, back: str,
         expected_version: int | None = None,
+        section: str | None = None,
     ) -> bool:
         def edit(deck: CardDeck):
-            result = deck.edit_by_id(card_id, front, back)
+            result = deck.edit_by_id(card_id, front, back, section)
             return result, result
 
         return self.repo.mutate_cards(

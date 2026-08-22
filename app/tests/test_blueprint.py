@@ -150,7 +150,10 @@ def test_csv_preview_is_read_only_and_reports_validation(client, repo, deck_id):
     response = client.post(
         f"/api/deck/{deck_id}/preview_csv",
         data={
-            "csv_file": (io.BytesIO(b"front;back\nQ;A\nbad;row;extra"), "cards.csv"),
+                "csv_file": (
+                    io.BytesIO(b"front;back\nQ;A\nbad;row;extra;column"),
+                    "cards.csv",
+                ),
             "has_header": "on",
             "delimiter": "auto",
         },
@@ -164,7 +167,10 @@ def test_csv_preview_is_read_only_and_reports_validation(client, repo, deck_id):
     imported = client.post(
         f"/deck/{deck_id}/import_csv",
         data={
-            "csv_file": (io.BytesIO(b"Q;A\nbad;row;extra"), "cards.csv"),
+            "csv_file": (
+                io.BytesIO(b"Q;A\nbad;row;extra;column"),
+                "cards.csv",
+            ),
             "delimiter": "semicolon",
         },
         content_type="multipart/form-data",

@@ -17,6 +17,7 @@ from didactic_cards.adapters.sqlite_repository import (
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import ConcurrentModificationError
 from didactic_cards.domain.printing import PrinterProfile
+from didactic_cards.domain.rendering import DeckRenderSettings
 from didactic_cards.use_cases.card_use_cases import AddCard
 
 
@@ -42,7 +43,8 @@ def test_database_initializes_wal_schema_and_foreign_keys(sqlite_repo):
             )
         }
     assert {
-        'repository_meta', 'decks', 'cards', 'deck_cards', 'printer_profiles'
+        'repository_meta', 'decks', 'cards', 'deck_cards', 'printer_profiles',
+        'deck_render_settings',
     } <= tables
     assert sqlite_repo.integrity_check() == []
     assert sqlite_repo.readiness_check() == []
@@ -51,6 +53,21 @@ def test_database_initializes_wal_schema_and_foreign_keys(sqlite_repo):
 def test_readiness_stops_on_integrity_error(sqlite_repo, monkeypatch):
     monkeypatch.setattr(sqlite_repo, 'integrity_check', lambda: ['broken'])
     assert sqlite_repo.readiness_check() == ['broken']
+
+
+def test_integrity_reports_missing_render_settings(sqlite_repo):
+    deck = sqlite_repo.create_deck('Broken settings')
+    with closing(sqlite_repo._connect()) as connection:
+        connection.execute(
+            'DELETE FROM deck_render_settings WHERE deck_id = ?', (deck.id,)
+        )
+        connection.commit()
+
+    assert sqlite_repo.integrity_check() == [
+        f'missing-render-settings: {deck.id}'
+    ]
+    with pytest.raises(ValueError, match='Missing render settings'):
+        sqlite_repo.get_deck(deck.id)
 
 
 def test_readiness_reports_unavailable_write_transaction(sqlite_repo, monkeypatch):
@@ -160,16 +177,48 @@ def test_schema_two_profiles_migrate_rotation_by_duplex_mode(tmp_path):
         )
 
 
+def test_schema_three_migrates_sections_and_legacy_render_settings(tmp_path):
+    data_dir = tmp_path / 'schema-three'
+    repository = SqliteRepository(data_dir)
+    deck = repository.create_deck('Existing')
+    repository.save_cards(
+        deck.id, CardDeck([Card(front='Q', back='A', section='Will be legacy')])
+    )
+    with closing(repository._connect()) as connection:
+        connection.execute('DROP TABLE deck_render_settings')
+        connection.execute('ALTER TABLE cards DROP COLUMN section')
+        connection.execute('PRAGMA user_version = 3')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+
+    assert migrated.load_cards(deck.id).cards[0].section == ''
+    assert migrated.get_render_settings(deck.id) == DeckRenderSettings.legacy()
+    with closing(migrated._connect()) as connection:
+        card_columns = {
+            row['name'] for row in connection.execute('PRAGMA table_info(cards)')
+        }
+        assert 'section' in card_columns
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == (
+            SQLITE_SCHEMA_VERSION
+        )
+
+
 def test_deck_and_ordered_card_round_trip(sqlite_repo):
     first = sqlite_repo.create_deck('First', 'Description')
     second = sqlite_repo.create_deck('Second')
-    cards = CardDeck([Card(front='A'), Card(front='B')])
+    cards = CardDeck([
+        Card(front='A', section='One'), Card(front='B', section='Two')
+    ])
     sqlite_repo.save_cards(first.id, cards)
 
     loaded = SqliteRepository(sqlite_repo.data_dir)
     assert [deck.id for deck in loaded.list_decks()][0] == first.id
     assert loaded.get_deck(first.id).card_ids == [card.id for card in cards.cards]
     assert [card.front for card in loaded.load_cards(first.id).cards] == ['A', 'B']
+    assert [card.section for card in loaded.load_cards(first.id).cards] == [
+        'One', 'Two'
+    ]
 
     updated = loaded.update_deck(second.id, 'Second+', 'Changed')
     assert updated.name == 'Second+'
@@ -192,6 +241,41 @@ def test_clone_lineage_delete_and_legacy_aliases(sqlite_repo):
     assert sqlite_repo.delete_deck(source.id) is False
     assert sqlite_repo.get_deck(source.id) is None
     assert sqlite_repo.load_cards(clone.id).cards[0].front == 'Q'
+
+
+def test_render_settings_are_versioned_and_cloned(sqlite_repo):
+    source = sqlite_repo.create_deck('Styled')
+    assert sqlite_repo.get_render_settings(source.id) == DeckRenderSettings.centered()
+    initial_version = sqlite_repo.get_deck(source.id).version
+    custom = DeckRenderSettings(
+        preset='custom',
+        horizontal_alignment='right',
+        vertical_alignment='bottom',
+        header_visibility='both',
+    )
+
+    saved = sqlite_repo.save_render_settings(
+        source.id, custom, expected_version=initial_version
+    )
+
+    assert saved == custom
+    assert sqlite_repo.get_render_settings(source.id) == custom
+    assert sqlite_repo.get_deck(source.id).version == initial_version + 1
+    with pytest.raises(ConcurrentModificationError):
+        sqlite_repo.save_render_settings(
+            source.id, DeckRenderSettings.legacy(), expected_version=initial_version
+        )
+    clone = sqlite_repo.clone_deck(source.id)
+    assert sqlite_repo.get_render_settings(clone.id) == custom
+
+
+def test_missing_deck_has_no_render_settings(sqlite_repo):
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.get_render_settings('missing')
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.save_render_settings(
+            'missing', DeckRenderSettings.centered()
+        )
 
 
 def test_create_deck_with_cards_is_one_transaction(sqlite_repo, monkeypatch):

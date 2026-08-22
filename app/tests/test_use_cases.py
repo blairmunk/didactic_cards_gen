@@ -22,13 +22,18 @@ from didactic_cards.use_cases.card_use_cases import (
 
 
 def test_card_crud_and_reorder(repo, deck_id):
-    first, first_index = AddCard(repo).execute(deck_id, "A", "1")
+    first, first_index = AddCard(repo).execute(
+        deck_id, "A", "1", section='Раздел 1'
+    )
     second, second_index = AddCard(repo).execute(deck_id, "B", "2")
     assert (first.front, first_index, second.front, second_index) == ("A", 0, "B", 1)
 
-    assert EditCard(repo).execute(deck_id, first.id, "A+", "1+") is True
+    assert EditCard(repo).execute(
+        deck_id, first.id, "A+", "1+", section='Раздел 2'
+    ) is True
     assert ReorderCards(repo).execute(deck_id, [second.id, first.id]) is True
     assert [card.front for card in GetDeck(repo).execute(deck_id).cards] == ["B", "A+"]
+    assert GetDeck(repo).execute(deck_id).cards[1].section == 'Раздел 2'
 
     assert DeleteCard(repo).execute(deck_id, "missing") is False
     assert DeleteCard(repo).execute(deck_id, second.id) is True
@@ -62,9 +67,13 @@ def test_bulk_limit_is_atomic(repo, deck_id):
 
 
 def test_bulk_import_matches_documented_double_pipe(repo, deck_id):
-    AddCardsBulk(repo).execute(deck_id, "question || answer")
+    AddCardsBulk(repo).execute(
+        deck_id, "question || answer", section='Кинематика'
+    )
     card = repo.load_cards(deck_id).cards[0]
-    assert (card.front, card.back) == ("question", "answer")
+    assert (card.section, card.front, card.back) == (
+        "Кинематика", "question", "answer"
+    )
 
 
 def test_bulk_import_supports_escaped_delimiter_and_backslash(repo, deck_id):
@@ -102,13 +111,27 @@ def test_csv_import_explicit_dialect_and_header(repo, deck_id):
     assert (card.front, card.back) == ("Q", "A")
 
 
+def test_csv_import_accepts_section_front_back_and_legacy_two_columns(repo, deck_id):
+    ImportCsv(repo).execute(
+        deck_id,
+        "section;front;back\nГеометрия;Q1;A1\nQ2;A2".encode(),
+        delimiter="semicolon",
+        has_header=True,
+    )
+    cards = repo.load_cards(deck_id).cards
+    assert (cards[0].section, cards[0].front, cards[0].back) == (
+        'Геометрия', 'Q1', 'A1'
+    )
+    assert (cards[1].section, cards[1].front, cards[1].back) == ('', 'Q2', 'A2')
+
+
 def test_csv_import_rejects_unknown_dialect(repo, deck_id):
     with pytest.raises(ValueError, match="delimiter"):
         ImportCsv(repo).execute(deck_id, b"Q,A", delimiter="pipes")
 
 
 def test_csv_preview_reports_rejected_rows_and_import_is_atomic(repo, deck_id):
-    source = b"front;back\nQ;A\ninvalid;row;extra"
+    source = b"front;back\nQ;A\ninvalid;row;extra;column"
     preview = preview_csv_import(source, has_header=True)
     assert preview.delimiter == ";"
     assert [(card.front, card.back) for card in preview.cards] == [("Q", "A")]

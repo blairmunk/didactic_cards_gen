@@ -1,5 +1,6 @@
 from ..domain.interfaces import DeckRepository
 from ..domain.entities import Deck
+from ..domain.rendering import DeckRenderSettings
 
 from typing import Optional
 
@@ -52,3 +53,28 @@ class CloneDeck:
 
     def execute(self, deck_id: str) -> Optional[Deck]:
         return self.repo.clone_deck(deck_id)
+
+
+class GetDeckRenderSettings:
+    def __init__(self, repo: DeckRepository):
+        self.repo = repo
+
+    def execute(self, deck_id: str) -> DeckRenderSettings:
+        return self.repo.get_render_settings(deck_id)
+
+
+class UpdateDeckRenderSettings:
+    def __init__(self, repo: DeckRepository):
+        self.repo = repo
+
+    def execute(
+        self,
+        deck_id: str,
+        settings: DeckRenderSettings,
+        expected_version: int | None = None,
+    ) -> DeckRenderSettings:
+        return self.repo.save_render_settings(
+            deck_id,
+            settings,
+            expected_version=expected_version,
+        )

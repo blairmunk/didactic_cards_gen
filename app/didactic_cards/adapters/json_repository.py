@@ -15,7 +15,12 @@ from typing import Callable, Iterator, Optional, TypeVar
 import fcntl
 
 from ..domain.entities import CardDeck, Deck
-from ..domain.interfaces import CardRepository, DeckRepository
+from ..domain.interfaces import (
+    CardRepository,
+    ConcurrentModificationError,
+    DeckRepository,
+)
+from ..domain.rendering import DeckRenderSettings
 
 
 MutationResult = TypeVar('MutationResult')
@@ -476,6 +481,7 @@ class JsonRepository(DeckRepository, CardRepository):
                 description=source.description,
                 parent_id=source.id,
                 card_ids=[card.id for card in new_cards.cards],
+                render_settings=source.render_settings,
             )
             self._write_json(self._cards_path(new_deck.id), new_cards.to_list())
             try:
@@ -491,6 +497,7 @@ class JsonRepository(DeckRepository, CardRepository):
         description: str,
         parent_id: str | None,
         cards: CardDeck,
+        render_settings: DeckRenderSettings | None = None,
     ) -> Deck:
         with self._transaction():
             deck = Deck(
@@ -498,6 +505,11 @@ class JsonRepository(DeckRepository, CardRepository):
                 description=description,
                 parent_id=parent_id,
                 card_ids=[card.id for card in cards.cards],
+                render_settings=(
+                    render_settings
+                    if render_settings is not None
+                    else DeckRenderSettings.centered()
+                ),
             )
             self._write_json(self._cards_path(deck.id), cards.to_list())
             try:
@@ -506,6 +518,32 @@ class JsonRepository(DeckRepository, CardRepository):
                 self._cards_path(deck.id).unlink(missing_ok=True)
                 raise
             return deck
+
+    def get_render_settings(self, deck_id: str) -> DeckRenderSettings:
+        with self._transaction():
+            deck = self._get_deck_unlocked(deck_id)
+            if deck is None:
+                raise DeckNotFoundError(deck_id)
+            return deck.render_settings
+
+    def save_render_settings(
+        self,
+        deck_id: str,
+        settings: DeckRenderSettings,
+        *,
+        expected_version: int | None = None,
+    ) -> DeckRenderSettings:
+        with self._transaction():
+            deck = self._get_deck_unlocked(deck_id)
+            if deck is None:
+                raise DeckNotFoundError(deck_id)
+            if expected_version is not None and deck.version != expected_version:
+                raise ConcurrentModificationError(expected_version, deck.version)
+            deck.render_settings = settings
+            deck.updated_at = datetime.now(timezone.utc)
+            deck.version += 1
+            self._save_deck_meta_unlocked(deck)
+            return deck.render_settings
 
     # DeckRepository: cards
 
@@ -525,8 +563,6 @@ class JsonRepository(DeckRepository, CardRepository):
         expected_version: int | None = None,
     ) -> MutationResult:
         with self._transaction():
-            from ..domain.interfaces import ConcurrentModificationError
-
             deck = self._get_deck_unlocked(deck_id)
             if deck is None:
                 raise DeckNotFoundError(deck_id)

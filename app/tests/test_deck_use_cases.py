@@ -1,11 +1,17 @@
+import pytest
+
 from didactic_cards.domain.entities import Card, CardDeck
+from didactic_cards.domain.interfaces import ConcurrentModificationError
+from didactic_cards.domain.rendering import DeckRenderSettings
 from didactic_cards.use_cases.deck_use_cases import (
     CloneDeck,
     CreateDeck,
     DeleteDeck,
     GetDeckInfo,
+    GetDeckRenderSettings,
     ListDecks,
     UpdateDeck,
+    UpdateDeckRenderSettings,
 )
 
 
@@ -42,3 +48,25 @@ def test_unknown_deck_operations_return_none(repo):
     assert GetDeckInfo(repo).execute("missing") is None
     assert UpdateDeck(repo).execute("missing", "X") is None
     assert CloneDeck(repo).execute("missing") is None
+
+
+def test_render_settings_use_cases_apply_optimistic_lock(repo):
+    deck = CreateDeck(repo).execute("Styled")
+    settings = DeckRenderSettings(
+        preset="custom",
+        horizontal_alignment="right",
+        vertical_alignment="bottom",
+    )
+
+    saved = UpdateDeckRenderSettings(repo).execute(
+        deck.id, settings, expected_version=deck.version
+    )
+
+    assert saved == settings
+    assert GetDeckRenderSettings(repo).execute(deck.id) == settings
+    with pytest.raises(ConcurrentModificationError):
+        UpdateDeckRenderSettings(repo).execute(
+            deck.id,
+            DeckRenderSettings.centered(),
+            expected_version=deck.version,
+        )

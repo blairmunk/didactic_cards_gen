@@ -13,11 +13,12 @@ from ..domain.interfaces import (
     DeckRepository,
 )
 from ..domain.printing import PrinterProfile
+from ..domain.rendering import DeckRenderSettings
 from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 3
+SQLITE_SCHEMA_VERSION = 4
 
 
 class LegacyMigrationError(ValueError):
@@ -65,7 +66,7 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _initialize_database(self) -> None:
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {0, 1, 2, SQLITE_SCHEMA_VERSION}:
+            if version not in {0, 1, 2, 3, SQLITE_SCHEMA_VERSION}:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
@@ -90,6 +91,7 @@ class SqliteRepository(DeckRepository, CardRepository):
                     parent_id TEXT,
                     front TEXT NOT NULL,
                     back TEXT NOT NULL,
+                    section TEXT NOT NULL DEFAULT '',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL,
                     version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0)
@@ -103,6 +105,28 @@ class SqliteRepository(DeckRepository, CardRepository):
                 );
                 CREATE INDEX IF NOT EXISTS idx_deck_cards_position
                     ON deck_cards(deck_id, position);
+                CREATE TABLE IF NOT EXISTS deck_render_settings (
+                    deck_id TEXT PRIMARY KEY
+                        REFERENCES decks(id) ON DELETE CASCADE,
+                    preset TEXT NOT NULL CHECK (
+                        preset IN ('legacy-top-left', 'centered', 'custom')
+                    ),
+                    horizontal_alignment TEXT NOT NULL CHECK (
+                        horizontal_alignment IN ('left', 'center', 'right')
+                    ),
+                    vertical_alignment TEXT NOT NULL CHECK (
+                        vertical_alignment IN ('top', 'center', 'bottom')
+                    ),
+                    header_visibility TEXT NOT NULL CHECK (
+                        header_visibility IN ('none', 'front', 'back', 'both')
+                    ),
+                    header_position TEXT NOT NULL CHECK (
+                        header_position IN ('top', 'bottom')
+                    ),
+                    header_alignment TEXT NOT NULL CHECK (
+                        header_alignment IN ('left', 'center', 'right')
+                    )
+                );
                 CREATE TABLE IF NOT EXISTS printer_profiles (
                     key TEXT PRIMARY KEY,
                     name TEXT NOT NULL,
@@ -139,9 +163,42 @@ class SqliteRepository(DeckRepository, CardRepository):
                     WHERE duplex_mode = 'long-edge'
                     '''
                 )
+            card_columns = {
+                row['name'] for row in connection.execute(
+                    'PRAGMA table_info(cards)'
+                )
+            }
+            if 'section' not in card_columns:
+                connection.execute(
+                    "ALTER TABLE cards ADD COLUMN section TEXT NOT NULL DEFAULT ''"
+                )
+            if version < 4:
+                legacy = DeckRenderSettings.legacy()
+                connection.execute(
+                    '''
+                    INSERT OR IGNORE INTO deck_render_settings(
+                        deck_id, preset, horizontal_alignment,
+                        vertical_alignment, header_visibility,
+                        header_position, header_alignment
+                    )
+                    SELECT id, ?, ?, ?, ?, ?, ? FROM decks
+                    ''',
+                    (
+                        legacy.preset.value,
+                        legacy.horizontal_alignment.value,
+                        legacy.vertical_alignment.value,
+                        legacy.header_visibility.value,
+                        legacy.header_position.value,
+                        legacy.header_alignment.value,
+                    ),
+                )
             if version < SQLITE_SCHEMA_VERSION:
                 connection.execute(f'PRAGMA user_version = {SQLITE_SCHEMA_VERSION}')
+        connection = self._connect()
+        try:
             connection.execute('PRAGMA journal_mode = WAL')
+        finally:
+            connection.close()
 
     def _meta(self, connection: sqlite3.Connection, key: str) -> str | None:
         row = connection.execute(
@@ -217,13 +274,40 @@ class SqliteRepository(DeckRepository, CardRepository):
                 )
 
     @staticmethod
-    def _deck_from_row(row: sqlite3.Row, card_ids: list[str]) -> Deck:
+    def _settings_from_row(row: sqlite3.Row) -> DeckRenderSettings:
+        return DeckRenderSettings(
+            preset=row['preset'],
+            horizontal_alignment=row['horizontal_alignment'],
+            vertical_alignment=row['vertical_alignment'],
+            header_visibility=row['header_visibility'],
+            header_position=row['header_position'],
+            header_alignment=row['header_alignment'],
+        )
+
+    def _get_render_settings(
+        self, connection: sqlite3.Connection, deck_id: str
+    ) -> DeckRenderSettings:
+        row = connection.execute(
+            'SELECT * FROM deck_render_settings WHERE deck_id = ?',
+            (deck_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f'Missing render settings for deck {deck_id}')
+        return self._settings_from_row(row)
+
+    @staticmethod
+    def _deck_from_row(
+        row: sqlite3.Row,
+        card_ids: list[str],
+        render_settings: DeckRenderSettings,
+    ) -> Deck:
         return Deck(
             id=row['id'],
             parent_id=row['parent_id'],
             name=row['name'],
             description=row['description'],
             card_ids=card_ids,
+            render_settings=render_settings,
             created_at=datetime.fromisoformat(row['created_at']),
             updated_at=datetime.fromisoformat(row['updated_at']),
             version=row['version'],
@@ -236,6 +320,7 @@ class SqliteRepository(DeckRepository, CardRepository):
             parent_id=row['parent_id'],
             front=row['front'],
             back=row['back'],
+            section=row['section'],
             created_at=datetime.fromisoformat(row['created_at']),
             updated_at=datetime.fromisoformat(row['updated_at']),
         )
@@ -258,7 +343,11 @@ class SqliteRepository(DeckRepository, CardRepository):
         ).fetchone()
         if row is None:
             return None
-        return self._deck_from_row(row, self._card_ids(connection, deck_id))
+        return self._deck_from_row(
+            row,
+            self._card_ids(connection, deck_id),
+            self._get_render_settings(connection, deck_id),
+        )
 
     def _load_cards(
         self, connection: sqlite3.Connection, deck_id: str
@@ -294,6 +383,25 @@ class SqliteRepository(DeckRepository, CardRepository):
                 deck.version,
             ),
         )
+        settings = deck.render_settings
+        connection.execute(
+            '''
+            INSERT INTO deck_render_settings(
+                deck_id, preset, horizontal_alignment,
+                vertical_alignment, header_visibility,
+                header_position, header_alignment
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''',
+            (
+                deck.id,
+                settings.preset.value,
+                settings.horizontal_alignment.value,
+                settings.vertical_alignment.value,
+                settings.header_visibility.value,
+                settings.header_position.value,
+                settings.header_alignment.value,
+            ),
+        )
 
     def _replace_cards(
         self,
@@ -326,12 +434,13 @@ class SqliteRepository(DeckRepository, CardRepository):
             connection.execute(
                 '''
                 INSERT INTO cards(
-                    id, parent_id, front, back, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                    id, parent_id, front, back, section, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                     parent_id = excluded.parent_id,
                     front = excluded.front,
                     back = excluded.back,
+                    section = excluded.section,
                     updated_at = excluded.updated_at,
                     version = cards.version + 1
                 ''',
@@ -340,6 +449,7 @@ class SqliteRepository(DeckRepository, CardRepository):
                     card.parent_id,
                     card.front,
                     card.back,
+                    card.section,
                     card.created_at.isoformat(),
                     card.updated_at.isoformat(),
                 ),
@@ -371,7 +481,11 @@ class SqliteRepository(DeckRepository, CardRepository):
                 'SELECT * FROM decks ORDER BY updated_at DESC'
             ).fetchall()
             return [
-                self._deck_from_row(row, self._card_ids(connection, row['id']))
+                self._deck_from_row(
+                    row,
+                    self._card_ids(connection, row['id']),
+                    self._get_render_settings(connection, row['id']),
+                )
                 for row in rows
             ]
 
@@ -428,6 +542,7 @@ class SqliteRepository(DeckRepository, CardRepository):
                 description=source.description,
                 parent_id=source.id,
                 card_ids=[card.id for card in cloned_cards.cards],
+                render_settings=source.render_settings,
             )
             self._insert_deck(connection, clone)
             self._replace_cards(connection, clone.id, cloned_cards)
@@ -439,17 +554,69 @@ class SqliteRepository(DeckRepository, CardRepository):
         description: str,
         parent_id: str | None,
         cards: CardDeck,
+        render_settings: DeckRenderSettings | None = None,
     ) -> Deck:
         deck = Deck(
             name=name,
             description=description,
             parent_id=parent_id,
             card_ids=[card.id for card in cards.cards],
+            render_settings=(
+                render_settings
+                if render_settings is not None
+                else DeckRenderSettings.centered()
+            ),
         )
         with self._transaction(write=True) as connection:
             self._insert_deck(connection, deck)
             self._replace_cards(connection, deck.id, cards)
             return self._get_deck(connection, deck.id)
+
+    def get_render_settings(self, deck_id: str) -> DeckRenderSettings:
+        with self._transaction() as connection:
+            if self._get_deck(connection, deck_id) is None:
+                raise DeckNotFoundError(deck_id)
+            return self._get_render_settings(connection, deck_id)
+
+    def save_render_settings(
+        self,
+        deck_id: str,
+        settings: DeckRenderSettings,
+        *,
+        expected_version: int | None = None,
+    ) -> DeckRenderSettings:
+        with self._transaction(write=True) as connection:
+            deck = self._get_deck(connection, deck_id)
+            if deck is None:
+                raise DeckNotFoundError(deck_id)
+            if expected_version is not None and deck.version != expected_version:
+                raise ConcurrentModificationError(expected_version, deck.version)
+            connection.execute(
+                '''
+                UPDATE deck_render_settings SET
+                    preset = ?, horizontal_alignment = ?,
+                    vertical_alignment = ?, header_visibility = ?,
+                    header_position = ?, header_alignment = ?
+                WHERE deck_id = ?
+                ''',
+                (
+                    settings.preset.value,
+                    settings.horizontal_alignment.value,
+                    settings.vertical_alignment.value,
+                    settings.header_visibility.value,
+                    settings.header_position.value,
+                    settings.header_alignment.value,
+                    deck_id,
+                ),
+            )
+            connection.execute(
+                '''
+                UPDATE decks SET updated_at = ?, version = version + 1
+                WHERE id = ?
+                ''',
+                (datetime.now(timezone.utc).isoformat(), deck_id),
+            )
+            return settings
 
     def load_cards(self, deck_id: str) -> CardDeck:
         with self._transaction() as connection:
@@ -553,9 +720,21 @@ class SqliteRepository(DeckRepository, CardRepository):
         with self._transaction() as connection:
             issues = [row[0] for row in connection.execute('PRAGMA integrity_check')]
             foreign_keys = connection.execute('PRAGMA foreign_key_check').fetchall()
+            missing_settings = connection.execute(
+                '''
+                SELECT decks.id FROM decks
+                LEFT JOIN deck_render_settings
+                    ON deck_render_settings.deck_id = decks.id
+                WHERE deck_render_settings.deck_id IS NULL
+                ORDER BY decks.id
+                '''
+            ).fetchall()
         if issues == ['ok']:
             issues = []
         issues.extend(f'foreign-key: {tuple(row)}' for row in foreign_keys)
+        issues.extend(
+            f"missing-render-settings: {row['id']}" for row in missing_settings
+        )
         return issues
 
     def readiness_check(self) -> list[str]:

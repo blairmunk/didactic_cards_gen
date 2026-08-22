@@ -12,7 +12,8 @@ from didactic_cards.adapters.json_repository import (
     UnsupportedSchemaError,
 )
 from didactic_cards.domain.entities import Card, CardDeck
-from didactic_cards.domain.interfaces import DeckRepository
+from didactic_cards.domain.interfaces import ConcurrentModificationError, DeckRepository
+from didactic_cards.domain.rendering import DeckRenderSettings
 
 
 def _add_cards_in_process(data_dir, deck_id, start, count):
@@ -39,7 +40,9 @@ def test_repository_initializes_storage(json_repo):
 
 def test_deck_and_card_persistence_round_trip(json_repo):
     deck = json_repo.create_deck("История", "Даты")
-    cards = CardDeck([Card(front="1242", back="Ледовое побоище")])
+    cards = CardDeck([
+        Card(front="1242", back="Ледовое побоище", section="История")
+    ])
     json_repo.save_cards(deck.id, cards)
 
     reloaded = JsonRepository(str(json_repo.data_dir))
@@ -48,6 +51,40 @@ def test_deck_and_card_persistence_round_trip(json_repo):
 
     assert loaded_deck.card_ids == [cards.cards[0].id]
     assert loaded_cards.cards[0].back == "Ледовое побоище"
+    assert loaded_cards.cards[0].section == "История"
+
+
+def test_render_settings_are_versioned_and_cloned(json_repo):
+    source = json_repo.create_deck("Styled")
+    initial_version = source.version
+    custom = DeckRenderSettings(
+        preset="custom",
+        horizontal_alignment="right",
+        vertical_alignment="bottom",
+        header_visibility="both",
+    )
+
+    assert json_repo.get_render_settings(source.id) == DeckRenderSettings.centered()
+    assert json_repo.save_render_settings(
+        source.id, custom, expected_version=initial_version
+    ) == custom
+    assert json_repo.get_render_settings(source.id) == custom
+    assert json_repo.get_deck(source.id).version == initial_version + 1
+    with pytest.raises(ConcurrentModificationError):
+        json_repo.save_render_settings(
+            source.id,
+            DeckRenderSettings.legacy(),
+            expected_version=initial_version,
+        )
+    clone = json_repo.clone_deck(source.id)
+    assert json_repo.get_render_settings(clone.id) == custom
+
+
+def test_missing_deck_has_no_render_settings(json_repo):
+    with pytest.raises(KeyError):
+        json_repo.get_render_settings("missing")
+    with pytest.raises(KeyError):
+        json_repo.save_render_settings("missing", DeckRenderSettings.centered())
 
 
 def test_update_sort_clone_and_delete(json_repo):

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, TypeVar
 
 from .entities import Card, Deck, CardDeck
+from .rendering import DeckRenderSettings
 
 
 MutationResult = TypeVar('MutationResult')
@@ -108,8 +109,23 @@ class DeckRepository(ABC):
         description: str,
         parent_id: str | None,
         cards: CardDeck,
+        render_settings: DeckRenderSettings | None = None,
     ) -> Deck:
         """Create a complete deck atomically."""
+        ...
+
+    @abstractmethod
+    def get_render_settings(self, deck_id: str) -> DeckRenderSettings:
+        ...
+
+    @abstractmethod
+    def save_render_settings(
+        self,
+        deck_id: str,
+        settings: DeckRenderSettings,
+        *,
+        expected_version: int | None = None,
+    ) -> DeckRenderSettings:
         ...
 
 

@@ -1,5 +1,6 @@
 import pytest
 from didactic_cards.domain.entities import Card, Deck, CardDeck
+from didactic_cards.domain.rendering import DeckRenderSettings
 
 
 class TestCard:
@@ -7,6 +8,7 @@ class TestCard:
         card = Card()
         assert card.front == ''
         assert card.back == ''
+        assert card.section == ''
         assert card.id is not None
         assert card.parent_id is None
         assert card.created_at is not None
@@ -26,12 +28,13 @@ class TestCard:
         assert card.updated_at >= old_updated
 
     def test_clone(self):
-        original = Card(front='Q', back='A')
+        original = Card(front='Q', back='A', section='Механика')
         clone = original.clone()
         assert clone.id != original.id
         assert clone.parent_id == original.id
         assert clone.front == 'Q'
         assert clone.back == 'A'
+        assert clone.section == 'Механика'
 
     def test_clone_no_parent(self):
         original = Card(front='Q', back='A')
@@ -39,11 +42,12 @@ class TestCard:
         assert clone.parent_id is None
 
     def test_round_trip(self):
-        card = Card(front='Q', back='A')
+        card = Card(front='Q', back='A', section='Алгебра')
         restored = Card.from_dict(card.to_dict())
         assert restored.id == card.id
         assert restored.front == card.front
         assert restored.back == card.back
+        assert restored.section == card.section
         assert restored.parent_id == card.parent_id
 
 
@@ -52,6 +56,7 @@ class TestDeck:
         deck = Deck()
         assert deck.name == 'Новая колода'
         assert len(deck) == 0
+        assert deck.render_settings == DeckRenderSettings.centered()
 
     def test_add_card_id(self):
         deck = Deck()
@@ -95,11 +100,22 @@ class TestDeck:
         assert len(deck) == 0
 
     def test_round_trip(self):
-        deck = Deck(name='Тест', card_ids=['c1', 'c2'])
+        deck = Deck(
+            name='Тест',
+            card_ids=['c1', 'c2'],
+            render_settings=DeckRenderSettings(
+                header_visibility='both', header_position='bottom'
+            ),
+        )
         restored = Deck.from_dict(deck.to_dict())
         assert restored.id == deck.id
         assert restored.name == deck.name
         assert restored.card_ids == deck.card_ids
+        assert restored.render_settings == deck.render_settings
+
+    def test_legacy_dict_without_render_settings_keeps_old_layout(self):
+        restored = Deck.from_dict({'name': 'Legacy'})
+        assert restored.render_settings == DeckRenderSettings.legacy()
 
 
 class TestCardDeck:

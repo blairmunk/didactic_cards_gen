@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+from .rendering import DeckRenderSettings
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -18,6 +20,7 @@ def _new_id() -> str:
 class Card:
     front: str = ''
     back: str = ''
+    section: str = ''
     id: str = field(default_factory=_new_id)
     parent_id: Optional[str] = None
     created_at: datetime = field(default_factory=_now)
@@ -30,12 +33,15 @@ class Card:
         return Card(
             front=self.front,
             back=self.back,
+            section=self.section,
             parent_id=self.id if keep_parent else None,
         )
 
-    def update(self, front: str, back: str) -> None:
+    def update(self, front: str, back: str, section: str | None = None) -> None:
         self.front = front
         self.back = back
+        if section is not None:
+            self.section = section
         self.updated_at = _now()
 
     def to_dict(self) -> dict:
@@ -44,6 +50,7 @@ class Card:
             'parent_id': self.parent_id,
             'front': self.front,
             'back': self.back,
+            'section': self.section,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }
@@ -55,6 +62,7 @@ class Card:
             parent_id=data.get('parent_id'),
             front=data.get('front', ''),
             back=data.get('back', ''),
+            section=data.get('section', ''),
             created_at=datetime.fromisoformat(data['created_at']) if 'created_at' in data else _now(),
             updated_at=datetime.fromisoformat(data['updated_at']) if 'updated_at' in data else _now(),
         )
@@ -67,6 +75,9 @@ class Deck:
     id: str = field(default_factory=_new_id)
     parent_id: Optional[str] = None
     card_ids: list[str] = field(default_factory=list)
+    render_settings: DeckRenderSettings = field(
+        default_factory=DeckRenderSettings.centered
+    )
     version: int = 1
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)
@@ -107,6 +118,7 @@ class Deck:
             description=self.description,
             parent_id=self.id,
             card_ids=new_card_ids,
+            render_settings=self.render_settings,
         )
 
     def clear(self) -> None:
@@ -120,6 +132,7 @@ class Deck:
             'name': self.name,
             'description': self.description,
             'card_ids': list(self.card_ids),
+            'render_settings': self.render_settings.to_dict(),
             'version': self.version,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
@@ -127,12 +140,19 @@ class Deck:
 
     @staticmethod
     def from_dict(data: dict) -> Deck:
+        settings_data = data.get('render_settings')
+        settings = (
+            DeckRenderSettings.from_dict(settings_data)
+            if settings_data is not None
+            else DeckRenderSettings.legacy()
+        )
         return Deck(
             id=data.get('id', _new_id()),
             parent_id=data.get('parent_id'),
             name=data.get('name', 'Новая колода'),
             description=data.get('description', ''),
             card_ids=data.get('card_ids', []),
+            render_settings=settings,
             version=data.get('version', 1),
             created_at=datetime.fromisoformat(data['created_at']) if 'created_at' in data else _now(),
             updated_at=datetime.fromisoformat(data['updated_at']) if 'updated_at' in data else _now(),
@@ -170,15 +190,21 @@ class CardDeck:
         index = self.index_of(card_id)
         return self.delete(index) if index is not None else False
 
-    def edit(self, index: int, front: str, back: str) -> bool:
+    def edit(
+        self, index: int, front: str, back: str, section: str | None = None
+    ) -> bool:
         if 0 <= index < len(self.cards):
-            self.cards[index].update(front, back)
+            self.cards[index].update(front, back, section)
             return True
         return False
 
-    def edit_by_id(self, card_id: str, front: str, back: str) -> bool:
+    def edit_by_id(
+        self, card_id: str, front: str, back: str, section: str | None = None
+    ) -> bool:
         index = self.index_of(card_id)
-        return self.edit(index, front, back) if index is not None else False
+        return (
+            self.edit(index, front, back, section) if index is not None else False
+        )
 
     def reorder(self, new_order: list[int]) -> bool:
         if sorted(new_order) != list(range(len(self.cards))):
