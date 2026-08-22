@@ -153,6 +153,10 @@ class DocumentRenderer(ABC):
         """
         return self
 
+    def with_trusted_template(self, template) -> DocumentRenderer:
+        """Return a renderer configured with one already-approved template."""
+        return self
+
     @abstractmethod
     def render(self, deck: CardDeck) -> str:
         ...

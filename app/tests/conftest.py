@@ -29,9 +29,14 @@ class FakeRenderer(DocumentRenderer):
         self.decks: list[CardDeck] = []
         self.sides: list[str] = []
         self.render_settings = []
+        self.trusted_templates = []
 
     def with_render_settings(self, settings):
         self.render_settings.append(settings)
+        return self
+
+    def with_trusted_template(self, template):
+        self.trusted_templates.append(template)
         return self
 
     def render(self, deck: CardDeck) -> str:

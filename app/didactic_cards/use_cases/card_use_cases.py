@@ -10,6 +10,38 @@ from ..domain.interfaces import (
     DocumentRenderer, PdfCompiler, CompileResult,
 )
 from ..domain.entities import Card, CardDeck
+from ..domain.rendering import DeckRenderSettings
+from ..domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
+
+
+def _print_inputs(
+    repo: DeckRepository,
+    deck_id: str,
+    trusted_template: TrustedTemplateVersion | None,
+    snapshot: PrintJobSnapshot | None,
+) -> tuple[CardDeck, DeckRenderSettings, TrustedTemplateVersion | None]:
+    if snapshot is not None:
+        if snapshot.deck_id != deck_id:
+            raise ValueError('print snapshot belongs to another deck')
+        return (
+            CardDeck(list(snapshot.cards)),
+            snapshot.render_settings,
+            snapshot.trusted_template,
+        )
+    return (
+        repo.load_cards(deck_id),
+        repo.get_render_settings(deck_id),
+        trusted_template,
+    )
+
+
+def _configure_print_renderer(
+    renderer: DocumentRenderer,
+    settings: DeckRenderSettings,
+    template: TrustedTemplateVersion | None,
+) -> DocumentRenderer:
+    configured = renderer.with_render_settings(settings)
+    return configured.with_trusted_template(template)
 
 
 class CardLimitExceeded(ValueError):
@@ -77,6 +109,24 @@ class PreflightReport:
                 issue.severity == 'warning' for issue in self.issues
             ),
         }
+
+
+COMPILE_CONTEXT_MARKER = re.compile(
+    r'DIDACTIC-CARDS-HBOX-BEGIN:(\d+):(front|back)(?::(?:body|header))?'
+)
+
+
+def compile_error_context(
+    log: str, deck: CardDeck
+) -> tuple[int, str, Card] | None:
+    matches = list(COMPILE_CONTEXT_MARKER.finditer(log))
+    if not matches:
+        return None
+    number = int(matches[-1].group(1))
+    side = matches[-1].group(2)
+    if not 1 <= number <= len(deck.cards):
+        return None
+    return number, side, deck.cards[number - 1]
 
 
 def _parse_bulk_line(line: str) -> tuple[str, str]:
@@ -297,16 +347,22 @@ class GetDeck:
 
 class GenerateDocument:
     def __init__(self, repo: DeckRepository, renderer: DocumentRenderer,
-                 compiler: PdfCompiler, cards_per_page: int):
+                 compiler: PdfCompiler, cards_per_page: int,
+                 trusted_template: TrustedTemplateVersion | None = None,
+                 snapshot: PrintJobSnapshot | None = None):
         self.repo = repo
         self.renderer = renderer
         self.compiler = compiler
         self.cards_per_page = cards_per_page
+        self.trusted_template = trusted_template
+        self.snapshot = snapshot
 
     def execute(self, deck_id: str) -> CompileResult:
-        deck = self.repo.load_cards(deck_id)
-        renderer = self.renderer.with_render_settings(
-            self.repo.get_render_settings(deck_id)
+        deck, settings, template = _print_inputs(
+            self.repo, deck_id, self.trusted_template, self.snapshot
+        )
+        renderer = _configure_print_renderer(
+            self.renderer, settings, template
         )
         layout = renderer.prepare_print_layout(deck, self.cards_per_page)
         padded_deck = CardDeck(cards=list(layout.cards))
@@ -322,17 +378,23 @@ class GenerateDocumentSide(GenerateDocument):
         compiler: PdfCompiler,
         cards_per_page: int,
         side: str,
+        trusted_template: TrustedTemplateVersion | None = None,
+        snapshot: PrintJobSnapshot | None = None,
     ):
-        super().__init__(repo, renderer, compiler, cards_per_page)
+        super().__init__(
+            repo, renderer, compiler, cards_per_page, trusted_template, snapshot
+        )
         if side not in {'front', 'back'}:
             raise ValueError('side must be front or back')
         self.side = side
 
     def execute(self, deck_id: str) -> CompileResult:
-        deck = self.repo.load_cards(deck_id)
+        deck, settings, template = _print_inputs(
+            self.repo, deck_id, self.trusted_template, self.snapshot
+        )
         method_name = 'render_fronts' if self.side == 'front' else 'render_backs'
-        renderer = self.renderer.with_render_settings(
-            self.repo.get_render_settings(deck_id)
+        renderer = _configure_print_renderer(
+            self.renderer, settings, template
         )
         layout = renderer.prepare_print_layout(deck, self.cards_per_page)
         padded_deck = CardDeck(cards=list(layout.cards))
@@ -364,16 +426,22 @@ class PreflightDocument:
         renderer: DocumentRenderer,
         compiler: PdfCompiler,
         cards_per_page: int,
+        trusted_template: TrustedTemplateVersion | None = None,
+        snapshot: PrintJobSnapshot | None = None,
     ):
         self.repo = repo
         self.renderer = renderer
         self.compiler = compiler
         self.cards_per_page = cards_per_page
+        self.trusted_template = trusted_template
+        self.snapshot = snapshot
 
     def execute(self, deck_id: str) -> PreflightReport:
-        deck = self.repo.load_cards(deck_id)
-        renderer = self.renderer.with_render_settings(
-            self.repo.get_render_settings(deck_id)
+        deck, settings, template = _print_inputs(
+            self.repo, deck_id, self.trusted_template, self.snapshot
+        )
+        renderer = _configure_print_renderer(
+            self.renderer, settings, template
         )
         layout = renderer.prepare_print_layout(deck, self.cards_per_page)
         padded_deck = CardDeck(cards=list(layout.cards))
@@ -428,10 +496,28 @@ class PreflightDocument:
 
         result = self.compiler.compile(renderer.render(padded_deck))
         if not result.success:
+            context = compile_error_context(result.log, deck)
+            if context is not None:
+                number, side, card = context
+                side_label = 'лицевая' if side == 'front' else 'оборотная'
+                message = (
+                    f'Карточка {number}: {side_label} сторона '
+                    'не компилируется'
+                )
+            else:
+                number = None
+                side = None
+                card = None
+                message = (
+                    'Документ не компилируется; проверьте содержимое карточек'
+                )
             issues.append(PreflightIssue(
                 code='compile-failed',
                 severity='error',
-                message='Документ не компилируется; проверьте содержимое карточек',
+                message=message,
+                card_id=card.id if card else None,
+                card_number=number,
+                side=side,
             ))
             return PreflightReport(False, tuple(issues))
 
@@ -583,15 +669,21 @@ class PreflightDocument:
 
 class PreviewDocument:
     def __init__(self, repo: DeckRepository, renderer: DocumentRenderer,
-                 cards_per_page: int):
+                 cards_per_page: int,
+                 trusted_template: TrustedTemplateVersion | None = None,
+                 snapshot: PrintJobSnapshot | None = None):
         self.repo = repo
         self.renderer = renderer
         self.cards_per_page = cards_per_page
+        self.trusted_template = trusted_template
+        self.snapshot = snapshot
 
     def execute(self, deck_id: str) -> str:
-        deck = self.repo.load_cards(deck_id)
-        renderer = self.renderer.with_render_settings(
-            self.repo.get_render_settings(deck_id)
+        deck, settings, template = _print_inputs(
+            self.repo, deck_id, self.trusted_template, self.snapshot
+        )
+        renderer = _configure_print_renderer(
+            self.renderer, settings, template
         )
         layout = renderer.prepare_print_layout(deck, self.cards_per_page)
         padded_deck = CardDeck(cards=list(layout.cards))

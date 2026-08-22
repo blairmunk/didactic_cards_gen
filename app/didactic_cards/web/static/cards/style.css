@@ -551,6 +551,33 @@ summary {
     text-decoration: underline;
 }
 
+.warning-panel {
+    margin: 16px 0;
+    padding: 14px 16px;
+    border: 2px solid #d98200;
+    border-radius: 6px;
+    background: #fff4db;
+    color: #5c3500;
+}
+
+.trusted-editor textarea {
+    width: 100%;
+    box-sizing: border-box;
+    min-height: 260px;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.trusted-version pre {
+    max-height: 220px;
+    overflow: auto;
+    border: 1px solid #d8d8d8;
+    background: #f7f7f7;
+}
+
+.trusted-version code {
+    overflow-wrap: anywhere;
+}
+
 /* ─── Адаптивность ─── */
 @media (max-width: 700px) {
     .form-row {

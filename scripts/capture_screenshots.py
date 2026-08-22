@@ -31,6 +31,21 @@ async def capture(base_url: str, deck_id: str, output_dir: Path) -> None:
         await page.goto(f"{base_url}/deck/{deck_id}", {"waitUntil": "domcontentloaded"})
         await page.screenshot({"path": str(output_dir / "deck-editor.png"), "fullPage": True})
 
+        advanced_link = await page.querySelector('a[href$="advanced"]')
+        if advanced_link is not None:
+            await page.goto(
+                f"{base_url}/deck/{deck_id}/advanced",
+                {"waitUntil": "domcontentloaded"},
+            )
+            await page.screenshot({
+                "path": str(output_dir / "trusted-latex.png"),
+                "fullPage": True,
+            })
+            await page.goto(
+                f"{base_url}/deck/{deck_id}",
+                {"waitUntil": "domcontentloaded"},
+            )
+
         first_card_id = await page.Jeval(
             "#cards-tbody tr:first-child",
             "element => element.dataset.cardId",
@@ -47,8 +62,6 @@ async def capture(base_url: str, deck_id: str, output_dir: Path) -> None:
         )
         await asyncio.sleep(1)
         await page.screenshot({"path": str(output_dir / "edit-card.png"), "fullPage": True})
-
-
         await page.goto(
             f"{base_url}/printer_profiles", {"waitUntil": "domcontentloaded"}
         )

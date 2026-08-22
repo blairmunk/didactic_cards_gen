@@ -257,7 +257,7 @@ def test_schema_four_adds_section_layout_settings_without_changing_behavior(
             )
         }
         assert {'header_repeat', 'section_break'} <= columns
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 6
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 7
 
 
 def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
@@ -273,7 +273,58 @@ def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
 
     assert migrated.list_trusted_templates(deck.id) == []
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 6
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 7
+
+
+def test_schema_six_adds_escaped_content_modes_without_activating_template(
+    tmp_path,
+):
+    data_dir = tmp_path / 'schema-six'
+    repository = SqliteRepository(data_dir)
+    deck = repository.create_deck('Existing trusted')
+    template = repository.quarantine_trusted_template(
+        deck.id, '{{ content }}'
+    )
+    with closing(repository._connect()) as connection:
+        connection.execute('ALTER TABLE trusted_templates RENAME TO templates_v7')
+        connection.execute(
+            '''
+            CREATE TABLE trusted_templates (
+                id TEXT PRIMARY KEY,
+                deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                source_hash TEXT NOT NULL,
+                provenance TEXT NOT NULL,
+                status TEXT NOT NULL,
+                origin_template_id TEXT,
+                created_at TEXT NOT NULL,
+                approved_at TEXT,
+                UNIQUE(deck_id, version)
+            )
+            '''
+        )
+        connection.execute(
+            '''
+            INSERT INTO trusted_templates
+            SELECT id, deck_id, version, source, source_hash, provenance,
+                   status, origin_template_id, created_at, approved_at
+            FROM templates_v7
+            '''
+        )
+        connection.execute('DROP TABLE templates_v7')
+        connection.execute('PRAGMA user_version = 6')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+    restored = migrated.list_trusted_templates(deck.id)[0]
+
+    assert restored.id == template.id
+    assert restored.front_content_mode.value == 'escaped'
+    assert restored.back_content_mode.value == 'escaped'
+    assert restored.status is TemplateStatus.QUARANTINED
+    with closing(migrated._connect()) as connection:
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 7
 
 
 def test_deck_and_ordered_card_round_trip(sqlite_repo):
@@ -360,11 +411,16 @@ def test_trusted_templates_are_versioned_quarantined_and_explicitly_approved(
         deck.id, r'\centering {{ content }}'
     )
     second = sqlite_repo.quarantine_trusted_template(
-        deck.id, r'\raggedleft {{ content }}'
+        deck.id,
+        r'\raggedleft {{ content }}',
+        front_content_mode='raw',
+        back_content_mode='escaped',
     )
 
     assert (first.version, second.version) == (1, 2)
     assert first.status is TemplateStatus.QUARANTINED
+    assert second.front_content_mode.value == 'raw'
+    assert second.back_content_mode.value == 'escaped'
     approved_first = sqlite_repo.approve_trusted_template(deck.id, first.id)
     assert approved_first.status is TemplateStatus.APPROVED
     assert sqlite_repo.get_approved_trusted_template(deck.id).id == first.id
@@ -451,6 +507,27 @@ def test_trusted_template_repository_rejects_missing_deck_and_version(
 def test_trusted_service_flag_must_be_boolean(sqlite_repo):
     with pytest.raises(TypeError, match='feature flag'):
         TrustedTemplateService(sqlite_repo, enabled=1)
+
+
+def test_print_job_snapshot_is_one_consistent_deck_style_template_read(
+    sqlite_repo,
+):
+    deck = sqlite_repo.create_deck('Snapshot')
+    card = Card(front='Q', back='A')
+    sqlite_repo.save_cards(deck.id, CardDeck([card]))
+    template = sqlite_repo.quarantine_trusted_template(
+        deck.id, '{{ content }}', back_content_mode='raw'
+    )
+    sqlite_repo.approve_trusted_template(deck.id, template.id)
+
+    snapshot = sqlite_repo.get_print_job_snapshot(deck.id)
+
+    assert snapshot.deck_id == deck.id
+    assert snapshot.deck_version == sqlite_repo.get_deck(deck.id).version
+    assert [item.id for item in snapshot.cards] == [card.id]
+    assert snapshot.render_settings == DeckRenderSettings.centered()
+    assert snapshot.trusted_template.id == template.id
+    assert snapshot.trusted_template.back_content_mode.value == 'raw'
 
 
 def test_create_deck_with_cards_is_one_transaction(sqlite_repo, monkeypatch):

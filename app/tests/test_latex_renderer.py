@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.rendering import DeckRenderSettings
+from didactic_cards.domain.trusted import TrustedTemplateVersion
 from didactic_cards.adapters.latex_renderer import (
     LatexRenderer,
     UnsafeLatexError,
@@ -14,6 +15,54 @@ from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 
 
 GOLDEN_DIR = Path(__file__).with_name('golden')
+
+
+def test_trusted_template_replaces_builtin_body_and_keeps_context_typed():
+    template = TrustedTemplateVersion(
+        deck_id='deck',
+        version=1,
+        source=(
+            r'\vfill\centering '
+            r'{{ section }} / {{ card_number }} / {{ side }}: {{ content }}'
+            r'\vfill'
+        ),
+        front_content_mode='escaped',
+        back_content_mode='raw',
+    )
+    renderer = LatexRenderer(
+        cards_per_row=1, rows_per_page=1
+    ).with_trusted_template(template)
+
+    latex = renderer.render(CardDeck([Card(
+        front='Цена 10% & итог',
+        back=r'\textbf{RAW}',
+        section='A&B',
+    )]))
+
+    assert r'A\&B / 1 / front: Цена 10\% \& итог' in latex
+    assert r'A\&B / 1 / back: \textbf{RAW}' in latex
+    assert r'\checkedcardheader{1}' not in latex
+    assert 'DIDACTIC-CARDS-HBOX-BEGIN:1:front:body' in latex
+    assert 'DIDACTIC-CARDS-HBOX-BEGIN:1:back:body' in latex
+
+
+def test_trusted_template_is_copy_configured_and_padding_stays_blank():
+    base = LatexRenderer(cards_per_row=2, rows_per_page=1)
+    template = TrustedTemplateVersion(
+        deck_id='deck', version=1, source='MARK {{ content }}'
+    )
+    configured = base.with_trusted_template(template)
+    deck = CardDeck([Card(front='Q', back='A')])
+    layout = configured.prepare_print_layout(deck, 2)
+    latex = configured.render(CardDeck(list(layout.cards)))
+
+    assert base.trusted_template is None
+    assert configured.trusted_template is template
+    assert latex.count('MARK') == 2
+    with pytest.raises(TypeError, match='TrustedTemplateVersion'):
+        LatexRenderer(trusted_template='bad')
+    with pytest.raises(TypeError, match='TrustedTemplateVersion'):
+        base.with_trusted_template('bad')
 
 
 def _card_measurement_log(log: str) -> str:

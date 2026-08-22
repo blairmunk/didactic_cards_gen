@@ -9,11 +9,15 @@ from didactic_cards.domain.trusted import (
     MAX_TRUSTED_JOB_BYTES,
     MAX_TRUSTED_TEMPLATE_BYTES,
     TemplateStatus,
+    ContentMode,
+    PrintJobSnapshot,
     TrustedCompileJob,
     TrustedTemplateVersion,
     render_trusted_template,
     validate_template_source,
 )
+from didactic_cards.domain.entities import Card
+from didactic_cards.domain.rendering import DeckRenderSettings
 
 
 def test_strict_template_substitution_supports_all_placeholders_and_unicode():
@@ -85,6 +89,8 @@ def test_template_record_is_hashed_and_approval_is_explicit():
     )
 
     assert template.status is TemplateStatus.QUARANTINED
+    assert template.front_content_mode is ContentMode.ESCAPED
+    assert template.back_content_mode is ContentMode.ESCAPED
     assert len(template.source_hash) == 64
     approved = template.approved()
     assert approved.status is TemplateStatus.APPROVED
@@ -134,6 +140,19 @@ def test_template_record_rejects_invalid_identity_and_source(kwargs, message):
         TrustedTemplateVersion(**values)
 
 
+def test_template_record_validates_independent_content_modes():
+    template = TrustedTemplateVersion(
+        deck_id='deck',
+        source='{{ content }}',
+        version=1,
+        front_content_mode='raw',
+        back_content_mode='escaped',
+    )
+    assert template.front_content_mode is ContentMode.RAW
+    with pytest.raises(ValueError):
+        replace(template, back_content_mode='automatic')
+
+
 def test_template_and_job_size_limits_are_utf8_byte_limits():
     with pytest.raises(ValueError, match='too large'):
         TrustedTemplateVersion(
@@ -165,3 +184,48 @@ def test_job_protocol_round_trip_detects_unknown_fields_and_tampering():
         TrustedCompileJob.from_dict([])
     with pytest.raises(ValueError, match='NUL'):
         TrustedCompileJob(latex_source='bad\x00source')
+
+
+def test_print_snapshot_requires_matching_approved_template():
+    approved = TrustedTemplateVersion(
+        deck_id='deck', source='{{ content }}', version=1
+    ).approved()
+    snapshot = PrintJobSnapshot(
+        deck_id='deck',
+        deck_version=2,
+        cards=(Card(front='Q'),),
+        render_settings=DeckRenderSettings.centered(),
+        trusted_template=approved,
+    )
+    assert snapshot.trusted_template.source_hash == approved.source_hash
+
+    with pytest.raises(ValueError, match='approved'):
+        replace(
+            snapshot,
+            trusted_template=TrustedTemplateVersion(
+                deck_id='deck', source='{{ content }}', version=2
+            ),
+        )
+    with pytest.raises(ValueError, match='approved'):
+        replace(snapshot, trusted_template=replace(approved, deck_id='another'))
+
+
+@pytest.mark.parametrize(
+    ('changes', 'error'),
+    [
+        ({'deck_id': ''}, ValueError),
+        ({'deck_version': True}, ValueError),
+        ({'cards': [Card()]}, TypeError),
+        ({'render_settings': 'bad'}, TypeError),
+    ],
+)
+def test_print_snapshot_rejects_incomplete_or_untyped_state(changes, error):
+    values = {
+        'deck_id': 'deck',
+        'deck_version': 1,
+        'cards': (),
+        'render_settings': DeckRenderSettings.centered(),
+    }
+    values.update(changes)
+    with pytest.raises(error):
+        PrintJobSnapshot(**values)

@@ -2,7 +2,7 @@
 
 Локальное Flask-приложение для создания колод дидактических карточек и сборки A4 PDF через LaTeX. У карточки есть лицевая сторона (задание), оборотная сторона (ответ) и сохраняемая секция/тема; данные сохраняются транзакционно в SQLite. Поддерживаются пакетный ввод, CSV, формулы, сортировка, клонирование колод, сохраняемые профили принтера, двухстраничный калибровочный PDF, duplex PDF и отдельные PDF лиц/оборотов для ручной двусторонней печати.
 
-> Статус после начала remediation 22.08.2026: программный порядок duplex-страниц исправлен (`front-1, back-1, front-2, back-2`), добавлены long-edge/short-edge transforms, независимый поворот содержимого оборота 0°/180° (legacy long-edge по умолчанию — 180°), X/Y calibration offsets, измеряемый калибровочный лист, однопроходные registration marks, TeX auto-fit и адресный preflight содержимого. SQLite schema 6 и JSON export schema 3 сохраняют секции и безопасные настройки оформления; schema 6 также добавляет отдельный карантин версий trusted-шаблона, не входящий в обычный импорт. В UI и PDF работают presets, девять комбинаций выравнивания, колонтитулы из секции, выбор их повтора и начало новой секции со следующей карточки, строки или физического листа; существующие колоды сохраняют прежнее поведение. Защищённый фундамент advanced LaTeX уже реализован, но UI появится только на следующем этапе. Гарантия точности всё ещё требует физического прогона; актуальный прогресс — в [плане ревизии](docs/REMEDIATION_PLAN.md).
+> Статус после remediation 22.08.2026: программный порядок duplex-страниц исправлен (`front-1, back-1, front-2, back-2`), добавлены long-edge/short-edge transforms, независимый поворот оборота 0°/180°, calibration offsets/лист, registration marks, auto-fit и адресный preflight. SQLite schema 7 и JSON export schema 4 сохраняют секции, оформление и карантин trusted-шаблонов. В UI и PDF работают presets, выравнивание 3×3, колонтитулы и физические разрывы секций. Явно включаемый advanced-режим даёт versioned внутренний TeX-шаблон, независимые escaped/raw стороны, test compile, approval/history/reset и компиляцию только в sandbox; импорт и clone никогда не наследуют approval. Гарантия точности всё ещё требует физического прогона; актуальный прогресс — в [плане ревизии](docs/REMEDIATION_PLAN.md).
 
 ![Редактор колоды](docs/images/deck-editor.png)
 
@@ -37,7 +37,7 @@ export DIDACTIC_CARDS_DATA_DIR='/srv/didactic-cards/data'
 
 `GET /health/live` проверяет процесс, `GET /health/ready` — целостность/доступность SQLite write-транзакции и наличие TeX executable. Debug по умолчанию выключен; `DIDACTIC_CARDS_DEBUG=true` предназначен только для локальной диагностики. Ответы получают `X-Request-ID`, а HTTP и PDF timing пишутся однострочными JSON-событиями без текста карточек и внутренних путей.
 
-Инфраструктура будущего advanced/trusted LaTeX на Linux требует `bubblewrap` (`sudo apt install bubblewrap`) и включается только явной переменной `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true`. Сейчас этот флаг активирует sandbox/readiness-контур, но не добавляет пользовательский редактор и не меняет обычную безопасную генерацию. Если namespaces или TeX runtime недоступны, `/health/ready` закрыто возвращает 503.
+Advanced/trusted LaTeX на Linux требует `bubblewrap` (`sudo apt install bubblewrap`) и включается только явной переменной `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true`. После этого в оформлении колоды появляется отдельный редактор. Без сохранения в карантин, успешного test compile и явного approval обычная печать не меняется. Если namespaces или TeX runtime недоступны, активация запрещена, а `/health/ready` закрыто возвращает 503. Для сетевого deployment обязательно закройте приложение аутентификацией reverse proxy: встроенной модели пользователей пока нет.
 
 Если существующий `venv` не запускается с `Exec format error`, не переиспользуйте его: это непереносимый Windows/WSL link-файл. Создайте `.venv` командами выше.
 
@@ -49,7 +49,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 476 основных тестов и отдельный проходящий Chromium E2E без `xfail`; обязательный branch coverage остаётся не ниже 98%. Реальные PDF также проходят vector geometry, матрицу выравнивания 3×3, проверку принадлежности body своей карточке, section sheet-break с полными duplex-парами, двухстраничный raster golden diff, адресное измерение overflow, проверку A4-калибровочного листа и hostile-набор изолированного trusted compiler. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает TeX/bubblewrap-интеграцию с обязательным порогом 98%.
+Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 506 основных тестов и отдельный проходящий Chromium E2E без `xfail`; branch coverage выше обязательного порога 98%. Реальные PDF также проходят vector geometry, матрицу выравнивания 3×3, section sheet-break, raster golden diff, overflow, A4-калибровку и hostile-набор изолированного trusted compiler. E2E проходит карантин, approval и trusted PDF. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает TeX/bubblewrap-интеграцию.
 
 Проверить целостность хранилища без автоматического исправления:
 

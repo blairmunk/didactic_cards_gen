@@ -21,6 +21,11 @@ class BrowserCompiler:
         return CompileResult(True, b'%PDF-1.7 browser-e2e', '')
 
 
+class BrowserTrustedCompiler(BrowserCompiler):
+    def readiness_check(self):
+        return True
+
+
 async def _exercise_browser(base_url: str, csv_path: str) -> None:
     from pyppeteer import launch
 
@@ -137,6 +142,36 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
         )
         assert await page.Jeval('#cards-count', 'element => element.textContent') == '3'
 
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('a.btn-warning[href$="advanced"]'),
+        )
+        await page.evaluate(
+            "document.getElementById('trusted-source').value = "
+            "'\\\\centering {{ content }}'"
+        )
+        await page.select('#front-content-mode', 'escaped')
+        await page.select('#back-content-mode', 'raw')
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('button[formaction$="advanced/stage"]'),
+        )
+        await page.click('input[name="confirm_trusted"]')
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('.trusted-version form button[type="submit"]'),
+        )
+        assert 'Активная версия' in await page.Jeval(
+            '.trusted-version', 'element => element.textContent'
+        )
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('.breadcrumb a:nth-of-type(2)'),
+        )
+        assert 'Advanced / trusted LaTeX — активен' in await page.Jeval(
+            '#render-settings-form', 'element => element.textContent'
+        )
+
         pdf_result = await page.evaluate(
             '''async () => {
                 const form = document.querySelector('form[action$="generate"]');
@@ -193,12 +228,18 @@ def test_complete_browser_workflow_is_offline_and_persistent(tmp_path):
     csv_path = tmp_path / 'cards.csv'
     csv_path.write_text('csv question;csv answer\n', encoding='utf-8')
     app = create_app(
-        config=AppConfig(secret_key='browser-secret'),
+        config=AppConfig(
+            secret_key='browser-secret', trusted_latex_enabled=True
+        ),
         data_dir=tmp_path / 'data',
         renderer=LatexRenderer(),
         compiler=BrowserCompiler(),
     )
-    app.config.update(TESTING=False, CSRF_ENABLED=True)
+    app.config.update(
+        TESTING=False,
+        CSRF_ENABLED=True,
+        TRUSTED_COMPILER=BrowserTrustedCompiler(),
+    )
     server = make_server('127.0.0.1', 0, app)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

@@ -9,7 +9,12 @@ import pytest
 from didactic_cards.adapters.sandboxed_pdflatex_compiler import (
     SandboxedPdfLatexCompiler,
 )
-from didactic_cards.domain.trusted import TrustedCompileJob
+from didactic_cards.adapters.latex_renderer import LatexRenderer
+from didactic_cards.domain.entities import Card, CardDeck
+from didactic_cards.domain.trusted import (
+    TrustedCompileJob,
+    TrustedTemplateVersion,
+)
 
 
 SIMPLE_DOCUMENT = r'''\documentclass{article}
@@ -197,6 +202,42 @@ def test_real_bwrap_compiles_without_home_project_or_network_mounts(tmp_path):
 
     assert compiler.readiness_check() is True
     result = compiler.compile(SIMPLE_DOCUMENT)
+
+    assert result.success, result.log
+    assert result.pdf_data.startswith(b'%PDF')
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.integration
+def test_real_bwrap_compiles_trusted_card_template_with_raw_and_escaped_sides(
+    tmp_path,
+):
+    if not shutil.which('bwrap') or not shutil.which('pdflatex'):
+        pytest.skip('bubblewrap and pdflatex are required')
+    compiler = SandboxedPdfLatexCompiler(
+        bwrap_path=shutil.which('bwrap'),
+        pdflatex_path=shutil.which('pdflatex'),
+        temp_root=tmp_path,
+    )
+    template = TrustedTemplateVersion(
+        deck_id='deck',
+        version=1,
+        source=r'\vfill\centering {{ section }}: {{ content }}\vfill',
+        front_content_mode='escaped',
+        back_content_mode='raw',
+    )
+    renderer = LatexRenderer(
+        cards_per_row=1,
+        rows_per_page=1,
+        trusted_template=template,
+    )
+    latex = renderer.render(CardDeck([Card(
+        front='Стоимость 10% & ответ',
+        back=r'\textbf{Жирный ответ}',
+        section='Тема & раздел',
+    )]))
+
+    result = compiler.compile(latex)
 
     assert result.success, result.log
     assert result.pdf_data.startswith(b'%PDF')

@@ -7,6 +7,9 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 
+from .entities import Card
+from .rendering import DeckRenderSettings
+
 
 MAX_TRUSTED_TEMPLATE_BYTES = 64 * 1024
 MAX_TRUSTED_JOB_BYTES = 1024 * 1024
@@ -39,6 +42,11 @@ class TemplateStatus(str, Enum):
     REVOKED = 'revoked'
 
 
+class ContentMode(str, Enum):
+    ESCAPED = 'escaped'
+    RAW = 'raw'
+
+
 @dataclass(frozen=True)
 class TrustedTemplateVersion:
     deck_id: str
@@ -46,6 +54,8 @@ class TrustedTemplateVersion:
     version: int
     provenance: TemplateProvenance | str = TemplateProvenance.LOCAL_AUTHOR
     status: TemplateStatus | str = TemplateStatus.QUARANTINED
+    front_content_mode: ContentMode | str = ContentMode.ESCAPED
+    back_content_mode: ContentMode | str = ContentMode.ESCAPED
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     source_hash: str = ''
     origin_template_id: str | None = None
@@ -67,6 +77,12 @@ class TrustedTemplateVersion:
             self, 'provenance', TemplateProvenance(self.provenance)
         )
         object.__setattr__(self, 'status', TemplateStatus(self.status))
+        object.__setattr__(
+            self, 'front_content_mode', ContentMode(self.front_content_mode)
+        )
+        object.__setattr__(
+            self, 'back_content_mode', ContentMode(self.back_content_mode)
+        )
         expected_hash = _sha256(self.source)
         if self.source_hash and self.source_hash != expected_hash:
             raise ValueError('trusted template source hash mismatch')
@@ -174,3 +190,34 @@ class TrustedCompileJob:
         if not isinstance(data['source_hash'], str) or len(data['source_hash']) != 64:
             raise ValueError('trusted job protocol requires source hash')
         return cls(**data)
+
+
+@dataclass(frozen=True)
+class PrintJobSnapshot:
+    deck_id: str
+    deck_version: int
+    cards: tuple[Card, ...]
+    render_settings: DeckRenderSettings
+    trusted_template: TrustedTemplateVersion | None = None
+
+    def __post_init__(self) -> None:
+        if not self.deck_id:
+            raise ValueError('print snapshot deck_id is required')
+        if (
+            isinstance(self.deck_version, bool)
+            or not isinstance(self.deck_version, int)
+            or self.deck_version <= 0
+        ):
+            raise ValueError('print snapshot deck version must be positive')
+        if not isinstance(self.cards, tuple) or any(
+            not isinstance(card, Card) for card in self.cards
+        ):
+            raise TypeError('print snapshot cards must be a tuple of Card')
+        if not isinstance(self.render_settings, DeckRenderSettings):
+            raise TypeError('print snapshot settings are invalid')
+        if self.trusted_template is not None and (
+            not isinstance(self.trusted_template, TrustedTemplateVersion)
+            or self.trusted_template.deck_id != self.deck_id
+            or self.trusted_template.status is not TemplateStatus.APPROVED
+        ):
+            raise ValueError('print snapshot template must be approved for deck')

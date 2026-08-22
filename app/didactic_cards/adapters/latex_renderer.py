@@ -22,6 +22,11 @@ from ..domain.rendering import (
     StylePreset,
     VerticalAlignment,
 )
+from ..domain.trusted import (
+    ContentMode,
+    TrustedTemplateVersion,
+    render_trusted_template,
+)
 
 
 PT_TO_CM = 2.54 / 72.27
@@ -148,6 +153,7 @@ class LatexRenderer(DocumentRenderer):
         registration_marks: bool = False,
         auto_fit: bool = True,
         render_settings: DeckRenderSettings | None = None,
+        trusted_template: TrustedTemplateVersion | None = None,
     ):
         if cards_per_row <= 0 or rows_per_page <= 0:
             raise ValueError('cards_per_row and rows_per_page must be positive')
@@ -201,6 +207,11 @@ class LatexRenderer(DocumentRenderer):
         )
         if not isinstance(self.render_settings, DeckRenderSettings):
             raise TypeError('render_settings must be DeckRenderSettings')
+        if trusted_template is not None and not isinstance(
+            trusted_template, TrustedTemplateVersion
+        ):
+            raise TypeError('trusted_template must be TrustedTemplateVersion')
+        self.trusted_template = trusted_template
         self.cards_per_page = cards_per_row * rows_per_page
 
     def with_render_settings(
@@ -210,6 +221,17 @@ class LatexRenderer(DocumentRenderer):
             raise TypeError('settings must be DeckRenderSettings')
         configured = copy(self)
         configured.render_settings = settings
+        return configured
+
+    def with_trusted_template(
+        self, template: TrustedTemplateVersion | None
+    ) -> LatexRenderer:
+        if template is not None and not isinstance(
+            template, TrustedTemplateVersion
+        ):
+            raise TypeError('template must be TrustedTemplateVersion')
+        configured = copy(self)
+        configured.trusted_template = template
         return configured
 
     def prepare_print_layout(
@@ -571,6 +593,25 @@ class LatexRenderer(DocumentRenderer):
         text: str,
         is_section_start: bool,
     ) -> str:
+        if self.trusted_template is not None and card_number:
+            mode = (
+                self.trusted_template.front_content_mode
+                if side == 'front'
+                else self.trusted_template.back_content_mode
+            )
+            content = text if mode is ContentMode.RAW else _card_content(text)
+            fragment = render_trusted_template(
+                self.trusted_template.source,
+                content=content,
+                section=_card_content(card.section),
+                card_number=card_number,
+                side=side,
+            )
+            return (
+                f'\\typeout{{DIDACTIC-CARDS-HBOX-BEGIN:{card_number}:{side}:body}}%\n'
+                + fragment
+                + f'\n\\typeout{{DIDACTIC-CARDS-HBOX-END:{card_number}:{side}:body}}'
+            )
         settings = self.render_settings
         legacy_layout = (
             settings.preset is StylePreset.LEGACY_TOP_LEFT

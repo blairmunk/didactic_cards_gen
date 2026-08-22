@@ -9,15 +9,18 @@ from flask import (Blueprint, render_template, request, redirect,
 
 from ..adapters.latex_renderer import UnsafeLatexError
 from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
-from ..domain.interfaces import ConcurrentModificationError
+from ..domain.entities import Card, CardDeck
+from ..domain.interfaces import CompileResult, ConcurrentModificationError
 from ..domain.printing import PrinterProfile
 from ..domain.rendering import DeckRenderSettings, StylePreset
+from ..domain.trusted import ContentMode, PrintJobSnapshot, TrustedTemplateVersion
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
     EditCard, ReorderCards, ResetCards, GetDeck,
     GenerateDocument, GenerateDocumentSide, PreviewDocument, CardLimitExceeded,
     PreflightDocument, CsvValidationError, preview_csv_import,
+    compile_error_context,
 )
 from ..use_cases.deck_use_cases import (
     ListDecks, GetDeckInfo, CreateDeck, UpdateDeck,
@@ -29,6 +32,7 @@ from ..use_cases.deck_transfer import (
     export_deck_json,
     import_deck_json,
 )
+from ..use_cases.trusted_template_use_cases import TrustedTemplateService
 
 cards_bp = Blueprint(
     'cards', __name__,
@@ -69,6 +73,68 @@ def _compiler():
     return current_app.config['COMPILER']
 
 
+def _trusted_enabled() -> bool:
+    return current_app.config.get('TRUSTED_LATEX_ENABLED', False) is True
+
+
+def _trusted_compiler():
+    return current_app.config.get('TRUSTED_COMPILER')
+
+
+def _trusted_sandbox_ready() -> bool:
+    compiler = _trusted_compiler()
+    if compiler is None:
+        return False
+    check = getattr(compiler, 'readiness_check', None) or getattr(
+        compiler, 'is_available', None
+    )
+    return check is not None and check()
+
+
+def _trusted_service() -> TrustedTemplateService:
+    if not _trusted_enabled():
+        abort(404)
+    return TrustedTemplateService(_repo(), enabled=True)
+
+
+def _active_trusted_template(deck_id: str):
+    if not _trusted_enabled():
+        return None
+    return _trusted_service().active(deck_id)
+
+
+def _print_compiler_and_template(deck_id: str):
+    get_snapshot = getattr(_repo(), 'get_print_job_snapshot', None)
+    snapshot = get_snapshot(deck_id) if get_snapshot is not None else None
+    template = (
+        snapshot.trusted_template
+        if snapshot is not None else _active_trusted_template(deck_id)
+    )
+    if not _trusted_enabled():
+        template = None
+        if snapshot is not None:
+            snapshot = PrintJobSnapshot(
+                deck_id=snapshot.deck_id,
+                deck_version=snapshot.deck_version,
+                cards=snapshot.cards,
+                render_settings=snapshot.render_settings,
+            )
+    if template is None:
+        return _compiler(), None, snapshot
+    compiler = _trusted_compiler()
+    if compiler is None:
+        class UnavailableTrustedCompiler:
+            def compile(self, _source):
+                return CompileResult(
+                    False,
+                    b'',
+                    'Trusted LaTeX sandbox is unavailable',
+                    'unavailable',
+                )
+        compiler = UnavailableTrustedCompiler()
+    return compiler, template, snapshot
+
+
 def _cards_per_page():
     return current_app.config['CARDS_PER_PAGE']
 
@@ -84,6 +150,8 @@ def _deck_page_context(deck_info, card_deck, **extra):
         'cards_per_page': cards_per_page,
         'print_pages': len(layout.cards) // cards_per_page,
         'empty_slots': layout.section_padding + layout.trailing_padding,
+        'trusted_enabled': _trusted_enabled(),
+        'trusted_active': _active_trusted_template(deck_info.id),
     }
     context.update(extra)
     return context
@@ -369,7 +437,14 @@ def calibration_sheet():
         abort(501, description='Калибровочный лист недоступен')
     result = _compiler().compile(render_sheet())
     if not result.success:
-        status_by_kind = {'timeout': 504, 'unavailable': 503, 'compile-error': 422}
+        status_by_kind = {
+            'timeout': 504,
+            'unavailable': 503,
+            'sandbox-error': 503,
+            'compile-error': 422,
+            'validation': 422,
+            'output-limit': 422,
+        }
         return _render_printer_profiles(
             'Не удалось сформировать калибровочный PDF.',
             status_by_kind.get(result.error_kind, 500),
@@ -517,6 +592,209 @@ def deck_view(deck_id):
             deck_info, card_deck, print_profiles=_print_profiles()
         ),
     )
+
+
+def _render_trusted_page(
+    deck_id: str,
+    *,
+    error: str | None = None,
+    status: int = 200,
+    draft_source: str | None = None,
+    draft_front_mode: str | None = None,
+    draft_back_mode: str | None = None,
+):
+    _trusted_service()
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
+        raise DeckNotFoundError(deck_id)
+    templates = _repo().list_trusted_templates(deck_id)
+    latest = templates[-1] if templates else None
+    default_source = (
+        r'\centering\vfill {{ content }}\vfill'
+    )
+    return render_template(
+        'cards/trusted_latex.html',
+        deck=deck,
+        templates=tuple(reversed(templates)),
+        active=_trusted_service().active(deck_id),
+        draft_source=(
+            draft_source
+            if draft_source is not None
+            else latest.source if latest else default_source
+        ),
+        draft_front_mode=(
+            draft_front_mode
+            or (latest.front_content_mode.value if latest else 'escaped')
+        ),
+        draft_back_mode=(
+            draft_back_mode
+            or (latest.back_content_mode.value if latest else 'escaped')
+        ),
+        sandbox_ready=_trusted_sandbox_ready(),
+        error=error,
+    ), status
+
+
+def _trusted_draft_from_form(deck_id: str) -> TrustedTemplateVersion:
+    return TrustedTemplateVersion(
+        deck_id=deck_id,
+        version=1,
+        source=request.form.get('source', ''),
+        front_content_mode=ContentMode(
+            request.form.get('front_content_mode', 'escaped')
+        ),
+        back_content_mode=ContentMode(
+            request.form.get('back_content_mode', 'escaped')
+        ),
+    )
+
+
+def _compile_trusted_template(deck_id: str, template: TrustedTemplateVersion):
+    compiler = _trusted_compiler()
+    if compiler is None or not _trusted_sandbox_ready():
+        return None
+    cards = _repo().load_cards(deck_id)
+    if not cards.cards:
+        cards = CardDeck([Card(
+            front='Пример лицевой стороны',
+            back='Пример оборотной стороны',
+            section='Пример секции',
+        )])
+    renderer = _renderer().with_render_settings(
+        _repo().get_render_settings(deck_id)
+    ).with_trusted_template(template)
+    layout = renderer.prepare_print_layout(cards, _cards_per_page())
+    latex = renderer.render(CardDeck(list(layout.cards)))
+    return compiler.compile(latex)
+
+
+@cards_bp.route('/deck/<deck_id>/advanced', methods=['GET'])
+def trusted_latex_editor(deck_id):
+    return _render_trusted_page(deck_id)
+
+
+@cards_bp.route('/deck/<deck_id>/advanced/test', methods=['POST'])
+def test_trusted_latex(deck_id):
+    _trusted_service()
+    try:
+        template = _trusted_draft_from_form(deck_id)
+        result = _compile_trusted_template(deck_id, template)
+    except ValueError as error:
+        return _render_trusted_page(
+            deck_id,
+            error=str(error),
+            status=400,
+            draft_source=request.form.get('source', ''),
+            draft_front_mode=request.form.get('front_content_mode'),
+            draft_back_mode=request.form.get('back_content_mode'),
+        )
+    if result is None:
+        return _render_trusted_page(
+            deck_id,
+            error='Изолированный compiler worker не прошёл readiness-проверку.',
+            status=503,
+            draft_source=template.source,
+            draft_front_mode=template.front_content_mode.value,
+            draft_back_mode=template.back_content_mode.value,
+        )
+    if not result.success:
+        context = compile_error_context(
+            result.log, _repo().load_cards(deck_id)
+        )
+        location = (
+            f' Карточка {context[0]}, '
+            f'{"лицевая" if context[1] == "front" else "оборотная"} сторона.'
+            if context is not None else ''
+        )
+        return _render_trusted_page(
+            deck_id,
+            error='Тестовая компиляция шаблона завершилась ошибкой.' + location,
+            status=422,
+            draft_source=template.source,
+            draft_front_mode=template.front_content_mode.value,
+            draft_back_mode=template.back_content_mode.value,
+        )
+    return send_file(
+        io.BytesIO(result.pdf_data),
+        mimetype='application/pdf',
+        as_attachment=False,
+        download_name='trusted-template-test.pdf',
+    )
+
+
+@cards_bp.route('/deck/<deck_id>/advanced/stage', methods=['POST'])
+def stage_trusted_latex(deck_id):
+    service = _trusted_service()
+    try:
+        template = _trusted_draft_from_form(deck_id)
+        service.stage_local(
+            deck_id,
+            template.source,
+            front_content_mode=template.front_content_mode,
+            back_content_mode=template.back_content_mode,
+        )
+    except ValueError as error:
+        return _render_trusted_page(
+            deck_id,
+            error=str(error),
+            status=400,
+            draft_source=request.form.get('source', ''),
+            draft_front_mode=request.form.get('front_content_mode'),
+            draft_back_mode=request.form.get('back_content_mode'),
+        )
+    return redirect(url_for('cards.trusted_latex_editor', deck_id=deck_id))
+
+
+@cards_bp.route(
+    '/deck/<deck_id>/advanced/<template_id>/approve', methods=['POST']
+)
+def approve_trusted_latex(deck_id, template_id):
+    service = _trusted_service()
+    if request.form.get('confirm_trusted') != 'yes':
+        return _render_trusted_page(
+            deck_id,
+            error='Подтвердите, что шаблон является доверенным кодом.',
+            status=400,
+        )
+    templates = {item.id: item for item in _repo().list_trusted_templates(deck_id)}
+    template = templates.get(template_id)
+    if template is None:
+        abort(404)
+    result = _compile_trusted_template(deck_id, template)
+    if result is None:
+        return _render_trusted_page(
+            deck_id,
+            error='Sandbox недоступен; шаблон не активирован.',
+            status=503,
+        )
+    if not result.success:
+        context = compile_error_context(
+            result.log, _repo().load_cards(deck_id)
+        )
+        location = (
+            f' Карточка {context[0]}, '
+            f'{"лицевая" if context[1] == "front" else "оборотная"} сторона.'
+            if context is not None else ''
+        )
+        return _render_trusted_page(
+            deck_id,
+            error=(
+                'Шаблон не активирован: test compile завершился ошибкой.'
+                + location
+            ),
+            status=422,
+        )
+    service.approve(deck_id, template_id)
+    return redirect(url_for('cards.trusted_latex_editor', deck_id=deck_id))
+
+
+@cards_bp.route('/deck/<deck_id>/advanced/reset', methods=['POST'])
+def reset_trusted_latex(deck_id):
+    service = _trusted_service()
+    active = service.active(deck_id)
+    if active is not None:
+        service.revoke(deck_id, active.id)
+    return redirect(url_for('cards.trusted_latex_editor', deck_id=deck_id))
 
 
 @cards_bp.route('/deck/<deck_id>/render_settings', methods=['POST'])
@@ -687,15 +965,19 @@ def _generate_pdf_response(
         )
 
     try:
+        selected_compiler, trusted_template, snapshot = _print_compiler_and_template(
+            deck_id
+        )
         if side is None:
             generator = GenerateDocument(
-                _repo(), _renderer(request.form.get('profile_id')), _compiler(),
-                _cards_per_page()
+                _repo(), _renderer(request.form.get('profile_id')),
+                selected_compiler, _cards_per_page(), trusted_template, snapshot
             )
         else:
             generator = GenerateDocumentSide(
-                _repo(), _renderer(request.form.get('profile_id')), _compiler(),
-                _cards_per_page(), side
+                _repo(), _renderer(request.form.get('profile_id')),
+                selected_compiler, _cards_per_page(), side, trusted_template,
+                snapshot
             )
         compile_started = time.perf_counter()
         result = generator.execute(deck_id)
@@ -735,14 +1017,35 @@ def _generate_pdf_response(
         ), 422
 
     if not result.success:
-        status_by_kind = {'timeout': 504, 'unavailable': 503, 'compile-error': 422}
+        status_by_kind = {
+            'timeout': 504,
+            'unavailable': 503,
+            'sandbox-error': 503,
+            'compile-error': 422,
+            'validation': 422,
+            'output-limit': 422,
+        }
         message_by_kind = {
             'timeout': 'Компиляция PDF превысила допустимое время.',
             'unavailable': 'Компилятор PDF недоступен на сервере.',
+            'sandbox-error': 'Изолированный compiler worker недоступен.',
             'compile-error': 'Не удалось скомпилировать PDF. Проверьте содержимое карточек.',
+            'validation': 'Trusted print job не прошёл проверку.',
+            'output-limit': 'Trusted PDF превысил допустимый размер.',
         }
         status = status_by_kind.get(result.error_kind, 500)
         message = message_by_kind.get(result.error_kind, 'Внутренняя ошибка генерации PDF.')
+        if trusted_template is not None:
+            context = compile_error_context(result.log, card_deck)
+            if context is not None:
+                number, failed_side, _card = context
+                side_label = (
+                    'лицевая' if failed_side == 'front' else 'оборотная'
+                )
+                message += (
+                    f' Ошибка относится к карточке {number}, '
+                    f'{side_label} сторона.'
+                )
         return render_template(
             'cards/error.html', deck=deck_info,
             errors=[message],
@@ -782,9 +1085,12 @@ def generate_backs(deck_id):
 @cards_bp.route('/api/deck/<deck_id>/preflight', methods=['POST'])
 def preflight_document(deck_id):
     try:
+        selected_compiler, trusted_template, snapshot = _print_compiler_and_template(
+            deck_id
+        )
         report = PreflightDocument(
-            _repo(), _renderer(request.form.get('profile_id')), _compiler(),
-            _cards_per_page()
+            _repo(), _renderer(request.form.get('profile_id')),
+            selected_compiler, _cards_per_page(), trusted_template, snapshot
         ).execute(deck_id)
         return jsonify(report.to_dict())
     except UnsafeLatexError as error:
@@ -817,8 +1123,12 @@ def preview_latex(deck_id):
         )
 
     try:
+        _selected_compiler, trusted_template, snapshot = _print_compiler_and_template(
+            deck_id
+        )
         latex = PreviewDocument(
-            _repo(), _renderer(request.form.get('profile_id')), _cards_per_page()
+            _repo(), _renderer(request.form.get('profile_id')),
+            _cards_per_page(), trusted_template, snapshot
         ).execute(deck_id)
     except UnsafeLatexError as error:
         return render_template(

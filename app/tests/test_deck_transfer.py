@@ -6,8 +6,10 @@ import json
 
 import pytest
 
+from didactic_cards.adapters.sqlite_repository import SqliteRepository
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.rendering import DeckRenderSettings
+from didactic_cards.domain.trusted import TemplateStatus, TrustedTemplateVersion
 from didactic_cards.use_cases.deck_transfer import (
     DECK_EXPORT_SCHEMA_VERSION,
     DeckTransferError,
@@ -39,6 +41,7 @@ def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
     assert payload['cards'][0]['id'] == original.id
     assert payload['cards'][0]['section'] == 'Европа'
     assert payload['deck']['render_settings']['preset'] == 'custom'
+    assert payload['trusted_templates'] == []
 
     imported = import_deck_json(repo, exported, max_cards=10)
     imported_card = repo.load_cards(imported.id).cards[0]
@@ -53,6 +56,126 @@ def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
     assert repo.get_render_settings(imported.id).header_visibility.value == 'both'
     assert repo.get_render_settings(imported.id).header_repeat.value == 'section-start'
     assert repo.get_render_settings(imported.id).section_break.value == 'new-row'
+
+
+def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
+    repo = SqliteRepository(tmp_path / 'sqlite-transfer')
+    source = repo.create_deck('Trusted export')
+    repo.save_cards(source.id, CardDeck([Card(front='Q', back='A')]))
+    template = repo.quarantine_trusted_template(
+        source.id,
+        r'\vfill {{ content }}\vfill',
+        front_content_mode='escaped',
+        back_content_mode='raw',
+    )
+    repo.approve_trusted_template(source.id, template.id)
+
+    exported = export_deck_json(repo, source.id)
+    payload = json.loads(exported)
+    exported_template = payload['trusted_templates'][0]
+    assert exported_template['source'] == template.source
+    assert exported_template['source_provenance'] == 'local-author'
+    assert 'status' not in exported_template
+    assert 'approved_at' not in exported_template
+
+    imported = import_deck_json(repo, exported)
+    imported_history = repo.list_trusted_templates(imported.id)
+
+    assert len(imported_history) == 1
+    assert imported_history[0].source == template.source
+    assert imported_history[0].provenance.value == 'imported'
+    assert imported_history[0].origin_template_id == template.id
+    assert imported_history[0].status is TemplateStatus.QUARANTINED
+    assert imported_history[0].back_content_mode.value == 'raw'
+    assert repo.get_approved_trusted_template(imported.id) is None
+
+
+def test_invalid_trusted_import_is_rejected_before_any_write(tmp_path):
+    repo = SqliteRepository(tmp_path / 'invalid-trusted-transfer')
+    payload = {
+        'schema_version': DECK_EXPORT_SCHEMA_VERSION,
+        'deck': {'name': 'Untrusted'},
+        'cards': [],
+        'trusted_templates': [{
+            'id': 'source-template',
+            'version': 1,
+            'source': '{{ content }}',
+            'source_hash': '0' * 64,
+            'source_provenance': 'local-author',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'raw',
+        }],
+    }
+
+    with pytest.raises(DeckTransferError, match='hash mismatch'):
+        import_deck_json(repo, json.dumps(payload).encode())
+    assert repo.list_decks() == []
+
+
+@pytest.mark.parametrize(
+    ('mutation', 'message'),
+    [
+        (lambda payload: payload.pop('trusted_templates'), 'должен содержать'),
+        (lambda payload: payload['trusted_templates'].__setitem__(0, []), 'поля'),
+        (lambda payload: payload['trusted_templates'][0].update(id=''), 'ID'),
+        (
+            lambda payload: payload['trusted_templates'].append(
+                dict(payload['trusted_templates'][0])
+            ),
+            'Повтор',
+        ),
+    ],
+)
+def test_schema_four_rejects_malformed_trusted_contract_before_write(
+    tmp_path, mutation, message
+):
+    repo = SqliteRepository(tmp_path / message)
+    template = TrustedTemplateVersion(
+        deck_id='source', version=1, source='{{ content }}'
+    )
+    payload = {
+        'schema_version': DECK_EXPORT_SCHEMA_VERSION,
+        'deck': {'name': 'Deck'},
+        'cards': [],
+        'trusted_templates': [{
+            'id': template.id,
+            'version': 1,
+            'source': template.source,
+            'source_hash': template.source_hash,
+            'source_provenance': 'local-author',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'escaped',
+        }],
+    }
+    mutation(payload)
+
+    with pytest.raises(DeckTransferError, match=message):
+        import_deck_json(repo, json.dumps(payload).encode())
+    assert repo.list_decks() == []
+
+
+def test_trusted_import_requires_atomic_capable_repository(repo):
+    template = TrustedTemplateVersion(
+        deck_id='source', version=1, source='{{ content }}'
+    )
+    payload = {
+        'schema_version': DECK_EXPORT_SCHEMA_VERSION,
+        'deck': {'name': 'Deck'},
+        'cards': [],
+        'trusted_templates': [{
+            'id': template.id,
+            'version': 1,
+            'source': template.source,
+            'source_hash': template.source_hash,
+            'source_provenance': 'local-author',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'escaped',
+        }],
+    }
+
+    with pytest.raises(DeckTransferError, match='не поддерживает'):
+        import_deck_json(repo, json.dumps(payload).encode())
+    assert repo.list_decks() == []
 
 
 def test_schema_two_import_gets_backward_compatible_section_layout_defaults(repo):

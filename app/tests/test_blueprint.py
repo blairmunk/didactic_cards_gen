@@ -11,10 +11,43 @@ from config import AppConfig
 from didactic_cards.domain.printing import PrinterProfile
 from didactic_cards.adapters.json_repository import RepositoryCorruptionError
 from didactic_cards.adapters.latex_renderer import LatexRenderer
+from didactic_cards.adapters.sqlite_repository import SqliteRepository
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import CompileResult
 from didactic_cards.domain.rendering import DeckRenderSettings
+from didactic_cards.domain.trusted import TemplateStatus
 from run import create_app
+
+
+class RecordingTrustedCompiler:
+    def __init__(self, *, ready=True, success=True):
+        self.ready = ready
+        self.success = success
+        self.sources = []
+
+    def readiness_check(self):
+        return self.ready
+
+    def compile(self, source):
+        self.sources.append(source)
+        return CompileResult(
+            self.success,
+            b'%PDF trusted' if self.success else b'',
+            '' if self.success else 'private sandbox log',
+            None if self.success else 'compile-error',
+        )
+
+
+def _enable_trusted(app, tmp_path, *, compiler=None):
+    repository = SqliteRepository(tmp_path / 'trusted-data')
+    app.config['REPO'] = repository
+    app.config['TRUSTED_LATEX_ENABLED'] = True
+    app.config['TRUSTED_COMPILER'] = compiler or RecordingTrustedCompiler()
+    deck = repository.create_deck('Advanced')
+    repository.save_cards(
+        deck.id, CardDeck([Card(front='10% safe', back=r'\textbf{raw}')])
+    )
+    return repository, deck
 
 
 def test_deck_crud_pages(client, repo):
@@ -973,7 +1006,10 @@ def test_request_size_limit_is_enforced(client, app, deck_id):
     [
         ('timeout', 504, 'превысила допустимое время'),
         ('unavailable', 503, 'недоступен'),
+        ('sandbox-error', 503, 'worker недоступен'),
         ('compile-error', 422, 'Не удалось скомпилировать'),
+        ('validation', 422, 'не прошёл проверку'),
+        ('output-limit', 422, 'превысил допустимый размер'),
     ],
 )
 def test_compiler_errors_are_classified_without_log_leak(
@@ -1011,3 +1047,233 @@ def test_unsafe_math_preview_is_rejected(client, app, deck_id):
     )
     response = client.post(f"/deck/{deck_id}/preview_latex")
     assert response.status_code == 422
+
+
+def test_advanced_routes_are_invisible_until_deployment_flag(client, deck_id):
+    response = client.get(f'/deck/{deck_id}/advanced')
+
+    assert response.status_code == 404
+    assert 'Advanced / trusted LaTeX' not in client.get(
+        f'/deck/{deck_id}'
+    ).text
+
+
+def test_trusted_editor_stages_modes_without_activation(
+    client, app, tmp_path
+):
+    repository, deck = _enable_trusted(app, tmp_path)
+
+    page = client.get(f'/deck/{deck.id}')
+    assert page.status_code == 200
+    assert 'Advanced / trusted LaTeX' in page.text
+
+    staged = client.post(
+        f'/deck/{deck.id}/advanced/stage',
+        data={
+            'source': r'\vfill {{ content }}\vfill',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'raw',
+        },
+    )
+
+    assert staged.status_code == 302
+    history = repository.list_trusted_templates(deck.id)
+    assert len(history) == 1
+    assert history[0].status is TemplateStatus.QUARANTINED
+    assert history[0].front_content_mode.value == 'escaped'
+    assert history[0].back_content_mode.value == 'raw'
+    assert repository.get_approved_trusted_template(deck.id) is None
+
+
+def test_trusted_test_compile_is_read_only_and_validation_is_atomic(
+    client, app, tmp_path
+):
+    repository, deck = _enable_trusted(app, tmp_path)
+
+    invalid = client.post(
+        f'/deck/{deck.id}/advanced/test',
+        data={
+            'source': '{{ content }} {{ content }}',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'escaped',
+        },
+    )
+    valid = client.post(
+        f'/deck/{deck.id}/advanced/test',
+        data={
+            'source': r'\centering {{ content }}',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'escaped',
+        },
+    )
+
+    assert invalid.status_code == 400
+    assert 'exactly once' in invalid.text
+    assert valid.status_code == 200
+    assert valid.mimetype == 'application/pdf'
+    assert repository.list_trusted_templates(deck.id) == []
+
+
+def test_trusted_approval_requires_consent_compile_and_routes_print_to_sandbox(
+    client, app, tmp_path
+):
+    compiler = RecordingTrustedCompiler()
+    repository, deck = _enable_trusted(app, tmp_path, compiler=compiler)
+    template = repository.quarantine_trusted_template(
+        deck.id,
+        r'\centering {{ content }}',
+        front_content_mode='escaped',
+        back_content_mode='raw',
+    )
+
+    denied = client.post(
+        f'/deck/{deck.id}/advanced/{template.id}/approve', data={}
+    )
+    approved = client.post(
+        f'/deck/{deck.id}/advanced/{template.id}/approve',
+        data={'confirm_trusted': 'yes'},
+    )
+    generated = client.post(f'/deck/{deck.id}/generate')
+
+    assert denied.status_code == 400
+    assert approved.status_code == 302
+    assert generated.status_code == 200
+    assert generated.data == b'%PDF trusted'
+    assert repository.get_approved_trusted_template(deck.id).id == template.id
+    assert len(compiler.sources) == 2
+    assert app.config['COMPILER'].sources == []
+
+    reset = client.post(f'/deck/{deck.id}/advanced/reset')
+    assert reset.status_code == 302
+    assert repository.get_approved_trusted_template(deck.id) is None
+
+
+def test_trusted_approval_fails_closed_when_sandbox_or_compile_fails(
+    client, app, tmp_path
+):
+    unavailable = RecordingTrustedCompiler(ready=False)
+    repository, deck = _enable_trusted(
+        app, tmp_path, compiler=unavailable
+    )
+    template = repository.quarantine_trusted_template(
+        deck.id, '{{ content }}'
+    )
+
+    response = client.post(
+        f'/deck/{deck.id}/advanced/{template.id}/approve',
+        data={'confirm_trusted': 'yes'},
+    )
+
+    assert response.status_code == 503
+    assert repository.get_approved_trusted_template(deck.id) is None
+
+    failing = RecordingTrustedCompiler(success=False)
+    app.config['TRUSTED_COMPILER'] = failing
+    response = client.post(
+        f'/deck/{deck.id}/advanced/{template.id}/approve',
+        data={'confirm_trusted': 'yes'},
+    )
+    assert response.status_code == 422
+    assert 'private sandbox log' not in response.text
+    assert repository.get_approved_trusted_template(deck.id) is None
+
+
+def test_trusted_editor_covers_empty_sample_and_fail_closed_form_paths(
+    client, app, tmp_path
+):
+    repository, deck = _enable_trusted(app, tmp_path)
+    repository.save_cards(deck.id, CardDeck())
+
+    sample = client.post(
+        f'/deck/{deck.id}/advanced/test',
+        data={
+            'source': '{{ content }}',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'escaped',
+        },
+    )
+    invalid_stage = client.post(
+        f'/deck/{deck.id}/advanced/stage',
+        data={'source': 'missing placeholder'},
+    )
+    missing_version = client.post(
+        f'/deck/{deck.id}/advanced/missing/approve',
+        data={'confirm_trusted': 'yes'},
+    )
+    inactive_reset = client.post(f'/deck/{deck.id}/advanced/reset')
+
+    assert sample.status_code == 200
+    assert invalid_stage.status_code == 400
+    assert missing_version.status_code == 404
+    assert inactive_reset.status_code == 302
+
+    app.config['TRUSTED_COMPILER'] = None
+    page = client.get(f'/deck/{deck.id}/advanced')
+    unavailable_test = client.post(
+        f'/deck/{deck.id}/advanced/test',
+        data={
+            'source': '{{ content }}',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'escaped',
+        },
+    )
+    assert page.status_code == 200
+    assert 'Sandbox:</strong> недоступен' in page.text
+    assert unavailable_test.status_code == 503
+
+
+def test_trusted_compile_and_print_errors_name_card_side_without_log_leak(
+    client, app, tmp_path
+):
+    compiler = RecordingTrustedCompiler()
+    repository, deck = _enable_trusted(app, tmp_path, compiler=compiler)
+    template = repository.quarantine_trusted_template(
+        deck.id, '{{ content }}', back_content_mode='raw'
+    )
+    client.post(
+        f'/deck/{deck.id}/advanced/{template.id}/approve',
+        data={'confirm_trusted': 'yes'},
+    )
+    compiler.success = False
+
+    def fail_with_context(_source):
+        return CompileResult(
+            False,
+            b'',
+            'DIDACTIC-CARDS-HBOX-BEGIN:1:back:body\n/private/log',
+            'compile-error',
+        )
+
+    compiler.compile = fail_with_context
+    tested = client.post(
+        f'/deck/{deck.id}/advanced/test',
+        data={
+            'source': '{{ content }}',
+            'front_content_mode': 'escaped',
+            'back_content_mode': 'raw',
+        },
+    )
+    generated = client.post(f'/deck/{deck.id}/generate')
+
+    assert tested.status_code == 422
+    assert 'Карточка 1, оборотная сторона' in tested.text
+    assert generated.status_code == 422
+    assert 'карточке 1, оборотная сторона' in generated.text
+    assert '/private/log' not in tested.text + generated.text
+
+
+def test_approved_trusted_print_never_falls_back_when_worker_disappears(
+    client, app, tmp_path
+):
+    repository, deck = _enable_trusted(app, tmp_path)
+    template = repository.quarantine_trusted_template(
+        deck.id, '{{ content }}'
+    )
+    repository.approve_trusted_template(deck.id, template.id)
+    app.config['TRUSTED_COMPILER'] = None
+
+    response = client.post(f'/deck/{deck.id}/generate')
+
+    assert response.status_code == 503
+    assert 'недоступен' in response.text
+    assert app.config['COMPILER'].sources == []

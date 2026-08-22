@@ -5,6 +5,8 @@ import pytest
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.domain.interfaces import CompileResult, DocumentRenderer
 from didactic_cards.domain.rendering import DeckRenderSettings
+from didactic_cards.domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
+from didactic_cards.domain.entities import Card
 from didactic_cards.use_cases.card_use_cases import (
     AddCard,
     AddCardsBulk,
@@ -209,6 +211,7 @@ def test_document_renderer_default_settings_hook_is_backward_compatible(app):
     assert DocumentRenderer.with_render_settings(
         renderer, DeckRenderSettings.centered()
     ) is renderer
+    assert DocumentRenderer.with_trusted_template(renderer, None) is renderer
 
 
 @pytest.mark.parametrize(('side', 'expected'), [('front', 'front'), ('back', 'back')])
@@ -301,7 +304,12 @@ def test_preflight_compile_failure_is_safe(repo, deck_id, app):
     class FailingCompiler:
         def compile(self, _source):
             from didactic_cards.domain.interfaces import CompileResult
-            return CompileResult(False, b'', '/private/path', 'compile-error')
+            return CompileResult(
+                False,
+                b'',
+                'DIDACTIC-CARDS-HBOX-BEGIN:1:back:body\n/private/path',
+                'compile-error',
+            )
 
     report = PreflightDocument(
         repo, app.config['RENDERER'], FailingCompiler(), 8
@@ -309,6 +317,9 @@ def test_preflight_compile_failure_is_safe(repo, deck_id, app):
     issue = next(issue for issue in report.issues if issue.code == 'compile-failed')
     assert report.ready is False
     assert '/private/path' not in issue.message
+    assert issue.card_number == 1
+    assert issue.side == 'back'
+    assert issue.card_id is not None
 
 
 def test_preflight_rejects_empty_deck_without_compilation(repo, deck_id, app):
@@ -397,3 +408,66 @@ def test_generate_rejects_non_positive_page_capacity(repo, deck_id, app):
     AddCard(repo).execute(deck_id, "Q", "A")
     with pytest.raises(ValueError, match="cards_per_page"):
         PreviewDocument(repo, app.config["RENDERER"], 0).execute(deck_id)
+
+
+def test_generate_uses_immutable_snapshot_without_rereading_repository(
+    repo, deck_id, app, monkeypatch
+):
+    template = TrustedTemplateVersion(
+        deck_id=deck_id, source='{{ content }}', version=1
+    ).approved()
+    snapshot = PrintJobSnapshot(
+        deck_id=deck_id,
+        deck_version=7,
+        cards=(Card(front='snapshot Q', back='snapshot A'),),
+        render_settings=DeckRenderSettings.centered(),
+        trusted_template=template,
+    )
+
+    monkeypatch.setattr(
+        repo, 'load_cards', lambda _deck_id: pytest.fail('snapshot reread cards')
+    )
+    monkeypatch.setattr(
+        repo,
+        'get_render_settings',
+        lambda _deck_id: pytest.fail('snapshot reread settings'),
+    )
+
+    result = GenerateDocument(
+        repo,
+        app.config['RENDERER'],
+        app.config['COMPILER'],
+        8,
+        snapshot=snapshot,
+    ).execute(deck_id)
+
+    assert result.success is True
+    assert app.config['RENDERER'].decks[-1].cards[0].front == 'snapshot Q'
+    assert app.config['RENDERER'].trusted_templates[-1] is template
+
+    PreviewDocument(
+        repo,
+        app.config['RENDERER'],
+        8,
+        snapshot=PrintJobSnapshot(
+            deck_id=deck_id,
+            deck_version=8,
+            cards=(),
+            render_settings=DeckRenderSettings.centered(),
+        ),
+    ).execute(deck_id)
+    assert app.config['RENDERER'].trusted_templates[-1] is None
+
+    with pytest.raises(ValueError, match='another deck'):
+        GenerateDocument(
+            repo,
+            app.config['RENDERER'],
+            app.config['COMPILER'],
+            8,
+            snapshot=PrintJobSnapshot(
+                deck_id='different',
+                deck_version=1,
+                cards=(),
+                render_settings=DeckRenderSettings.centered(),
+            ),
+        ).execute(deck_id)

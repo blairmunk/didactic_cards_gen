@@ -15,6 +15,8 @@ from ..domain.interfaces import (
 from ..domain.printing import PrinterProfile
 from ..domain.rendering import DeckRenderSettings
 from ..domain.trusted import (
+    ContentMode,
+    PrintJobSnapshot,
     TemplateProvenance,
     TemplateStatus,
     TrustedTemplateVersion,
@@ -23,7 +25,7 @@ from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 6
+SQLITE_SCHEMA_VERSION = 7
 
 
 class LegacyMigrationError(ValueError):
@@ -71,7 +73,7 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _initialize_database(self) -> None:
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, SQLITE_SCHEMA_VERSION}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, SQLITE_SCHEMA_VERSION}:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
@@ -159,6 +161,12 @@ class SqliteRepository(DeckRepository, CardRepository):
                     version INTEGER NOT NULL CHECK (version > 0),
                     source TEXT NOT NULL,
                     source_hash TEXT NOT NULL,
+                    front_content_mode TEXT NOT NULL DEFAULT 'escaped' CHECK (
+                        front_content_mode IN ('escaped', 'raw')
+                    ),
+                    back_content_mode TEXT NOT NULL DEFAULT 'escaped' CHECK (
+                        back_content_mode IN ('escaped', 'raw')
+                    ),
                     provenance TEXT NOT NULL CHECK (
                         provenance IN ('local-author', 'imported', 'cloned')
                     ),
@@ -244,6 +252,20 @@ class SqliteRepository(DeckRepository, CardRepository):
                         CHECK (section_break IN ('continuous', 'new-row', 'new-sheet'))
                     """
                 )
+            template_columns = {
+                row['name'] for row in connection.execute(
+                    'PRAGMA table_info(trusted_templates)'
+                )
+            }
+            for column in ('front_content_mode', 'back_content_mode'):
+                if column not in template_columns:
+                    connection.execute(
+                        f"""
+                        ALTER TABLE trusted_templates
+                        ADD COLUMN {column} TEXT NOT NULL DEFAULT 'escaped'
+                            CHECK ({column} IN ('escaped', 'raw'))
+                        """
+                    )
             if version < SQLITE_SCHEMA_VERSION:
                 connection.execute(f'PRAGMA user_version = {SQLITE_SCHEMA_VERSION}')
         connection = self._connect()
@@ -391,6 +413,8 @@ class SqliteRepository(DeckRepository, CardRepository):
             version=row['version'],
             source=row['source'],
             source_hash=row['source_hash'],
+            front_content_mode=row['front_content_mode'],
+            back_content_mode=row['back_content_mode'],
             provenance=row['provenance'],
             status=row['status'],
             origin_template_id=row['origin_template_id'],
@@ -410,8 +434,9 @@ class SqliteRepository(DeckRepository, CardRepository):
             '''
             INSERT INTO trusted_templates(
                 id, deck_id, version, source, source_hash, provenance,
-                status, origin_template_id, created_at, approved_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                status, origin_template_id, created_at, approved_at,
+                front_content_mode, back_content_mode
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 template.id,
@@ -425,6 +450,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                 template.created_at.isoformat(),
                 template.approved_at.isoformat()
                 if template.approved_at else None,
+                template.front_content_mode.value,
+                template.back_content_mode.value,
             ),
         )
 
@@ -666,6 +693,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                         deck_id=clone.id,
                         version=version,
                         source=row['source'],
+                        front_content_mode=row['front_content_mode'],
+                        back_content_mode=row['back_content_mode'],
                         provenance=TemplateProvenance.CLONED,
                         origin_template_id=row['id'],
                     ),
@@ -694,6 +723,42 @@ class SqliteRepository(DeckRepository, CardRepository):
         with self._transaction(write=True) as connection:
             self._insert_deck(connection, deck)
             self._replace_cards(connection, deck.id, cards)
+            return self._get_deck(connection, deck.id)
+
+    def create_deck_with_cards_and_trusted(
+        self,
+        name: str,
+        description: str,
+        parent_id: str | None,
+        cards: CardDeck,
+        render_settings: DeckRenderSettings,
+        trusted_templates: tuple[TrustedTemplateVersion, ...],
+    ) -> Deck:
+        deck = Deck(
+            name=name,
+            description=description,
+            parent_id=parent_id,
+            card_ids=[card.id for card in cards.cards],
+            render_settings=render_settings,
+        )
+        with self._transaction(write=True) as connection:
+            self._insert_deck(connection, deck)
+            self._replace_cards(connection, deck.id, cards)
+            for version, template in enumerate(trusted_templates, start=1):
+                self._insert_trusted_template(
+                    connection,
+                    TrustedTemplateVersion(
+                        id=template.id,
+                        deck_id=deck.id,
+                        version=version,
+                        source=template.source,
+                        source_hash=template.source_hash,
+                        provenance=TemplateProvenance.IMPORTED,
+                        origin_template_id=template.origin_template_id,
+                        front_content_mode=template.front_content_mode,
+                        back_content_mode=template.back_content_mode,
+                    ),
+                )
             return self._get_deck(connection, deck.id)
 
     def get_render_settings(self, deck_id: str) -> DeckRenderSettings:
@@ -865,6 +930,8 @@ class SqliteRepository(DeckRepository, CardRepository):
         *,
         provenance: TemplateProvenance | str = TemplateProvenance.LOCAL_AUTHOR,
         origin_template_id: str | None = None,
+        front_content_mode: ContentMode | str = ContentMode.ESCAPED,
+        back_content_mode: ContentMode | str = ContentMode.ESCAPED,
     ) -> TrustedTemplateVersion:
         with self._transaction(write=True) as connection:
             if self._get_deck(connection, deck_id) is None:
@@ -882,6 +949,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                 version=version,
                 provenance=provenance,
                 origin_template_id=origin_template_id,
+                front_content_mode=front_content_mode,
+                back_content_mode=back_content_mode,
             )
             self._insert_trusted_template(connection, template)
             return template
@@ -962,6 +1031,29 @@ class SqliteRepository(DeckRepository, CardRepository):
                 (deck_id,),
             ).fetchone()
             return self._trusted_template_from_row(row) if row else None
+
+    def get_print_job_snapshot(self, deck_id: str) -> PrintJobSnapshot:
+        with self._transaction() as connection:
+            deck = self._get_deck(connection, deck_id)
+            if deck is None:
+                raise DeckNotFoundError(deck_id)
+            template_row = connection.execute(
+                '''
+                SELECT * FROM trusted_templates
+                WHERE deck_id = ? AND status = 'approved'
+                ''',
+                (deck_id,),
+            ).fetchone()
+            return PrintJobSnapshot(
+                deck_id=deck.id,
+                deck_version=deck.version,
+                cards=tuple(self._load_cards(connection, deck_id).cards),
+                render_settings=deck.render_settings,
+                trusted_template=(
+                    self._trusted_template_from_row(template_row)
+                    if template_row else None
+                ),
+            )
 
     def integrity_check(self) -> list[str]:
         with self._transaction() as connection:

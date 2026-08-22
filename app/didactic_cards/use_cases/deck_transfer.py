@@ -8,10 +8,14 @@ from datetime import datetime, timezone
 from ..domain.entities import Card, CardDeck, Deck
 from ..domain.interfaces import DeckRepository
 from ..domain.rendering import DeckRenderSettings
+from ..domain.trusted import (
+    TemplateProvenance,
+    TrustedTemplateVersion,
+)
 
 
-DECK_EXPORT_SCHEMA_VERSION = 3
-SUPPORTED_DECK_EXPORT_SCHEMAS = {1, 2, DECK_EXPORT_SCHEMA_VERSION}
+DECK_EXPORT_SCHEMA_VERSION = 4
+SUPPORTED_DECK_EXPORT_SCHEMAS = {1, 2, 3, DECK_EXPORT_SCHEMA_VERSION}
 
 
 class DeckTransferError(ValueError):
@@ -29,6 +33,22 @@ def export_deck_json(repo: DeckRepository, deck_id: str) -> bytes:
         'deck': deck.to_dict(),
         'cards': cards.to_list(),
     }
+    list_templates = getattr(repo, 'list_trusted_templates', None)
+    payload['trusted_templates'] = (
+        [
+            {
+                'id': template.id,
+                'version': template.version,
+                'source': template.source,
+                'source_hash': template.source_hash,
+                'source_provenance': template.provenance.value,
+                'front_content_mode': template.front_content_mode.value,
+                'back_content_mode': template.back_content_mode.value,
+            }
+            for template in list_templates(deck_id)
+        ]
+        if list_templates is not None else []
+    )
     return json.dumps(payload, ensure_ascii=False, indent=2).encode('utf-8')
 
 
@@ -108,6 +128,69 @@ def import_deck_json(
             section=section,
             parent_id=source_card_id,
         ))
+
+    trusted_templates: list[TrustedTemplateVersion] = []
+    if schema_version == DECK_EXPORT_SCHEMA_VERSION:
+        template_items = payload.get('trusted_templates')
+        if not isinstance(template_items, list):
+            raise DeckTransferError(
+                'Export schema 4 должен содержать trusted_templates'
+            )
+        template_ids: set[str] = set()
+        template_versions: set[int] = set()
+        expected_fields = {
+            'id', 'version', 'source', 'source_hash', 'source_provenance',
+            'front_content_mode', 'back_content_mode',
+        }
+        for index, item in enumerate(template_items, start=1):
+            if not isinstance(item, dict) or set(item) != expected_fields:
+                raise DeckTransferError(
+                    f'Trusted-шаблон {index} имеет неверные поля'
+                )
+            template_id = item['id']
+            version = item['version']
+            if not isinstance(template_id, str) or not template_id:
+                raise DeckTransferError(
+                    f'Trusted-шаблон {index}: неверный ID'
+                )
+            if template_id in template_ids or version in template_versions:
+                raise DeckTransferError('Повтор trusted-шаблона или версии')
+            try:
+                TemplateProvenance(item['source_provenance'])
+                template = TrustedTemplateVersion(
+                    deck_id='import-source',
+                    version=version,
+                    source=item['source'],
+                    source_hash=item['source_hash'],
+                    provenance=TemplateProvenance.IMPORTED,
+                    origin_template_id=template_id,
+                    front_content_mode=item['front_content_mode'],
+                    back_content_mode=item['back_content_mode'],
+                )
+            except (TypeError, ValueError) as error:
+                raise DeckTransferError(
+                    f'Некорректный trusted-шаблон {index}: {error}'
+                ) from error
+            template_ids.add(template_id)
+            template_versions.add(version)
+            trusted_templates.append(template)
+
+    if trusted_templates:
+        create_with_trusted = getattr(
+            repo, 'create_deck_with_cards_and_trusted', None
+        )
+        if create_with_trusted is None:
+            raise DeckTransferError(
+                'Хранилище не поддерживает безопасный импорт trusted-шаблонов'
+            )
+        return create_with_trusted(
+            name=f'{name.strip()} (импорт)',
+            description=description,
+            parent_id=source_deck_id,
+            cards=CardDeck(cards),
+            render_settings=render_settings,
+            trusted_templates=tuple(trusted_templates),
+        )
 
     return repo.create_deck_with_cards(
         name=f'{name.strip()} (импорт)',

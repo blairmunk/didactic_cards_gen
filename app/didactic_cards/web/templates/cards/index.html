@@ -123,6 +123,9 @@
             </div>
             <p class="preview-notice">Разрыв применяется при изменении значения секции и добавляет пустые физические ячейки до duplex-перестановки. HTML-превью приблизительно передаёт оформление; PDF-превью является точным предпечатным результатом и показывает реальные разрывы и обороты.</p>
             <button type="submit" class="btn-primary">Сохранить оформление</button>
+            {% if trusted_enabled %}
+            <a href="{{ url_for('cards.trusted_latex_editor', deck_id=deck.id) }}" class="btn-warning">Advanced / trusted LaTeX{% if trusted_active %} — активен{% endif %}</a>
+            {% endif %}
         </form>
     </div>
 
