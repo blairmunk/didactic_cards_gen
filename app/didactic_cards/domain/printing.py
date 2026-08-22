@@ -7,6 +7,7 @@ import re
 from typing import Sequence
 
 from .entities import Card
+from .rendering import SectionBreak
 
 
 class DuplexMode(str, Enum):
@@ -65,6 +66,60 @@ class Sheet:
     back_slots: tuple[Card, ...]
 
 
+@dataclass
+class PrintPaddingCard(Card):
+    """Ephemeral blank slot which is never persisted as a user card."""
+
+
+@dataclass(frozen=True)
+class PrintLayout:
+    """Physical front slots before the duplex permutation is applied."""
+
+    cards: tuple[Card, ...]
+    section_padding: int
+    trailing_padding: int
+
+
+def build_print_layout(
+    cards: Sequence[Card],
+    *,
+    rows: int,
+    columns: int,
+    section_break: SectionBreak | str = SectionBreak.CONTINUOUS,
+) -> PrintLayout:
+    """Insert section gaps and final padding in physical front-slot order."""
+    if rows <= 0 or columns <= 0:
+        raise ValueError("rows and columns must be positive")
+    try:
+        break_mode = SectionBreak(section_break)
+    except ValueError as error:
+        raise ValueError(f"unsupported section break: {section_break}") from error
+
+    capacity = rows * columns
+    laid_out: list[Card] = []
+    section_padding = 0
+    previous_section: str | None = None
+    for card in cards:
+        section_changed = (
+            previous_section is not None and card.section != previous_section
+        )
+        if section_changed and break_mode is not SectionBreak.CONTINUOUS:
+            boundary = (
+                columns
+                if break_mode is SectionBreak.NEW_ROW
+                else capacity
+            )
+            gap = (-len(laid_out)) % boundary
+            laid_out.extend(PrintPaddingCard() for _ in range(gap))
+            section_padding += gap
+        laid_out.append(card)
+        previous_section = card.section
+
+    trailing_padding = (-len(laid_out)) % capacity if laid_out else 0
+    laid_out.extend(PrintPaddingCard() for _ in range(trailing_padding))
+    return PrintLayout(tuple(laid_out), section_padding, trailing_padding)
+
+
 def build_sheets(
     cards: Sequence[Card],
     *,
@@ -85,7 +140,7 @@ def build_sheets(
     sheets: list[Sheet] = []
     for offset in range(0, len(cards), capacity):
         front = list(cards[offset:offset + capacity])
-        front.extend(Card() for _ in range(capacity - len(front)))
+        front.extend(PrintPaddingCard() for _ in range(capacity - len(front)))
         back: list[Card | None] = [None] * capacity
 
         for source_index, card in enumerate(front):

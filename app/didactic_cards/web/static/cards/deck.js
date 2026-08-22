@@ -45,12 +45,14 @@ document.addEventListener('DOMContentLoaded', function() {
         setTimeout(() => { el.style.display = 'none'; }, 2500);
     }
 
-    function updateCounters(count) {
+    function updateCounters(count, printPages, emptySlots) {
         document.getElementById('cards-count').textContent = count;
-        const pages = count > 0 ? Math.ceil(count / CARDS_PER_PAGE) : 0;
+        const pages = Number.isInteger(printPages)
+            ? printPages : (count > 0 ? Math.ceil(count / CARDS_PER_PAGE) : 0);
         document.getElementById('pages-count').textContent = pages;
         document.getElementById('empty-count').textContent =
-            count > 0 ? (pages * CARDS_PER_PAGE - count) : 0;
+            Number.isInteger(emptySlots)
+                ? emptySlots : (count > 0 ? (pages * CARDS_PER_PAGE - count) : 0);
         document.getElementById('generate-buttons').style.display =
             count > 0 ? '' : 'none';
     }
@@ -94,6 +96,20 @@ document.addEventListener('DOMContentLoaded', function() {
         const cards = document.querySelectorAll('#preview-grid .preview-card');
         cards.forEach((card, i) => {
             card.querySelector('.card-number').textContent = '#' + (i + 1);
+        });
+        refreshSectionHeaders();
+    }
+
+    function refreshSectionHeaders() {
+        const sectionStartOnly = document.body.dataset.headerRepeat === 'section-start';
+        let previousSection = null;
+        document.querySelectorAll('#preview-grid .preview-card').forEach(function(card) {
+            const section = card.dataset.section || '';
+            const visible = !sectionStartOnly || previousSection === null || section !== previousSection;
+            card.querySelectorAll('.preview-section').forEach(function(header) {
+                header.classList.toggle('section-header-suppressed', !visible);
+            });
+            previousSection = section;
         });
     }
 
@@ -154,6 +170,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const div = document.createElement('div');
         div.className = 'preview-card';
         div.dataset.cardId = cardData.id;
+        div.dataset.section = cardData.section || '';
         const visibility = document.body.dataset.headerVisibility;
         const position = document.body.dataset.headerPosition;
         function sideHtml(side, content, label) {
@@ -180,6 +197,7 @@ document.addEventListener('DOMContentLoaded', function() {
             '</div>';
         grid.appendChild(div);
         attachDeleteEvent(div.querySelector('.delete-btn'));
+        renumberPreviews();
 
         if (mathjaxRendered && window.MathJax && MathJax.typesetPromise) {
             MathJax.typesetPromise([div]);
@@ -225,7 +243,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 addCardRow(data.index, data.card);
                 addCardToPreview(data.index, data.card);
-                updateCounters(data.cards_count);
+                updateCounters(data.cards_count, data.print_pages, data.empty_slots);
                 updateDeckVersion(data.deck_version);
                 showSuccess('Карточка добавлена!');
 
@@ -299,7 +317,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 renumberRows();
 
                 removeCardFromPreview(cardId);
-                updateCounters(data.cards_count);
+                updateCounters(data.cards_count, data.print_pages, data.empty_slots);
                 updateDeckVersion(data.deck_version);
                 showSuccess('Карточка удалена');
 
@@ -503,6 +521,11 @@ document.addEventListener('DOMContentLoaded', function() {
             renumberRows();
             rebuildPreviewOrder();
             updateDeckVersion(data.deck_version);
+            updateCounters(
+                document.querySelectorAll('#cards-tbody tr').length,
+                data.print_pages,
+                data.empty_slots
+            );
             showSuccess('Порядок сохранён');
             return true;
         } catch (error) {
@@ -606,5 +629,6 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Инициализация drag & drop
     document.querySelectorAll('#cards-tbody tr').forEach(attachRowDragEvents);
+    refreshSectionHeaders();
 
 });

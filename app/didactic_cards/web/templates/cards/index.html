@@ -23,6 +23,8 @@
       data-header-visibility="{{ deck.render_settings.header_visibility.value }}"
       data-header-position="{{ deck.render_settings.header_position.value }}"
       data-header-alignment="{{ deck.render_settings.header_alignment.value }}"
+      data-header-repeat="{{ deck.render_settings.header_repeat.value }}"
+      data-section-break="{{ deck.render_settings.section_break.value }}"
       class="align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }}">
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> → {{ deck.name }}
@@ -44,10 +46,10 @@
     <div class="info-panel">
         <strong>Карточек:</strong> <span id="cards-count">{{ cards_count }}</span>
         &nbsp;|&nbsp;
-        <strong>Листов A4:</strong> <span id="pages-count">{{ ((cards_count + cards_per_page - 1) // cards_per_page) if cards_count > 0 else 0 }}</span>
+        <strong>Листов A4:</strong> <span id="pages-count">{{ print_pages }}</span>
         &nbsp;|&nbsp;
         <strong>Пустых ячеек:</strong>
-        <span id="empty-count">{% if cards_count > 0 %}{{ ((((cards_count + cards_per_page - 1) // cards_per_page) * cards_per_page) - cards_count) }}{% else %}0{% endif %}</span>
+        <span id="empty-count">{{ empty_slots }}</span>
     </div>
 
     <h2>Оформление карточек</h2>
@@ -103,8 +105,23 @@
                         {% endfor %}
                     </select>
                 </div>
+                <div>
+                    <label for="header-repeat">Повтор колонтитула:</label>
+                    <select name="header_repeat" id="header-repeat">
+                        <option value="every-card" {% if deck.render_settings.header_repeat.value == 'every-card' %}selected{% endif %}>На каждой карточке</option>
+                        <option value="section-start" {% if deck.render_settings.header_repeat.value == 'section-start' %}selected{% endif %}>Только в начале секции</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="section-break">Новая секция начинается:</label>
+                    <select name="section_break" id="section-break">
+                        <option value="continuous" {% if deck.render_settings.section_break.value == 'continuous' %}selected{% endif %}>Со следующей карточки</option>
+                        <option value="new-row" {% if deck.render_settings.section_break.value == 'new-row' %}selected{% endif %}>С новой строки</option>
+                        <option value="new-sheet" {% if deck.render_settings.section_break.value == 'new-sheet' %}selected{% endif %}>С нового листа</option>
+                    </select>
+                </div>
             </div>
-            <p class="preview-notice">HTML-превью приблизительно передаёт оформление; PDF-превью является точным предпечатным результатом.</p>
+            <p class="preview-notice">Разрыв применяется при изменении значения секции и добавляет пустые физические ячейки до duplex-перестановки. HTML-превью приблизительно передаёт оформление; PDF-превью является точным предпечатным результатом и показывает реальные разрывы и обороты.</p>
             <button type="submit" class="btn-primary">Сохранить оформление</button>
         </form>
     </div>
@@ -214,7 +231,7 @@
     <div id="view-preview" style="display:none">
         <div class="preview-grid" id="preview-grid">
             {% for card in cards %}
-            <div class="preview-card" data-card-id="{{ card.id }}">
+            <div class="preview-card" data-card-id="{{ card.id }}" data-section="{{ card.section }}">
                 <span class="card-number">#{{ loop.index }}</span>
                 <span class="card-actions">
                     <a href="{{ url_for('cards.edit_card', deck_id=deck.id, card_id=card.id) }}" aria-label="Редактировать карточку {{ loop.index }}" title="Редактировать">✏️</a>

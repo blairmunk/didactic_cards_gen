@@ -260,6 +260,33 @@ class TestLatexRenderer:
             r'\checkedcardheader'
         )
 
+    def test_header_can_be_rendered_only_at_each_section_start(self):
+        deck = CardDeck([
+            Card(front='Q1', section='HEADER-ALPHA'),
+            Card(front='Q2', section='HEADER-ALPHA'),
+            Card(front='Q3', section='HEADER-BETA'),
+        ])
+        renderer = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                header_visibility='front',
+                header_repeat='section-start',
+            ),
+            cards_per_row=1,
+            rows_per_page=3,
+        )
+
+        source = renderer.render_fronts(deck)
+
+        assert source.count('HEADER-ALPHA') == 1
+        assert source.count('HEADER-BETA') == 1
+
+    def test_genuine_empty_card_keeps_its_logical_number(self):
+        source = LatexRenderer(
+            cards_per_row=1, rows_per_page=1
+        ).render_fronts(CardDeck([Card()]))
+
+        assert r'\legacycheckedcardcontent{1}{front}{\mbox{}}' in source
+
     def test_renderer_copy_applies_deck_settings_without_mutating_base(self):
         base = LatexRenderer(cards_per_row=1, rows_per_page=1)
         configured = base.with_render_settings(DeckRenderSettings.centered())
@@ -267,6 +294,12 @@ class TestLatexRenderer:
         assert configured is not base
         assert base.render_settings == DeckRenderSettings.legacy()
         assert configured.render_settings == DeckRenderSettings.centered()
+
+    def test_print_layout_capacity_must_match_renderer_grid(self):
+        with pytest.raises(ValueError, match='does not match'):
+            LatexRenderer(cards_per_row=2, rows_per_page=4).prepare_print_layout(
+                self.make_deck(1), 6
+            )
 
     @pytest.mark.parametrize('value', [object(), 'centered'])
     def test_renderer_rejects_non_settings_objects(self, value):
@@ -818,6 +851,55 @@ def test_real_pdf_compiles_fixed_header_band_on_both_sides(tmp_path):
         check=True,
     ).stdout
     assert extracted.count('МЕХАНИКА') == 2
+
+
+@pytest.mark.integration
+def test_real_section_sheet_break_creates_complete_duplex_sheet_pairs(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdftotext'):
+        pytest.skip('pdflatex/pdftotext are required for section break test')
+
+    renderer = LatexRenderer(
+        cards_per_row=2,
+        rows_per_page=2,
+        back_rotation_deg=0,
+        render_settings=DeckRenderSettings(
+            header_visibility='front',
+            header_repeat='section-start',
+            section_break='new-sheet',
+        ),
+    )
+    deck = CardDeck([
+        Card(front='FIRST-FRONT', back='FIRST-BACK', section='ONE-SECTION'),
+        Card(front='SECOND-FRONT', back='SECOND-BACK', section='TWO-SECTION'),
+    ])
+    layout = renderer.prepare_print_layout(deck, 4)
+    result = PdfLatexCompiler().compile(
+        renderer.render(CardDeck(list(layout.cards)))
+    )
+
+    assert result.success, result.log
+    assert layout.section_padding == 3
+    assert layout.trailing_padding == 3
+    pdf_path = tmp_path / 'section-sheets.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    pages = []
+    for page_number in range(1, 5):
+        pages.append(subprocess.run(
+            [
+                'pdftotext', '-f', str(page_number), '-l', str(page_number),
+                str(pdf_path), '-',
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout)
+
+    assert 'FIRST-FRONT' in pages[0]
+    assert 'FIRST-BACK' in pages[1]
+    assert 'SECOND-FRONT' in pages[2]
+    assert 'SECOND-BACK' in pages[3]
+    assert pages[0].count('ONE-SECTION') == 1
+    assert pages[2].count('TWO-SECTION') == 1
 
 
 @pytest.mark.integration

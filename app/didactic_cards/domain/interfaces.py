@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Callable, Optional, TypeVar
 
 from .entities import Card, Deck, CardDeck
+from .printing import PrintLayout
 from .rendering import DeckRenderSettings
 
 
@@ -130,6 +131,17 @@ class DeckRepository(ABC):
 
 
 class DocumentRenderer(ABC):
+
+    def prepare_print_layout(
+        self, deck: CardDeck, cards_per_page: int
+    ) -> PrintLayout:
+        """Return complete physical front slots for one print job."""
+        padded = deck.padded(cards_per_page)
+        return PrintLayout(
+            tuple(padded),
+            section_padding=0,
+            trailing_padding=len(padded) - len(deck.cards),
+        )
 
     def with_render_settings(
         self, settings: DeckRenderSettings

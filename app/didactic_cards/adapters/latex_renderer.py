@@ -6,10 +6,17 @@ from copy import copy
 
 from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import DocumentRenderer
-from ..domain.printing import DuplexMode, build_sheets
+from ..domain.printing import (
+    DuplexMode,
+    PrintLayout,
+    PrintPaddingCard,
+    build_print_layout,
+    build_sheets,
+)
 from ..domain.rendering import (
     DeckRenderSettings,
     HeaderPosition,
+    HeaderRepeat,
     HeaderVisibility,
     HorizontalAlignment,
     StylePreset,
@@ -205,6 +212,18 @@ class LatexRenderer(DocumentRenderer):
         configured.render_settings = settings
         return configured
 
+    def prepare_print_layout(
+        self, deck: CardDeck, cards_per_page: int
+    ) -> PrintLayout:
+        if cards_per_page != self.cards_per_page:
+            raise ValueError('cards_per_page does not match renderer grid')
+        return build_print_layout(
+            deck.cards,
+            rows=self.rows_per_page,
+            columns=self.cards_per_row,
+            section_break=self.render_settings.section_break,
+        )
+
     def render(self, deck: CardDeck) -> str:
         return self._render_sides(deck, ('front', 'back'))
 
@@ -291,9 +310,22 @@ class LatexRenderer(DocumentRenderer):
         return tuple(warnings)
 
     def _render_sides(self, deck: CardDeck, sides: tuple[str, ...]) -> str:
-        card_numbers = {
-            id(card): number for number, card in enumerate(deck.cards, start=1)
-        }
+        card_numbers: dict[int, int] = {}
+        logical_number = 0
+        for card in deck.cards:
+            if isinstance(card, PrintPaddingCard):
+                card_numbers[id(card)] = 0
+            else:
+                logical_number += 1
+                card_numbers[id(card)] = logical_number
+        section_start_ids: set[int] = set()
+        previous_section: str | None = None
+        for card in deck.cards:
+            if isinstance(card, PrintPaddingCard):
+                continue
+            if previous_section is None or card.section != previous_section:
+                section_start_ids.add(id(card))
+            previous_section = card.section
         sheets = build_sheets(
             deck.cards,
             rows=self.rows_per_page,
@@ -312,7 +344,10 @@ class LatexRenderer(DocumentRenderer):
             side_label = 'передние стороны' if side == 'front' else 'задние стороны'
             latex += f'\n% ===== Лист {sheet_index + 1}: {side_label} =====\n'
             latex += self._render_page(
-                cards, side=side, card_numbers=card_numbers
+                cards,
+                side=side,
+                card_numbers=card_numbers,
+                section_start_ids=section_start_ids,
             )
             if page_index < len(pages) - 1:
                 latex += r'\newpage' + '\n'
@@ -481,6 +516,7 @@ class LatexRenderer(DocumentRenderer):
         *,
         side: str,
         card_numbers: dict[int, int],
+        section_start_ids: set[int],
     ) -> str:
         command = r'\frontcard' if side == 'front' else r'\backcard'
         offset_x, offset_y = self.front_offset if side == 'front' else self.back_offset
@@ -494,12 +530,13 @@ class LatexRenderer(DocumentRenderer):
                 index = row * self.cards_per_row + column
                 card = cards[index]
                 text = getattr(card, side)
-                card_number = card_numbers[id(card)]
+                card_number = card_numbers.get(id(card), 0)
                 checked_content = self._render_card_content(
                     card,
                     side=side,
                     card_number=card_number,
                     text=text,
+                    is_section_start=id(card) in section_start_ids,
                 )
                 rendered_card = command + '{' + checked_content + '}'
                 if side == 'back' and self.back_rotation_deg == 180:
@@ -511,12 +548,18 @@ class LatexRenderer(DocumentRenderer):
                 result += '\n'
         return result + r'\end{minipage}' + '\n'
 
-    def _header_is_visible(self, side: str) -> bool:
+    def _header_is_visible(self, side: str, *, is_section_start: bool) -> bool:
         visibility = self.render_settings.header_visibility
-        return visibility is HeaderVisibility.BOTH or (
+        visible_on_side = visibility is HeaderVisibility.BOTH or (
             visibility is HeaderVisibility.FRONT and side == 'front'
         ) or (
             visibility is HeaderVisibility.BACK and side == 'back'
+        )
+        if not visible_on_side:
+            return False
+        return (
+            self.render_settings.header_repeat is HeaderRepeat.EVERY_CARD
+            or is_section_start
         )
 
     def _render_card_content(
@@ -526,6 +569,7 @@ class LatexRenderer(DocumentRenderer):
         side: str,
         card_number: int,
         text: str,
+        is_section_start: bool,
     ) -> str:
         settings = self.render_settings
         legacy_layout = (
@@ -541,7 +585,9 @@ class LatexRenderer(DocumentRenderer):
                 f'{{{card_number}}}{{{side}}}{{{content}}}'
             )
 
-        header_visible = self._header_is_visible(side)
+        header_visible = self._header_is_visible(
+            side, is_section_start=is_section_start
+        )
         reserved_height = (
             HEADER_HEIGHT_CM + HEADER_GAP_CM if header_visible else 0.0
         )

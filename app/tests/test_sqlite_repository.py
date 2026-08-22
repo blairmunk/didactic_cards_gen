@@ -204,6 +204,56 @@ def test_schema_three_migrates_sections_and_legacy_render_settings(tmp_path):
         )
 
 
+def test_schema_four_adds_section_layout_settings_without_changing_behavior(
+    tmp_path,
+):
+    data_dir = tmp_path / 'schema-four'
+    repository = SqliteRepository(data_dir)
+    deck = repository.create_deck('Existing presentation')
+    with closing(repository._connect()) as connection:
+        connection.execute(
+            'ALTER TABLE deck_render_settings RENAME TO settings_v5'
+        )
+        connection.execute(
+            '''
+            CREATE TABLE deck_render_settings (
+                deck_id TEXT PRIMARY KEY REFERENCES decks(id) ON DELETE CASCADE,
+                preset TEXT NOT NULL,
+                horizontal_alignment TEXT NOT NULL,
+                vertical_alignment TEXT NOT NULL,
+                header_visibility TEXT NOT NULL,
+                header_position TEXT NOT NULL,
+                header_alignment TEXT NOT NULL
+            )
+            '''
+        )
+        connection.execute(
+            '''
+            INSERT INTO deck_render_settings
+            SELECT deck_id, preset, horizontal_alignment, vertical_alignment,
+                   header_visibility, header_position, header_alignment
+            FROM settings_v5
+            '''
+        )
+        connection.execute('DROP TABLE settings_v5')
+        connection.execute('PRAGMA user_version = 4')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+    settings = migrated.get_render_settings(deck.id)
+
+    assert settings.header_repeat.value == 'every-card'
+    assert settings.section_break.value == 'continuous'
+    with closing(migrated._connect()) as connection:
+        columns = {
+            row['name'] for row in connection.execute(
+                'PRAGMA table_info(deck_render_settings)'
+            )
+        }
+        assert {'header_repeat', 'section_break'} <= columns
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 5
+
+
 def test_deck_and_ordered_card_round_trip(sqlite_repo):
     first = sqlite_repo.create_deck('First', 'Description')
     second = sqlite_repo.create_deck('Second')
@@ -252,6 +302,8 @@ def test_render_settings_are_versioned_and_cloned(sqlite_repo):
         horizontal_alignment='right',
         vertical_alignment='bottom',
         header_visibility='both',
+        header_repeat='section-start',
+        section_break='new-sheet',
     )
 
     saved = sqlite_repo.save_render_settings(

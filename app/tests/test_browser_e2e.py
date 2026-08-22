@@ -51,6 +51,8 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
         await page.select('#vertical-alignment', 'bottom')
         await page.select('#header-visibility', 'both')
         await page.select('#header-alignment', 'center')
+        await page.select('#header-repeat', 'section-start')
+        await page.select('#section-break', 'new-row')
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('#render-settings-form button[type="submit"]'),
@@ -58,6 +60,9 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
         assert await page.Jeval(
             'body', 'element => element.dataset.verticalAlignment'
         ) == 'bottom'
+        assert await page.Jeval(
+            'body', 'element => element.dataset.sectionBreak'
+        ) == 'new-row'
 
         async def add_card(
             front: str, back: str, expected_count: int, section: str = ''
@@ -78,7 +83,7 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             )
 
         await add_card('$x^2$', 'first', 1, 'Алгебра')
-        await add_card('second', 'answer', 2)
+        await add_card('second', 'answer', 2, 'Алгебра')
         await page.waitForFunction(
             "document.getElementById('math-status').textContent === 'Формулы готовы'"
         )
@@ -87,6 +92,10 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             '.preview-card:first-child .preview-section',
             'element => element.textContent',
         ) == 'Алгебра'
+        assert await page.Jeval(
+            '.preview-card:nth-child(2) .preview-section',
+            'element => getComputedStyle(element).display',
+        ) == 'none'
         await page.click('#btn-view-table')
 
         handles = await page.querySelectorAll('.drag-handle')

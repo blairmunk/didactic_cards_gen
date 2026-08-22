@@ -266,6 +266,8 @@ def test_render_settings_form_is_versioned_and_updates_preview_contract(
     initial = repo.get_deck(deck_id)
     page = client.get(f'/deck/{deck_id}')
     assert 'data-horizontal-alignment="center"' in page.text
+    assert 'id="header-repeat"' in page.text
+    assert 'id="section-break"' in page.text
     assert 'PDF-превью является точным' in page.text
 
     response = client.post(
@@ -278,6 +280,8 @@ def test_render_settings_form_is_versioned_and_updates_preview_contract(
             'header_visibility': 'both',
             'header_position': 'bottom',
             'header_alignment': 'center',
+            'header_repeat': 'section-start',
+            'section_break': 'new-sheet',
         },
     )
 
@@ -289,11 +293,15 @@ def test_render_settings_form_is_versioned_and_updates_preview_contract(
         header_visibility='both',
         header_position='bottom',
         header_alignment='center',
+        header_repeat='section-start',
+        section_break='new-sheet',
     )
     assert repo.get_deck(deck_id).version == initial.version + 1
     updated_page = client.get(f'/deck/{deck_id}')
     assert 'data-horizontal-alignment="right"' in updated_page.text
     assert 'data-header-position="bottom"' in updated_page.text
+    assert 'data-header-repeat="section-start"' in updated_page.text
+    assert 'data-section-break="new-sheet"' in updated_page.text
 
     stale = client.post(
         f'/deck/{deck_id}/render_settings',
@@ -345,6 +353,30 @@ def test_render_settings_presets_are_canonical(
     saved = repo.get_render_settings(deck_id)
     assert saved.horizontal_alignment.value == horizontal
     assert saved.vertical_alignment.value == vertical
+
+
+def test_sheet_counters_include_physical_section_break_slots(
+    client, app, repo, deck_id
+):
+    app.config['RENDERER'] = LatexRenderer(cards_per_row=2, rows_per_page=4)
+    client.post(
+        f'/api/deck/{deck_id}/add_card',
+        json={'front': 'Q1', 'back': 'A1', 'section': 'One'},
+    )
+    repo.save_render_settings(
+        deck_id, DeckRenderSettings(section_break='new-sheet')
+    )
+
+    added = client.post(
+        f'/api/deck/{deck_id}/add_card',
+        json={'front': 'Q2', 'back': 'A2', 'section': 'Two'},
+    )
+    page = client.get(f'/deck/{deck_id}')
+
+    assert added.json['print_pages'] == 2
+    assert added.json['empty_slots'] == 14
+    assert '<span id="pages-count">2</span>' in page.text
+    assert '<span id="empty-count">14</span>' in page.text
 
 
 def test_api_rejects_non_string_section(client, deck_id):

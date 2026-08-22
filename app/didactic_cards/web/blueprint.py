@@ -73,6 +73,32 @@ def _cards_per_page():
     return current_app.config['CARDS_PER_PAGE']
 
 
+def _deck_page_context(deck_info, card_deck, **extra):
+    cards_per_page = _cards_per_page()
+    renderer = _renderer().with_render_settings(deck_info.render_settings)
+    layout = renderer.prepare_print_layout(card_deck, cards_per_page)
+    context = {
+        'deck': deck_info,
+        'cards': card_deck.to_list(),
+        'cards_count': len(card_deck),
+        'cards_per_page': cards_per_page,
+        'print_pages': len(layout.cards) // cards_per_page,
+        'empty_slots': layout.section_padding + layout.trailing_padding,
+    }
+    context.update(extra)
+    return context
+
+
+def _deck_print_stats(deck_id: str) -> dict[str, int]:
+    deck_info = GetDeckInfo(_repo()).execute(deck_id)
+    card_deck = GetDeck(_repo()).execute(deck_id)
+    context = _deck_page_context(deck_info, card_deck)
+    return {
+        'print_pages': context['print_pages'],
+        'empty_slots': context['empty_slots'],
+    }
+
+
 def _max_cards():
     return current_app.config.get('MAX_CARDS')
 
@@ -180,6 +206,8 @@ def _render_settings_from_form() -> DeckRenderSettings:
         header_visibility=request.form.get('header_visibility', 'none'),
         header_position=request.form.get('header_position', 'top'),
         header_alignment=request.form.get('header_alignment', 'left'),
+        header_repeat=request.form.get('header_repeat', 'every-card'),
+        section_break=request.form.get('section_break', 'continuous'),
     )
 
 
@@ -294,11 +322,7 @@ def _render_deck_error(deck_id: str, message: str, status: int = 409):
     card_deck = GetDeck(_repo()).execute(deck_id)
     return render_template(
         'cards/index.html',
-        deck=deck_info,
-        cards=card_deck.to_list(),
-        cards_count=len(card_deck),
-        cards_per_page=_cards_per_page(),
-        error=message,
+        **_deck_page_context(deck_info, card_deck, error=message),
     ), status
 
 
@@ -466,12 +490,12 @@ def deck_view(deck_id):
         return redirect(url_for('cards.decks_list'))
 
     card_deck = GetDeck(_repo()).execute(deck_id)
-    return render_template('cards/index.html',
-                           deck=deck_info,
-                           cards=card_deck.to_list(),
-                           cards_count=len(card_deck),
-                           cards_per_page=_cards_per_page(),
-                           print_profiles=_print_profiles())
+    return render_template(
+        'cards/index.html',
+        **_deck_page_context(
+            deck_info, card_deck, print_profiles=_print_profiles()
+        ),
+    )
 
 
 @cards_bp.route('/deck/<deck_id>/render_settings', methods=['POST'])
@@ -564,12 +588,14 @@ def import_csv(deck_id):
     except UnicodeDecodeError:
         deck_info = GetDeckInfo(_repo()).execute(deck_id)
         card_deck = GetDeck(_repo()).execute(deck_id)
-        return render_template('cards/index.html',
-                               deck=deck_info,
-                               cards=card_deck.to_list(),
-                               cards_count=len(card_deck),
-                               cards_per_page=_cards_per_page(),
-                               error='Ошибка кодировки. Сохраните CSV в UTF-8.')
+        return render_template(
+            'cards/index.html',
+            **_deck_page_context(
+                deck_info,
+                card_deck,
+                error='Ошибка кодировки. Сохраните CSV в UTF-8.',
+            ),
+        )
     except (CsvValidationError, ValueError) as error:
         return _render_deck_error(deck_id, str(error), 400)
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
@@ -607,7 +633,11 @@ def edit_card(deck_id, card_id):
 
     card = card_deck.cards[index].to_dict()
     return render_template('cards/edit_card.html',
-                           deck=deck_info, card=card, index=index)
+                           deck=deck_info, card=card, index=index,
+                           previous_section=(
+                               None if index == 0
+                               else card_deck.cards[index - 1].section
+                           ))
 
 
 @cards_bp.route('/deck/<deck_id>/reset', methods=['POST'])
@@ -628,11 +658,12 @@ def _generate_pdf_response(
     card_deck = GetDeck(_repo()).execute(deck_id)
 
     if not len(card_deck):
-        return render_template('cards/index.html',
-                               deck=deck_info,
-                               cards=[], cards_count=0,
-                               cards_per_page=_cards_per_page(),
-                               error='Добавьте хотя бы одну карточку!')
+        return render_template(
+            'cards/index.html',
+            **_deck_page_context(
+                deck_info, card_deck, error='Добавьте хотя бы одну карточку!'
+            ),
+        )
 
     try:
         if side is None:
@@ -757,11 +788,12 @@ def preview_latex(deck_id):
     card_deck = GetDeck(_repo()).execute(deck_id)
 
     if not len(card_deck):
-        return render_template('cards/index.html',
-                               deck=deck_info,
-                               cards=[], cards_count=0,
-                               cards_per_page=_cards_per_page(),
-                               error='Добавьте хотя бы одну карточку!')
+        return render_template(
+            'cards/index.html',
+            **_deck_page_context(
+                deck_info, card_deck, error='Добавьте хотя бы одну карточку!'
+            ),
+        )
 
     try:
         latex = PreviewDocument(
@@ -809,12 +841,14 @@ def api_add_card(deck_id):
     except CardLimitExceeded as error:
         return jsonify({'error': str(error)}), 409
     card_deck = GetDeck(_repo()).execute(deck_id)
+    stats = _deck_print_stats(deck_id)
 
     return jsonify({
         'ok': True,
         'card': card.to_dict(),
         'index': index,
         'cards_count': len(card_deck),
+        **stats,
         'deck_version': GetDeckInfo(_repo()).execute(deck_id).version,
     })
 
@@ -830,9 +864,11 @@ def api_delete_card(deck_id, card_id):
     if not result:
         return jsonify({'error': 'Неверный индекс'}), 404
     card_deck = GetDeck(_repo()).execute(deck_id)
+    stats = _deck_print_stats(deck_id)
     return jsonify({
         'ok': True,
         'cards_count': len(card_deck),
+        **stats,
         'deck_version': GetDeckInfo(_repo()).execute(deck_id).version,
     })
 
@@ -852,8 +888,10 @@ def api_reorder(deck_id):
     )
     if not result:
         return jsonify({'error': 'Некорректный порядок'}), 400
+    stats = _deck_print_stats(deck_id)
     return jsonify({
         'ok': True,
+        **stats,
         'deck_version': GetDeckInfo(_repo()).execute(deck_id).version,
     })
 

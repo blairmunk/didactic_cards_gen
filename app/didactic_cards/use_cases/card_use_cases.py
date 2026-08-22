@@ -305,10 +305,11 @@ class GenerateDocument:
 
     def execute(self, deck_id: str) -> CompileResult:
         deck = self.repo.load_cards(deck_id)
-        padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
         renderer = self.renderer.with_render_settings(
             self.repo.get_render_settings(deck_id)
         )
+        layout = renderer.prepare_print_layout(deck, self.cards_per_page)
+        padded_deck = CardDeck(cards=list(layout.cards))
         latex = renderer.render(padded_deck)
         return self.compiler.compile(latex)
 
@@ -329,11 +330,12 @@ class GenerateDocumentSide(GenerateDocument):
 
     def execute(self, deck_id: str) -> CompileResult:
         deck = self.repo.load_cards(deck_id)
-        padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
         method_name = 'render_fronts' if self.side == 'front' else 'render_backs'
         renderer = self.renderer.with_render_settings(
             self.repo.get_render_settings(deck_id)
         )
+        layout = renderer.prepare_print_layout(deck, self.cards_per_page)
+        padded_deck = CardDeck(cards=list(layout.cards))
         render_side = getattr(renderer, method_name)
         return self.compiler.compile(render_side(padded_deck))
 
@@ -370,17 +372,17 @@ class PreflightDocument:
 
     def execute(self, deck_id: str) -> PreflightReport:
         deck = self.repo.load_cards(deck_id)
-        padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
+        renderer = self.renderer.with_render_settings(
+            self.repo.get_render_settings(deck_id)
+        )
+        layout = renderer.prepare_print_layout(deck, self.cards_per_page)
+        padded_deck = CardDeck(cards=list(layout.cards))
         if not deck.cards:
             return PreflightReport(False, (PreflightIssue(
                 code='empty-deck',
                 severity='error',
                 message='Добавьте хотя бы одну карточку',
             ),))
-
-        renderer = self.renderer.with_render_settings(
-            self.repo.get_render_settings(deck_id)
-        )
 
         issues: list[PreflightIssue] = []
         for number, card in enumerate(deck.cards, start=1):
@@ -399,13 +401,24 @@ class PreflightDocument:
                         side=side,
                     ))
 
-        remainder = len(deck) % self.cards_per_page
-        if remainder:
-            empty_slots = self.cards_per_page - remainder
+        if layout.section_padding:
+            issues.append(PreflightIssue(
+                code='section-break-padding',
+                severity='info',
+                message=(
+                    'Разрывы секций добавили пустых ячеек: '
+                    f'{layout.section_padding}'
+                ),
+            ))
+
+        if layout.trailing_padding:
             issues.append(PreflightIssue(
                 code='partial-sheet',
                 severity='info',
-                message=f'Последний лист содержит {empty_slots} пустых ячеек',
+                message=(
+                    'Последний лист содержит '
+                    f'{layout.trailing_padding} пустых ячеек'
+                ),
             ))
 
         for message in renderer.printable_area_warnings():
@@ -426,7 +439,9 @@ class PreflightDocument:
         for match in self.OVERFLOW_MARKER.finditer(result.log):
             number = int(match.group(1))
             side = match.group(2)
-            if number > len(deck.cards) or (number, side) in seen_overflows:
+            if not 1 <= number <= len(deck.cards) or (
+                number, side
+            ) in seen_overflows:
                 continue
             seen_overflows.add((number, side))
             card = deck.cards[number - 1]
@@ -445,7 +460,9 @@ class PreflightDocument:
             number = int(match.group(1))
             side = match.group(2)
             size = match.group(3)
-            if number > len(deck.cards) or (number, side) in seen_autofit:
+            if not 1 <= number <= len(deck.cards) or (
+                number, side
+            ) in seen_autofit:
                 continue
             seen_autofit.add((number, side))
             card = deck.cards[number - 1]
@@ -466,7 +483,7 @@ class PreflightDocument:
             number = int(match.group(1))
             side = match.group(2)
             if (
-                number > len(deck.cards)
+                not 1 <= number <= len(deck.cards)
                 or (number, side) in seen_header_overflows
             ):
                 continue
@@ -491,7 +508,7 @@ class PreflightDocument:
             side = match.group(2)
             size = match.group(3)
             if (
-                number > len(deck.cards)
+                not 1 <= number <= len(deck.cards)
                 or (number, side) in seen_header_autofit
             ):
                 continue
@@ -527,7 +544,7 @@ class PreflightDocument:
                 horizontal_overflows.add(measured_side)
 
         for number, side, component in sorted(horizontal_overflows):
-            if number > len(deck.cards):
+            if not 1 <= number <= len(deck.cards):
                 continue
             card = deck.cards[number - 1]
             side_label = 'лицевая' if side == 'front' else 'оборотная'
@@ -573,8 +590,9 @@ class PreviewDocument:
 
     def execute(self, deck_id: str) -> str:
         deck = self.repo.load_cards(deck_id)
-        padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
         renderer = self.renderer.with_render_settings(
             self.repo.get_render_settings(deck_id)
         )
+        layout = renderer.prepare_print_layout(deck, self.cards_per_page)
+        padded_deck = CardDeck(cards=list(layout.cards))
         return renderer.render(padded_deck)

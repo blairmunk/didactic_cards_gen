@@ -465,6 +465,8 @@ summary {
 .header-align-center .preview-section { text-align: center; }
 .header-align-right .preview-section { text-align: right; }
 
+.preview-section.section-header-suppressed { display: none; }
+
 .preview-front {
     background: #fafafa;
     border-right: 2px dashed #ddd;

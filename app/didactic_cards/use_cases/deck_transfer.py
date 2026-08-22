@@ -10,8 +10,8 @@ from ..domain.interfaces import DeckRepository
 from ..domain.rendering import DeckRenderSettings
 
 
-DECK_EXPORT_SCHEMA_VERSION = 2
-SUPPORTED_DECK_EXPORT_SCHEMAS = {1, DECK_EXPORT_SCHEMA_VERSION}
+DECK_EXPORT_SCHEMA_VERSION = 3
+SUPPORTED_DECK_EXPORT_SCHEMAS = {1, 2, DECK_EXPORT_SCHEMA_VERSION}
 
 
 class DeckTransferError(ValueError):

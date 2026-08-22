@@ -23,6 +23,8 @@ def test_render_settings_round_trip_preserves_safe_header_options():
         header_visibility='both',
         header_position='bottom',
         header_alignment='center',
+        header_repeat='section-start',
+        section_break='new-row',
     )
 
     assert DeckRenderSettings.from_dict(settings.to_dict()) == settings
@@ -37,6 +39,8 @@ def test_render_settings_round_trip_preserves_safe_header_options():
         {'header_visibility': 'sometimes'},
         {'header_position': 'side'},
         {'header_alignment': 'justify'},
+        {'header_repeat': 'sometimes'},
+        {'section_break': 'new-column'},
     ],
 )
 def test_render_settings_reject_unknown_values(kwargs):

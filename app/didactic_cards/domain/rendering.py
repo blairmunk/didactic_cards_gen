@@ -34,6 +34,17 @@ class HeaderPosition(str, Enum):
     BOTTOM = 'bottom'
 
 
+class HeaderRepeat(str, Enum):
+    EVERY_CARD = 'every-card'
+    SECTION_START = 'section-start'
+
+
+class SectionBreak(str, Enum):
+    CONTINUOUS = 'continuous'
+    NEW_ROW = 'new-row'
+    NEW_SHEET = 'new-sheet'
+
+
 @dataclass(frozen=True)
 class DeckRenderSettings:
     """Safe, serializable presentation choices owned by one deck."""
@@ -44,6 +55,8 @@ class DeckRenderSettings:
     header_visibility: HeaderVisibility | str = HeaderVisibility.NONE
     header_position: HeaderPosition | str = HeaderPosition.TOP
     header_alignment: HorizontalAlignment | str = HorizontalAlignment.LEFT
+    header_repeat: HeaderRepeat | str = HeaderRepeat.EVERY_CARD
+    section_break: SectionBreak | str = SectionBreak.CONTINUOUS
 
     def __post_init__(self) -> None:
         try:
@@ -73,6 +86,12 @@ class DeckRenderSettings:
                 'header_alignment',
                 HorizontalAlignment(self.header_alignment),
             )
+            object.__setattr__(
+                self, 'header_repeat', HeaderRepeat(self.header_repeat)
+            )
+            object.__setattr__(
+                self, 'section_break', SectionBreak(self.section_break)
+            )
         except ValueError as error:
             raise ValueError(f'unsupported deck render setting: {error}') from error
 
@@ -96,6 +115,8 @@ class DeckRenderSettings:
             'header_visibility': self.header_visibility.value,
             'header_position': self.header_position.value,
             'header_alignment': self.header_alignment.value,
+            'header_repeat': self.header_repeat.value,
+            'section_break': self.section_break.value,
         }
 
     @classmethod
@@ -109,6 +130,8 @@ class DeckRenderSettings:
             'header_visibility',
             'header_position',
             'header_alignment',
+            'header_repeat',
+            'section_break',
         }
         unknown_fields = set(data) - known_fields
         if unknown_fields:

@@ -27,6 +27,8 @@ def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
             preset='custom',
             horizontal_alignment='right',
             header_visibility='both',
+            header_repeat='section-start',
+            section_break='new-row',
         ),
     )
 
@@ -49,6 +51,32 @@ def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
     assert imported_card.section == 'Европа'
     assert repo.get_render_settings(imported.id).horizontal_alignment.value == 'right'
     assert repo.get_render_settings(imported.id).header_visibility.value == 'both'
+    assert repo.get_render_settings(imported.id).header_repeat.value == 'section-start'
+    assert repo.get_render_settings(imported.id).section_break.value == 'new-row'
+
+
+def test_schema_two_import_gets_backward_compatible_section_layout_defaults(repo):
+    payload = {
+        'schema_version': 2,
+        'deck': {
+            'name': 'Previous export',
+            'render_settings': {
+                'preset': 'centered',
+                'horizontal_alignment': 'center',
+                'vertical_alignment': 'center',
+                'header_visibility': 'front',
+                'header_position': 'top',
+                'header_alignment': 'left',
+            },
+        },
+        'cards': [{'front': 'Q', 'back': 'A', 'section': 'One'}],
+    }
+
+    imported = import_deck_json(repo, json.dumps(payload).encode())
+
+    settings = repo.get_render_settings(imported.id)
+    assert settings.header_repeat.value == 'every-card'
+    assert settings.section_break.value == 'continuous'
 
 
 def test_csv_export_is_bom_semicolon_and_quote_safe(repo):

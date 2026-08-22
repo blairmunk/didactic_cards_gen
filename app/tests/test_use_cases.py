@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from didactic_cards.domain.interfaces import DocumentRenderer
+from didactic_cards.adapters.latex_renderer import LatexRenderer
+from didactic_cards.domain.interfaces import CompileResult, DocumentRenderer
 from didactic_cards.domain.rendering import DeckRenderSettings
 from didactic_cards.use_cases.card_use_cases import (
     AddCard,
@@ -172,6 +173,35 @@ def test_generate_and_preview_pad_to_whole_sheet(repo, deck_id, app):
         repo.get_render_settings(deck_id),
         repo.get_render_settings(deck_id),
     ]
+
+
+def test_preflight_reports_slots_inserted_by_section_break(repo, deck_id):
+    AddCard(repo).execute(deck_id, 'Q1', 'A1', section='One')
+    AddCard(repo).execute(deck_id, 'Q2', 'A2', section='Two')
+    repo.save_render_settings(
+        deck_id,
+        DeckRenderSettings(
+            header_visibility='front',
+            section_break='new-row',
+        ),
+    )
+    renderer = LatexRenderer(cards_per_row=2, rows_per_page=4)
+    class Compiler:
+        def __init__(self):
+            self.sources = []
+
+        def compile(self, source):
+            self.sources.append(source)
+            return CompileResult(True, b'%PDF', '')
+
+    compiler = Compiler()
+
+    report = PreflightDocument(repo, renderer, compiler, 8).execute(deck_id)
+
+    issues = {issue.code: issue for issue in report.issues}
+    assert issues['section-break-padding'].message.endswith('1')
+    assert issues['partial-sheet'].message.endswith('5 пустых ячеек')
+    assert compiler.sources[0].index('Q1') < compiler.sources[0].index('Q2')
 
 
 def test_document_renderer_default_settings_hook_is_backward_compatible(app):

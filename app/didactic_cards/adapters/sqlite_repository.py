@@ -18,7 +18,7 @@ from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 4
+SQLITE_SCHEMA_VERSION = 5
 
 
 class LegacyMigrationError(ValueError):
@@ -66,7 +66,7 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _initialize_database(self) -> None:
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {0, 1, 2, 3, SQLITE_SCHEMA_VERSION}:
+            if version not in {0, 1, 2, 3, 4, SQLITE_SCHEMA_VERSION}:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
@@ -125,6 +125,12 @@ class SqliteRepository(DeckRepository, CardRepository):
                     ),
                     header_alignment TEXT NOT NULL CHECK (
                         header_alignment IN ('left', 'center', 'right')
+                    ),
+                    header_repeat TEXT NOT NULL DEFAULT 'every-card' CHECK (
+                        header_repeat IN ('every-card', 'section-start')
+                    ),
+                    section_break TEXT NOT NULL DEFAULT 'continuous' CHECK (
+                        section_break IN ('continuous', 'new-row', 'new-sheet')
                     )
                 );
                 CREATE TABLE IF NOT EXISTS printer_profiles (
@@ -191,6 +197,27 @@ class SqliteRepository(DeckRepository, CardRepository):
                         legacy.header_position.value,
                         legacy.header_alignment.value,
                     ),
+                )
+            settings_columns = {
+                row['name'] for row in connection.execute(
+                    'PRAGMA table_info(deck_render_settings)'
+                )
+            }
+            if 'header_repeat' not in settings_columns:
+                connection.execute(
+                    """
+                    ALTER TABLE deck_render_settings
+                    ADD COLUMN header_repeat TEXT NOT NULL DEFAULT 'every-card'
+                        CHECK (header_repeat IN ('every-card', 'section-start'))
+                    """
+                )
+            if 'section_break' not in settings_columns:
+                connection.execute(
+                    """
+                    ALTER TABLE deck_render_settings
+                    ADD COLUMN section_break TEXT NOT NULL DEFAULT 'continuous'
+                        CHECK (section_break IN ('continuous', 'new-row', 'new-sheet'))
+                    """
                 )
             if version < SQLITE_SCHEMA_VERSION:
                 connection.execute(f'PRAGMA user_version = {SQLITE_SCHEMA_VERSION}')
@@ -282,6 +309,8 @@ class SqliteRepository(DeckRepository, CardRepository):
             header_visibility=row['header_visibility'],
             header_position=row['header_position'],
             header_alignment=row['header_alignment'],
+            header_repeat=row['header_repeat'],
+            section_break=row['section_break'],
         )
 
     def _get_render_settings(
@@ -389,8 +418,9 @@ class SqliteRepository(DeckRepository, CardRepository):
             INSERT INTO deck_render_settings(
                 deck_id, preset, horizontal_alignment,
                 vertical_alignment, header_visibility,
-                header_position, header_alignment
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                header_position, header_alignment, header_repeat,
+                section_break
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 deck.id,
@@ -400,6 +430,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                 settings.header_visibility.value,
                 settings.header_position.value,
                 settings.header_alignment.value,
+                settings.header_repeat.value,
+                settings.section_break.value,
             ),
         )
 
@@ -596,7 +628,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                 UPDATE deck_render_settings SET
                     preset = ?, horizontal_alignment = ?,
                     vertical_alignment = ?, header_visibility = ?,
-                    header_position = ?, header_alignment = ?
+                    header_position = ?, header_alignment = ?,
+                    header_repeat = ?, section_break = ?
                 WHERE deck_id = ?
                 ''',
                 (
@@ -606,6 +639,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                     settings.header_visibility.value,
                     settings.header_position.value,
                     settings.header_alignment.value,
+                    settings.header_repeat.value,
+                    settings.section_break.value,
                     deck_id,
                 ),
             )
