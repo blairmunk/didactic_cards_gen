@@ -11,7 +11,7 @@ from ..adapters.latex_renderer import UnsafeLatexError
 from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
 from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import CompileResult, ConcurrentModificationError
-from ..domain.printing import PrinterProfile
+from ..domain.printing import PrinterProfile, recommend_back_offsets
 from ..domain.rendering import DeckRenderSettings, StylePreset
 from ..domain.trusted import ContentMode, PrintJobSnapshot, TrustedTemplateVersion
 
@@ -245,14 +245,23 @@ def _saved_print_profiles():
     return tuple(list_saved()) if list_saved is not None else ()
 
 
-def _render_printer_profiles(error: str | None = None, status: int = 200):
+def _render_printer_profiles(
+    error: str | None = None,
+    status: int = 200,
+    *,
+    calibration_result: dict | None = None,
+    calibration_form: dict | None = None,
+):
     return render_template(
         'cards/printer_profiles.html',
         configured_profiles=tuple(
             current_app.config.get('PRINT_PROFILES', {}).values()
         ),
         saved_profiles=_saved_print_profiles(),
+        available_profiles=_print_profiles(),
         error=error,
+        calibration_result=calibration_result,
+        calibration_form=calibration_form or {},
     ), status
 
 
@@ -455,6 +464,45 @@ def calibration_sheet():
         mimetype='application/pdf',
         as_attachment=True,
         download_name=f'printer-calibration-{suffix}.pdf',
+    )
+
+
+@cards_bp.route('/printer_profiles/calibration-calculate', methods=['POST'])
+def calculate_calibration():
+    profile_id = request.form.get('profile_id', '').strip()
+    form_values = {
+        'profile_id': profile_id,
+        'measured_x_mm': request.form.get('measured_x_mm', '').strip(),
+        'measured_y_mm': request.form.get('measured_y_mm', '').strip(),
+    }
+    profile = _print_profile_map().get(profile_id)
+    if profile is None:
+        return _render_printer_profiles(
+            'Выберите существующий профиль для расчёта.',
+            400,
+            calibration_form=form_values,
+        )
+    try:
+        measured_x = _profile_offset('measured_x_mm')
+        measured_y = _profile_offset('measured_y_mm')
+        corrected_x, corrected_y = recommend_back_offsets(
+            profile, measured_x, measured_y
+        )
+    except ValueError as error:
+        return _render_printer_profiles(
+            str(error), 400, calibration_form=form_values
+        )
+    result = {
+        'profile': profile,
+        'measured_x_mm': measured_x,
+        'measured_y_mm': measured_y,
+        'back_offset_x_mm': corrected_x,
+        'back_offset_y_mm': corrected_y,
+        'within_limits': abs(corrected_x) <= 10 and abs(corrected_y) <= 10,
+    }
+    return _render_printer_profiles(
+        calibration_result=result,
+        calibration_form=form_values,
     )
 
 

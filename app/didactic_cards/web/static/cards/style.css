@@ -76,6 +76,28 @@ button:hover, .btn:hover,
     padding: 0.5rem;
 }
 
+.calibration-calculator select {
+    width: 100%;
+}
+
+.calibration-result code {
+    font-size: 1.05rem;
+    font-weight: 700;
+}
+
+.calibration-result .error-message {
+    margin: 0.75rem 0 0;
+}
+
+.table-scroll {
+    max-width: 100%;
+    overflow-x: auto;
+}
+
+.acceptance-matrix {
+    min-width: 42rem;
+}
+
 .settings-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(11rem, 1fr));

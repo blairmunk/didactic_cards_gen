@@ -3,8 +3,10 @@ import pytest
 from didactic_cards.domain.entities import Card
 from didactic_cards.domain.printing import (
     DuplexMode,
+    PrinterProfile,
     build_print_layout,
     build_sheets,
+    recommend_back_offsets,
 )
 
 
@@ -122,3 +124,36 @@ def test_invalid_grid_is_rejected(rows, columns):
 def test_unknown_duplex_mode_is_rejected():
     with pytest.raises(ValueError, match='unsupported duplex mode'):
         build_sheets(make_cards(1), rows=1, columns=1, duplex_mode='diagonal')
+
+
+@pytest.mark.parametrize(
+    ('mode', 'current', 'measured', 'expected'),
+    [
+        ('long-edge', (0.25, -0.5), (1.2, -0.4), (1.45, -0.1)),
+        ('short-edge', (0.25, -0.5), (1.2, -0.4), (-0.95, -0.9)),
+    ],
+)
+def test_calibration_recommendation_applies_flip_specific_signs(
+    mode, current, measured, expected
+):
+    profile = PrinterProfile(
+        key='measured',
+        name='Measured printer',
+        duplex_mode=mode,
+        back_offset_x_mm=current[0],
+        back_offset_y_mm=current[1],
+    )
+
+    assert recommend_back_offsets(profile, *measured) == expected
+
+
+@pytest.mark.parametrize('measurement', [float('nan'), float('inf')])
+def test_calibration_recommendation_rejects_non_finite_measurements(measurement):
+    profile = PrinterProfile(key='test', name='Test')
+    with pytest.raises(ValueError, match='finite'):
+        recommend_back_offsets(profile, measurement, 0)
+
+
+def test_calibration_recommendation_requires_profile():
+    with pytest.raises(TypeError, match='PrinterProfile'):
+        recommend_back_offsets(object(), 0, 0)

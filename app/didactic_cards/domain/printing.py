@@ -58,6 +58,30 @@ class PrinterProfile:
         object.__setattr__(self, 'duplex_mode', DuplexMode(self.duplex_mode))
 
 
+def recommend_back_offsets(
+    profile: PrinterProfile,
+    measured_x_mm: float,
+    measured_y_mm: float,
+) -> tuple[float, float]:
+    """Return corrected back offsets from a face-up transmitted-light reading.
+
+    ``measured_x_mm`` and ``measured_y_mm`` describe where the printed back
+    target appears relative to the front target: right/down are positive.
+    The duplex transform changes the correction signs between flip modes.
+    """
+    if not isinstance(profile, PrinterProfile):
+        raise TypeError('profile must be PrinterProfile')
+    if not all(math.isfinite(value) for value in (measured_x_mm, measured_y_mm)):
+        raise ValueError('calibration measurements must be finite')
+    if profile.duplex_mode is DuplexMode.LONG_EDGE:
+        corrected_x = profile.back_offset_x_mm + measured_x_mm
+        corrected_y = profile.back_offset_y_mm - measured_y_mm
+    else:
+        corrected_x = profile.back_offset_x_mm - measured_x_mm
+        corrected_y = profile.back_offset_y_mm + measured_y_mm
+    return round(corrected_x, 3), round(corrected_y, 3)
+
+
 @dataclass(frozen=True)
 class Sheet:
     """A physical sheet represented in PDF page reading order."""

@@ -4,6 +4,8 @@
 
 > Статус после remediation 22.08.2026: программный порядок duplex-страниц исправлен (`front-1, back-1, front-2, back-2`), добавлены long-edge/short-edge transforms, независимый поворот оборота 0°/180°, calibration offsets/лист, registration marks, auto-fit и адресный preflight. SQLite schema 7 и JSON export schema 4 сохраняют секции, оформление и карантин trusted-шаблонов. В UI и PDF работают presets, выравнивание 3×3, колонтитулы и физические разрывы секций. Явно включаемый advanced-режим даёт versioned внутренний TeX-шаблон, независимые escaped/raw стороны, test compile, approval/history/reset и компиляцию только в sandbox; импорт и clone никогда не наследуют approval. Гарантия точности всё ещё требует физического прогона; актуальный прогресс — в [плане ревизии](docs/REMEDIATION_PLAN.md).
 
+Для физической приёмки используйте встроенный калькулятор компенсации на странице профилей и заполните [протокол long-edge / short-edge / ручной подачи](docs/PHYSICAL_PRINT_ACCEPTANCE.md). Этап считается завершённым только после реальных измерений.
+
 ![Редактор колоды](docs/images/deck-editor.png)
 
 ## Быстрый запуск
@@ -49,7 +51,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 506 основных тестов и отдельный проходящий Chromium E2E без `xfail`; branch coverage выше обязательного порога 98%. Реальные PDF также проходят vector geometry, матрицу выравнивания 3×3, section sheet-break, raster golden diff, overflow, A4-калибровку и hostile-набор изолированного trusted compiler. E2E проходит карантин, approval и trusted PDF. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает TeX/bubblewrap-интеграцию.
+Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 515 основных тестов и отдельный проходящий Chromium E2E без `xfail`; branch coverage выше обязательного порога 98%. Реальные PDF также проходят vector geometry, матрицу выравнивания 3×3, section sheet-break, raster golden diff, overflow, A4-калибровку и hostile-набор изолированного trusted compiler. E2E проходит карантин, approval и trusted PDF. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает TeX/bubblewrap-интеграцию.
 
 Проверить целостность хранилища без автоматического исправления:
 

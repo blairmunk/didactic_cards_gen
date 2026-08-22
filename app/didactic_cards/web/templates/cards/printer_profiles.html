@@ -51,6 +51,89 @@
         <button class="btn-primary" type="submit">Скачать калибровочный PDF</button>
     </form>
 
+    <h2>Калькулятор компенсации</h2>
+    <p>
+        Введите измеренное положение пунктирной мишени относительно сплошной, когда лист
+        лежит <strong>лицевой стороной к вам</strong>. Калькулятор учтёт duplex-режим и
+        покажет новые значения «Оборот X/Y». Он ничего не сохраняет автоматически.
+    </p>
+    <form method="post" action="{{ url_for('cards.calculate_calibration') }}" class="card-form calibration-calculator">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label for="calculation-profile">Исходный профиль</label>
+        <select id="calculation-profile" name="profile_id" required>
+            <option value="">Выберите профиль</option>
+            {% for profile in available_profiles %}
+            <option value="{{ profile.key }}" {% if calibration_form.profile_id == profile.key %}selected{% endif %}>{{ profile.name }} — {{ profile.duplex_mode.value }}</option>
+            {% endfor %}
+        </select>
+        <div class="profile-offset-grid">
+            <label for="measured-x">Измеренный X, мм
+                <input id="measured-x" name="measured_x_mm" type="number" step="0.05" required value="{{ calibration_form.measured_x_mm|default('') }}" placeholder="вправо + / влево −">
+            </label>
+            <label for="measured-y">Измеренный Y, мм
+                <input id="measured-y" name="measured_y_mm" type="number" step="0.05" required value="{{ calibration_form.measured_y_mm|default('') }}" placeholder="вниз + / вверх −">
+            </label>
+        </div>
+        <button class="btn-primary" type="submit">Рассчитать новые offsets</button>
+    </form>
+
+    {% if calibration_result %}
+    <div class="info-panel calibration-result" role="status" tabindex="-1">
+        <strong>Рекомендация для «{{ calibration_result.profile.name }}»:</strong>
+        «Оборот X» = <code>{{ calibration_result.back_offset_x_mm }}</code> мм,
+        «Оборот Y» = <code>{{ calibration_result.back_offset_y_mm }}</code> мм.
+        <br>
+        Расчёт выполнен из B({{ calibration_result.profile.back_offset_x_mm }},
+        {{ calibration_result.profile.back_offset_y_mm }}) мм при измерении
+        X={{ calibration_result.measured_x_mm }}, Y={{ calibration_result.measured_y_mm }} мм.
+        {% if not calibration_result.within_limits %}
+        <div class="error-message">
+            Результат выходит за допустимые ±10 мм. Проверьте масштаб, ориентацию листа и
+            выбранный flip mode: такой сдвиг не следует компенсировать профилем.
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <h2>Протокол физической приёмки</h2>
+    <p>
+        Один удачный лист проверяет только конкретную комбинацию принтера, драйвера,
+        бумаги и способа подачи. Для завершения этапа 6.6 выполните все три строки.
+        Рекомендуемый допуск: контрольные 100 мм находятся в пределах 99,5–100,5 мм,
+        остаточный сдвиг центра не больше 0,5 мм по каждой оси, углов — не больше 1 мм,
+        ориентация и пары карточек совпадают без ошибок.
+    </p>
+    <div class="table-scroll">
+        <table class="cards-table acceptance-matrix">
+            <thead>
+                <tr><th>Прогон</th><th>Что печатать</th><th>Что зафиксировать</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Автодуплекс long-edge</td>
+                    <td>Калибровочный PDF с профилем long-edge, Actual size</td>
+                    <td>Длина, X/Y центра, максимум по углам, ориентация стрелки</td>
+                </tr>
+                <tr>
+                    <td>Автодуплекс short-edge</td>
+                    <td>Калибровочный PDF с профилем short-edge, Actual size</td>
+                    <td>Длина, X/Y центра, максимум по углам, ориентация стрелки</td>
+                </tr>
+                <tr>
+                    <td>Ручная подача</td>
+                    <td>Front-only, затем Back-only одной тестовой колоды</td>
+                    <td>Как вернуть лист в лоток, порядок страниц, пары и ориентация</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <ol>
+        <li>Запишите модель принтера, версию драйвера, тип/плотность бумаги и дату.</li>
+        <li>Сначала устраните масштаб и неверную ориентацию; только затем рассчитывайте offsets.</li>
+        <li>После компенсации распечатайте повторный лист и измерьте остаток во всех пяти мишенях.</li>
+        <li>Не отмечайте прогон успешным, если центр совпал, но углы расходятся: это skew подачи, а не равномерный offset.</li>
+    </ol>
+
     <h2>Предустановленные профили приложения</h2>
     <ul>
         {% for profile in configured_profiles %}

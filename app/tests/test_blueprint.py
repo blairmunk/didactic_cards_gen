@@ -847,6 +847,81 @@ def test_calibration_sheet_download_uses_selected_profile(tmp_path):
 
 
 @pytest.mark.parametrize(
+    ('profile_id', 'expected_x', 'expected_y'),
+    [
+        ('standard-long-edge', '1.2', '0.4'),
+        ('standard-short-edge', '-1.2', '-0.4'),
+    ],
+)
+def test_calibration_calculator_applies_profile_flip_mode_without_writing(
+    client, app, profile_id, expected_x, expected_y
+):
+    mode = 'short-edge' if profile_id.endswith('short-edge') else 'long-edge'
+    app.config['PRINT_PROFILES'] = {
+        profile_id: PrinterProfile(profile_id, profile_id, duplex_mode=mode)
+    }
+
+    response = client.post(
+        '/printer_profiles/calibration-calculate',
+        data={
+            'profile_id': profile_id,
+            'measured_x_mm': '1.2',
+            'measured_y_mm': '-0.4',
+        },
+    )
+
+    assert response.status_code == 200
+    assert f'«Оборот X» = <code>{expected_x}</code>' in response.text
+    assert f'«Оборот Y» = <code>{expected_y}</code>' in response.text
+
+
+def test_calibration_calculator_validates_input_and_flags_implausible_result(
+    client, app,
+):
+    app.config['PRINT_PROFILES'] = {
+        'standard-long-edge': PrinterProfile(
+            'standard-long-edge', 'Standard long-edge'
+        )
+    }
+    missing_profile = client.post(
+        '/printer_profiles/calibration-calculate',
+        data={'profile_id': 'missing', 'measured_x_mm': '0', 'measured_y_mm': '0'},
+    )
+    non_finite = client.post(
+        '/printer_profiles/calibration-calculate',
+        data={
+            'profile_id': 'standard-long-edge',
+            'measured_x_mm': 'nan',
+            'measured_y_mm': '0',
+        },
+    )
+    outside_limits = client.post(
+        '/printer_profiles/calibration-calculate',
+        data={
+            'profile_id': 'standard-long-edge',
+            'measured_x_mm': '11',
+            'measured_y_mm': '0',
+        },
+    )
+
+    assert missing_profile.status_code == 400
+    assert non_finite.status_code == 400
+    assert outside_limits.status_code == 200
+    assert 'выходит за допустимые ±10 мм' in outside_limits.text
+
+
+def test_printer_profile_page_contains_physical_acceptance_matrix(client):
+    page = client.get('/printer_profiles')
+
+    assert page.status_code == 200
+    assert 'Протокол физической приёмки' in page.text
+    assert 'Автодуплекс long-edge' in page.text
+    assert 'Автодуплекс short-edge' in page.text
+    assert 'Ручная подача' in page.text
+    assert '99,5–100,5 мм' in page.text
+
+
+@pytest.mark.parametrize(
     'form',
     [
         {'key': 'Invalid', 'name': 'Name'},

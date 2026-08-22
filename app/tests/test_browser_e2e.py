@@ -213,6 +213,22 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
         assert preflight_state['scrolls'] >= 2
         assert preflight_state['focused'] == 'preflight-result'
 
+        await page.goto(
+            f'{base_url}/printer_profiles', {'waitUntil': 'networkidle2'}
+        )
+        await page.select('#calculation-profile', 'standard-short-edge')
+        await page.type('#measured-x', '1.2')
+        await page.type('#measured-y', '-0.4')
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('.calibration-calculator button[type="submit"]'),
+        )
+        calculation = await page.Jeval(
+            '.calibration-result', 'element => element.textContent'
+        )
+        assert '«Оборот X» = -1.2 мм' in calculation
+        assert '«Оборот Y» = -0.4 мм' in calculation
+
         resource_urls = await page.evaluate(
             "() => performance.getEntriesByType('resource').map(entry => entry.name)"
         )

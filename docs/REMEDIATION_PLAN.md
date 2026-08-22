@@ -66,6 +66,8 @@
   - [x] Добавлены повтор колонтитула на каждой карточке/только при смене секции и физические section breaks: continuous/new row/new sheet до duplex permutation.
   - [x] Добавлен закрытый по умолчанию trusted foundation: feature flag, schema 6 quarantine/provenance, строгий job protocol и изолированный bubblewrap compiler worker.
   - [x] Этап 6.5: advanced UI, escaped/raw для каждой стороны, test compile, история/approval/reset, schema 7, JSON export schema 4 и immutable print snapshot подключены к sandbox-печати.
+  - [x] Программная подготовка 6.6: UI-калькулятор учитывает знаки long-edge/short-edge, опубликованы измеримые критерии и протокол automatic/manual прогонов.
+  - [ ] Физическая часть 6.6: заполнить `PHYSICAL_PRINT_ACCEPTANCE.md` по реальным отпечаткам и записать модель принтера/остаточные отклонения.
 - [x] Production runtime.
   - [x] Debug выключен по умолчанию и включается только строгой env-переменной.
   - [x] Добавлены `/health/live` и sanitised `/health/ready` для SQLite/TeX.
@@ -94,7 +96,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 431 проходящий основной тест, 0 `xfail`, один отдельно запускаемый browser E2E; общий branch coverage составляет 98,65% при обязательном CI-пороге 98%. Chromium-сценарий проверяет настройки оформления и секционирования, скрытие повторного колонтитула, focus/scroll результата preflight и только локальные resource URLs. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF/raster-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 515 проходящих основных тестов, 0 `xfail`, один отдельно запускаемый browser E2E; общий branch coverage составляет 98,43% при обязательном CI-пороге 98%. Chromium-сценарий проверяет настройки оформления/секционирования, focus/scroll preflight и trusted quarantine/approval/PDF. Физический прогон на реальном принтере ещё обязателен: PDF/raster-проверка и калькулятор не моделируют driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -401,6 +403,6 @@ Sandbox-контракт: отдельный непривилегированн�
 4. **6.3 — секционирование:** ✅ bulk section, повтор колонтитула на каждой карточке/только при смене и физические row/sheet breaks выполнены; preflight показывает добавленные пустые slots, а schema 4→5 сохраняет прежнее поведение.
 5. **6.4 — trusted infrastructure:** ✅ feature flag, schema 6 quarantine/provenance, job protocol, namespace readiness и sandbox worker с hostile test suite выполнены без выпуска UI.
 6. **6.5 — advanced UX:** ✅ редактор шаблона, raw/escaped content switch, test compile/PDF, history/approval/reset, immutable print snapshot, quarantined JSON schema 4 и документация рисков выполнены.
-7. **6.6 — физическая приёмка:** минимум один duplex-принтер в обоих flip modes и ручная подача; измерение меток/рамок после калибровки.
+7. **6.6 — физическая приёмка:** 🟡 калькулятор компенсации, критерии и воспроизводимый акт подготовлены; остаётся минимум один реальный duplex-принтер в обоих flip modes и ручная подача с измерением пяти мишеней после калибровки.
 
 Программные критерии этапов 6.0–6.5 выполнены. Следующий рабочий инкремент — 6.6: физическая приёмка на реальном duplex-принтере в обоих flip modes и при ручной подаче; это нельзя достоверно заменить программным тестом.

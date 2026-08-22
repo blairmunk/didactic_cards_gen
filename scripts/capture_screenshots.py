@@ -65,6 +65,13 @@ async def capture(base_url: str, deck_id: str, output_dir: Path) -> None:
         await page.goto(
             f"{base_url}/printer_profiles", {"waitUntil": "domcontentloaded"}
         )
+        await page.select("#calculation-profile", "standard-short-edge")
+        await page.type("#measured-x", "1.2")
+        await page.type("#measured-y", "-0.4")
+        await asyncio.gather(
+            page.waitForNavigation({"waitUntil": "domcontentloaded"}),
+            page.click('.calibration-calculator button[type="submit"]'),
+        )
         await page.screenshot({
             "path": str(output_dir / "printer-profiles.png"), "fullPage": True
         })
