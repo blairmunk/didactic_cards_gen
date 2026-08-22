@@ -137,7 +137,7 @@ JSON files             PdfLatexCompiler
 - `adapters/json_repository.py`: активное файловое хранилище.
 - `adapters/latex_renderer.py`: физическая сетка и зеркалирование.
 - `web/blueprint.py`: HTML и AJAX endpoints.
-- `json_storage.py` и `session_repository.py`: legacy-код; первый сейчас даже не импортируется из-за удалённого интерфейса.
+- `xelatex_compiler.py`: протестированная альтернативная реализация компилятора; активная конфигурация пока использует `pdflatex`.
 
 `CardLayoutConfig` задаёт `9.3 × 6.3 см`, 2 столбца, 4 ряда и `fboxsep=8pt`. Эти размеры относятся к внутренней `minipage`; физическая рамка получается примерно `9.89 × 6.89 см` с учётом padding и border (`BUG-PRINT-003`).
 

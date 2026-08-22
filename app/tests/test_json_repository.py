@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import importlib
 import json
 
 import pytest
@@ -130,12 +129,3 @@ def test_interrupted_write_preserves_previous_json(json_repo, monkeypatch):
     with pytest.raises(OSError):
         json_repo.create_deck("Потерянная")
     assert json_repo.decks_file.read_bytes() == before
-
-
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-ARCH-001: obsolete JsonFileStorage imports removed StorageBackend",
-)
-def test_legacy_json_storage_is_importable_or_removed_cleanly():
-    module = importlib.import_module("didactic_cards.adapters.json_storage")
-    assert hasattr(module, "JsonFileStorage")
