@@ -1,9 +1,11 @@
 import io
 import hmac
 import secrets
+import time
+import uuid
 
 from flask import (Blueprint, render_template, request, redirect,
-                   url_for, jsonify, current_app, send_file, session, abort)
+                   url_for, jsonify, current_app, send_file, session, abort, g)
 
 from ..adapters.latex_renderer import UnsafeLatexError
 from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
@@ -125,7 +127,14 @@ def inject_csrf_token():
     return {
         'csrf_token': _csrf_token,
         'print_profiles': _print_profiles(),
+        'request_id': getattr(g, 'request_id', None),
     }
+
+
+@cards_bp.before_app_request
+def start_request_observation():
+    g.request_id = str(uuid.uuid4())
+    g.request_started = time.perf_counter()
 
 
 @cards_bp.before_app_request
@@ -155,6 +164,23 @@ def add_security_headers(response):
         "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
         "font-src 'self' data:; object-src 'none'; "
         "frame-src 'self' blob:; base-uri 'self'; frame-ancestors 'none'",
+    )
+    response.headers['X-Request-ID'] = getattr(g, 'request_id', 'unavailable')
+    started = getattr(g, 'request_started', None)
+    duration_ms = (
+        round((time.perf_counter() - started) * 1000, 3)
+        if started is not None else None
+    )
+    current_app.logger.info(
+        'request_completed',
+        extra={
+            'event': 'request_completed',
+            'request_id': getattr(g, 'request_id', None),
+            'method': request.method,
+            'path': request.path,
+            'status': response.status_code,
+            'duration_ms': duration_ms,
+        },
     )
     return response
 
@@ -457,8 +483,38 @@ def _generate_pdf_response(
                 _repo(), _renderer(request.form.get('profile_id')), _compiler(),
                 _cards_per_page(), side
             )
+        compile_started = time.perf_counter()
         result = generator.execute(deck_id)
+        compile_duration_ms = round(
+            (time.perf_counter() - compile_started) * 1000, 3
+        )
+        current_app.logger.info(
+            'pdf_compilation',
+            extra={
+                'event': 'pdf_compilation',
+                'request_id': g.request_id,
+                'deck_id': deck_id,
+                'side': side or 'duplex',
+                'status': 'success' if result.success else 'failure',
+                'error_kind': result.error_kind,
+                'duration_ms': compile_duration_ms,
+            },
+        )
     except UnsafeLatexError as error:
+        current_app.logger.info(
+            'pdf_compilation',
+            extra={
+                'event': 'pdf_compilation',
+                'request_id': g.request_id,
+                'deck_id': deck_id,
+                'side': side or 'duplex',
+                'status': 'failure',
+                'error_kind': 'validation',
+                'duration_ms': round(
+                    (time.perf_counter() - compile_started) * 1000, 3
+                ),
+            },
+        )
         return render_template(
             'cards/error.html', deck=deck_info,
             errors=[str(error)], full_log=''

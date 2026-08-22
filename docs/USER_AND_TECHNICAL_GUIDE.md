@@ -43,6 +43,8 @@ export DIDACTIC_CARDS_DATA_DIR='/srv/didactic-cards/data'
 
 TLS и аутентификацию следует завершать на reverse proxy. Liveness probe — `GET /health/live`; readiness probe — `GET /health/ready`. Readiness возвращает 503, если SQLite integrity/write-transaction check или поиск настроенного TeX executable не прошёл. Ответ показывает только `storage`/`tex: ok|unavailable` и не раскрывает внутренние пути.
 
+Каждый HTTP-ответ содержит новый UUID в `X-Request-ID`; страница ошибки показывает тот же код пользователю. Логи имеют однострочный JSON-формат. Событие `request_completed` содержит method/path/status/duration, а `pdf_compilation` — deck UUID, сторону (`duplex|front|back`), result/error kind и длительность. Содержимое карточек, TeX-log и filesystem paths в эти поля не записываются.
+
 По умолчанию данные сохраняются в абсолютном пути `app/data`, поэтому каталог запуска не меняет выбранную базу. Для отдельной базы используйте, например, `DIDACTIC_CARDS_DATA_DIR=/srv/didactic-cards/data`; каталог будет приведён к абсолютному пути.
 
 Проверка TeX:
@@ -229,7 +231,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 317 проходящих тестов, 0 `xfail`, общий branch coverage 98.66%. В него входят unit/HTTP-контракты production health, профилей, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
+Текущее состояние основного набора: 324 проходящих теста, 0 `xfail`, общий branch coverage 98.69%. В него входят unit/HTTP-контракты observability/production health, профилей, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
 
 Скриншоты можно переснять на запущенном приложении:
 

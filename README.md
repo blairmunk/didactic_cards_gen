@@ -35,7 +35,7 @@ export DIDACTIC_CARDS_DATA_DIR='/srv/didactic-cards/data'
 .venv/bin/gunicorn --chdir app --workers 2 --bind 127.0.0.1:8000 'run:create_app()'
 ```
 
-`GET /health/live` проверяет процесс, `GET /health/ready` — целостность/доступность SQLite write-транзакции и наличие TeX executable. Debug по умолчанию выключен; `DIDACTIC_CARDS_DEBUG=true` предназначен только для локальной диагностики.
+`GET /health/live` проверяет процесс, `GET /health/ready` — целостность/доступность SQLite write-транзакции и наличие TeX executable. Debug по умолчанию выключен; `DIDACTIC_CARDS_DEBUG=true` предназначен только для локальной диагностики. Ответы получают `X-Request-ID`, а HTTP и PDF timing пишутся однострочными JSON-событиями без текста карточек и внутренних путей.
 
 Если существующий `venv` не запускается с `Exec format error`, не переиспользуйте его: это непереносимый Windows/WSL link-файл. Создайте `.venv` командами выше.
 
@@ -47,7 +47,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 317 проходящих тестов без `xfail`, branch coverage 98.66%; отдельный Chromium E2E запускается marker-ом `browser`. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с обязательным порогом 98%.
+Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 324 проходящих теста без `xfail`, branch coverage 98.69%; отдельный Chromium E2E запускается marker-ом `browser`. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с обязательным порогом 98%.
 
 Проверить целостность хранилища без автоматического исправления:
 

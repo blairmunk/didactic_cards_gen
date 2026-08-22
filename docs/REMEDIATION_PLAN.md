@@ -49,11 +49,11 @@
   - [x] Компилируемый preflight проверяет overflow, missing glyphs, unsupported formulas и printable area до печати.
   - [x] Именованные config-профили принтера выбираются на print job и изолированы между запросами.
   - [ ] Web calibration wizard с сохранением пользовательских профилей, расширенная layout-конфигурация и auto-fit/clip policy.
-- [ ] Production runtime.
+- [x] Production runtime.
   - [x] Debug выключен по умолчанию и включается только строгой env-переменной.
   - [x] Добавлены `/health/live` и sanitised `/health/ready` для SQLite/TeX.
   - [x] Gunicorn добавлен в runtime dependencies; WSGI-команда и probe semantics документированы.
-  - [ ] Добавить structured logging, request/error IDs и метрики времени компиляции.
+  - [x] Добавлены однострочные JSON-логи, request/error IDs и duration событий HTTP/PDF compilation без контента/путей.
 
 ## 1. Итог аудита
 
@@ -77,7 +77,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 317 проходящих тестов, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.66% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 324 проходящих теста, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.69% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -127,7 +127,7 @@
 - Времена сохраняются UTC, но UI форматирует без зоны и без явной конвертации в локальную.
 - Полный LaTeX log показывается пользователю и может раскрыть пути/служебные детали.
 - `MAX_CONTENT_LENGTH=2 MiB` и `max_cards=200` реализованы; отдельные ограничения длины стороны/имени ещё нужны.
-- ✅ Liveness/readiness проверяют процесс, SQLite integrity/write transaction и TeX executable без утечки деталей. Structured logging, error IDs и метрики времени компиляции остаются.
+- ✅ Liveness/readiness, JSON logging, request/error IDs и HTTP/PDF duration events реализованы без записи контента карточек или внутренних путей.
 - Нет backup/restore/export всей колоды и schema version/migrations.
 - ✅ Активный backend переведён с JSON read-modify-write на SQLite transactions/WAL; thread/process stress tests не теряют обновления. Legacy JSON оставлен read-only источником миграции и recovery.
 - ✅ Debug по умолчанию выключен и управляется строгой env-переменной; Gunicorn runtime/команда добавлены. Reverse proxy/TLS и deployment hardening зависят от окружения.

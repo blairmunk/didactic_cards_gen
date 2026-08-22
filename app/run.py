@@ -6,6 +6,7 @@ from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 from didactic_cards.adapters.sqlite_repository import SqliteRepository
 from didactic_cards.web.blueprint import cards_bp
+from didactic_cards.web.observability import configure_json_logging
 
 
 def create_app(
@@ -21,6 +22,7 @@ def create_app(
     app = Flask(__name__)
     app.secret_key = cfg.secret_key
     app.debug = cfg.debug
+    configure_json_logging(app.logger)
 
     repo = repo if repo is not None else SqliteRepository(
         data_dir=data_dir if data_dir is not None else cfg.data_dir

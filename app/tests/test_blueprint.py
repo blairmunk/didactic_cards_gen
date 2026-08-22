@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import uuid
 
 import pytest
 
@@ -585,6 +586,43 @@ def test_health_endpoints_report_ready_components(client):
         'status': 'ready',
         'components': {'storage': 'ok', 'tex': 'ok'},
     }
+
+
+def test_every_response_has_unique_request_id(client):
+    first = client.get('/')
+    second = client.get('/')
+    first_id = first.headers['X-Request-ID']
+    second_id = second.headers['X-Request-ID']
+    assert str(uuid.UUID(first_id)) == first_id
+    assert str(uuid.UUID(second_id)) == second_id
+    assert first_id != second_id
+
+
+def test_pdf_generation_logs_safe_duration_metric(client, app, deck_id, monkeypatch):
+    events = []
+    monkeypatch.setattr(
+        app.logger,
+        'info',
+        lambda message, *, extra: events.append((message, extra)),
+    )
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
+    response = client.post(f'/deck/{deck_id}/generate')
+    metric = next(extra for message, extra in events if message == 'pdf_compilation')
+    assert response.status_code == 200
+    assert metric['deck_id'] == deck_id
+    assert metric['side'] == 'duplex'
+    assert metric['status'] == 'success'
+    assert metric['duration_ms'] >= 0
+    assert metric['request_id'] == response.headers['X-Request-ID']
+
+
+def test_error_page_displays_request_id(app_fail_compiler):
+    repo = app_fail_compiler.config['REPO']
+    deck = repo.create_deck('Fail')
+    client = app_fail_compiler.test_client()
+    client.post(f"/api/deck/{deck.id}/add_card", json={"front": "Q", "back": "A"})
+    response = client.post(f'/deck/{deck.id}/generate')
+    assert response.headers['X-Request-ID'] in response.text
 
 
 def test_readiness_reports_dependency_failure_without_internal_details(
