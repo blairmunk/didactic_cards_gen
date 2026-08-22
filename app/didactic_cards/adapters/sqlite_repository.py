@@ -12,11 +12,12 @@ from ..domain.interfaces import (
     ConcurrentModificationError,
     DeckRepository,
 )
+from ..domain.printing import PrinterProfile
 from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 1
+SQLITE_SCHEMA_VERSION = 2
 
 
 class LegacyMigrationError(ValueError):
@@ -64,7 +65,7 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _initialize_database(self) -> None:
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {0, SQLITE_SCHEMA_VERSION}:
+            if version not in {0, 1, SQLITE_SCHEMA_VERSION}:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
@@ -102,9 +103,22 @@ class SqliteRepository(DeckRepository, CardRepository):
                 );
                 CREATE INDEX IF NOT EXISTS idx_deck_cards_position
                     ON deck_cards(deck_id, position);
+                CREATE TABLE IF NOT EXISTS printer_profiles (
+                    key TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    duplex_mode TEXT NOT NULL
+                        CHECK (duplex_mode IN ('long-edge', 'short-edge')),
+                    front_offset_x_mm REAL NOT NULL,
+                    front_offset_y_mm REAL NOT NULL,
+                    back_offset_x_mm REAL NOT NULL,
+                    back_offset_y_mm REAL NOT NULL,
+                    back_border INTEGER NOT NULL CHECK (back_border IN (0, 1)),
+                    registration_marks INTEGER NOT NULL
+                        CHECK (registration_marks IN (0, 1))
+                );
                 '''
             )
-            if version == 0:
+            if version < SQLITE_SCHEMA_VERSION:
                 connection.execute(f'PRAGMA user_version = {SQLITE_SCHEMA_VERSION}')
             connection.execute('PRAGMA journal_mode = WAL')
 
@@ -448,6 +462,68 @@ class SqliteRepository(DeckRepository, CardRepository):
 
     def save(self, deck: CardDeck, deck_id: str = 'default') -> None:
         self.save_cards(deck_id, deck)
+
+    @staticmethod
+    def _profile_from_row(row: sqlite3.Row) -> PrinterProfile:
+        return PrinterProfile(
+            key=row['key'],
+            name=row['name'],
+            duplex_mode=row['duplex_mode'],
+            front_offset_x_mm=row['front_offset_x_mm'],
+            front_offset_y_mm=row['front_offset_y_mm'],
+            back_offset_x_mm=row['back_offset_x_mm'],
+            back_offset_y_mm=row['back_offset_y_mm'],
+            back_border=bool(row['back_border']),
+            registration_marks=bool(row['registration_marks']),
+        )
+
+    def list_printer_profiles(self) -> list[PrinterProfile]:
+        with self._transaction() as connection:
+            rows = connection.execute(
+                'SELECT * FROM printer_profiles ORDER BY name, key'
+            ).fetchall()
+            return [self._profile_from_row(row) for row in rows]
+
+    def save_printer_profile(self, profile: PrinterProfile) -> PrinterProfile:
+        with self._transaction(write=True) as connection:
+            connection.execute(
+                '''
+                INSERT INTO printer_profiles(
+                    key, name, duplex_mode,
+                    front_offset_x_mm, front_offset_y_mm,
+                    back_offset_x_mm, back_offset_y_mm,
+                    back_border, registration_marks
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    name = excluded.name,
+                    duplex_mode = excluded.duplex_mode,
+                    front_offset_x_mm = excluded.front_offset_x_mm,
+                    front_offset_y_mm = excluded.front_offset_y_mm,
+                    back_offset_x_mm = excluded.back_offset_x_mm,
+                    back_offset_y_mm = excluded.back_offset_y_mm,
+                    back_border = excluded.back_border,
+                    registration_marks = excluded.registration_marks
+                ''',
+                (
+                    profile.key,
+                    profile.name,
+                    profile.duplex_mode.value,
+                    profile.front_offset_x_mm,
+                    profile.front_offset_y_mm,
+                    profile.back_offset_x_mm,
+                    profile.back_offset_y_mm,
+                    int(profile.back_border),
+                    int(profile.registration_marks),
+                ),
+            )
+        return profile
+
+    def delete_printer_profile(self, key: str) -> bool:
+        with self._transaction(write=True) as connection:
+            cursor = connection.execute(
+                'DELETE FROM printer_profiles WHERE key = ?', (key,)
+            )
+            return cursor.rowcount > 0
 
     def integrity_check(self) -> list[str]:
         with self._transaction() as connection:

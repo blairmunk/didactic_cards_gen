@@ -9,6 +9,7 @@
 </head>
 <body>
     <h1>📚 Мои колоды</h1>
+    <p><a href="{{ url_for('cards.printer_profiles') }}">Профили принтеров и калибровка</a></p>
 
     {% if error %}
     <div class="error-message">{{ error }}</div>

@@ -175,6 +175,7 @@
                 <option value="{{ profile.key }}">{{ profile.name }}</option>
                 {% endfor %}
             </select>
+            <a href="{{ url_for('cards.printer_profiles') }}">Настроить</a>
         </div>
         {% endif %}
         <div class="buttons">

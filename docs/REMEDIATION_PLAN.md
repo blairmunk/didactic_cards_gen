@@ -33,7 +33,7 @@
   - [x] Corrupt/missing/invalid JSON останавливает запись и даёт безопасную HTTP-ошибку.
   - [x] Устранены stale `card_ids`, orphan writes и потеря ancestry при clone.
   - [x] Добавлены schema version 1, read-only startup integrity report и управляемое CLI-восстановление backup с сохранением `.broken-*`.
-  - [x] Активное хранилище мигрировано в SQLite schema 1 с FK, WAL, транзакциями и одноразовым backup/import legacy JSON.
+  - [x] Активное хранилище мигрировано в SQLite schema 2 с FK, WAL, транзакциями, одноразовым backup/import legacy JSON и профилями принтера.
   - [x] Карточные HTML/API операции переведены с индексов на UUID; deck version даёт HTTP 409 при stale mutation.
 - [ ] Этап 4: импорт и web UX.
   - [x] Bulk использует exact `||` и документированное escaping.
@@ -48,7 +48,8 @@
   - [x] Раздельные front-only/back-only PDF сохраняют sheet mapping, duplex transform и offsets для ручной подачи.
   - [x] Компилируемый preflight проверяет overflow, missing glyphs, unsupported formulas и printable area до печати.
   - [x] Именованные config-профили принтера выбираются на print job и изолированы между запросами.
-  - [ ] Web calibration wizard с сохранением пользовательских профилей, расширенная layout-конфигурация и auto-fit/clip policy.
+  - [x] Web calibration workflow сохраняет валидированные пользовательские профили в SQLite schema 2.
+  - [ ] Расширенная layout-конфигурация и auto-fit/clip policy.
 - [x] Production runtime.
   - [x] Debug выключен по умолчанию и включается только строгой env-переменной.
   - [x] Добавлены `/health/live` и sanitised `/health/ready` для SQLite/TeX.
@@ -57,7 +58,7 @@
 
 ## 1. Итог аудита
 
-Вердикт: приложение имеет понятную слоистую основу и работоспособный CRUD, но пока не выполняет главное обещание — гарантированное совмещение лицевой и оборотной стороны при произвольной двусторонней печати. До устранения P0-блокеров PDF нельзя выдавать как готовый печатный результат.
+Вердикт после выполненной программной remediation: исходные P0-дефекты page pairing, duplex transform, cut size, TeX boundary, HTTP download и persistence закрыты обычными regression/integration-тестами. Программная раскладка теперь воспроизводима, но точность на конкретном принтере всё ещё нельзя гарантировать без пробного листа и физической калибровки: драйвер, подача бумаги и механический skew находятся вне приложения.
 
 Самые опасные проблемы исходного baseline (выполненные отмечены):
 
@@ -77,7 +78,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 324 проходящих теста, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.69% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 335 проходящих тестов, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.65% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -204,7 +205,7 @@
 
 Приоритетный roadmap:
 
-1. [ ] Профили принтеров и calibration wizard: [x] config-defined профили и выбор на print job; [ ] измеряемые X/Y offsets и сохранение пользовательского профиля.
+1. [x] Config-defined и сохраняемые SQLite-профили, выбор на print job и web calibration workflow с X/Y offsets. Фактические значения пользователь получает физическим измерением пробного листа.
 2. Выбор формата A4/Letter, ориентации, сетки, внешнего размера карточки, margins/gaps/bleed/safe area.
 3. [x] Двусторонний PDF и два отдельных файла front/back для принтеров без duplex. Раздельные документы сохраняют одинаковую нумерацию физических листов, back permutation и калибровочные offsets; unit, HTTP и реальный `pdflatex` page-count test проходят.
 4. [x] Импорт/экспорт колоды в versioned JSON schema 1 и UTF-8-BOM CSV; импорт создаёт транзакционную копию с lineage, validation/quota и без перезаписи существующих данных. Полный backup/restore всей базы остаётся эксплуатационным пунктом.

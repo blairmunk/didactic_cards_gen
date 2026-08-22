@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from config import AppConfig, CardLayoutConfig, PrinterProfile
+from config import AppConfig, CardLayoutConfig
+from didactic_cards.domain.printing import PrinterProfile
 from run import create_app
 
 

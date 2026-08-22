@@ -10,6 +10,7 @@ from flask import (Blueprint, render_template, request, redirect,
 from ..adapters.latex_renderer import UnsafeLatexError
 from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
 from ..domain.interfaces import ConcurrentModificationError
+from ..domain.printing import PrinterProfile
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
@@ -43,7 +44,7 @@ def _repo():
 def _renderer(profile_id: str | None = None):
     if not profile_id:
         return current_app.config['RENDERER']
-    profile = current_app.config.get('PRINT_PROFILES', {}).get(profile_id)
+    profile = _print_profile_map().get(profile_id)
     factory = current_app.config.get('RENDERER_FACTORY')
     if profile is None or factory is None:
         abort(400, description='Неизвестный профиль принтера')
@@ -51,7 +52,16 @@ def _renderer(profile_id: str | None = None):
 
 
 def _print_profiles():
-    return tuple(current_app.config.get('PRINT_PROFILES', {}).values())
+    profiles = dict(current_app.config.get('PRINT_PROFILES', {}))
+    list_saved = getattr(_repo(), 'list_printer_profiles', None)
+    if list_saved is not None:
+        for profile in list_saved():
+            profiles.setdefault(profile.key, profile)
+    return tuple(profiles.values())
+
+
+def _print_profile_map():
+    return {profile.key: profile for profile in _print_profiles()}
 
 
 def _compiler():
@@ -112,6 +122,30 @@ def _optional_version(value) -> int | None:
     if version <= 0:
         abort(400, description='Некорректная версия колоды')
     return version
+
+
+def _saved_print_profiles():
+    list_saved = getattr(_repo(), 'list_printer_profiles', None)
+    return tuple(list_saved()) if list_saved is not None else ()
+
+
+def _render_printer_profiles(error: str | None = None, status: int = 200):
+    return render_template(
+        'cards/printer_profiles.html',
+        configured_profiles=tuple(
+            current_app.config.get('PRINT_PROFILES', {}).values()
+        ),
+        saved_profiles=_saved_print_profiles(),
+        error=error,
+    ), status
+
+
+def _profile_offset(name: str) -> float:
+    raw_value = request.form.get(name, '0').strip().replace(',', '.')
+    try:
+        return float(raw_value)
+    except ValueError as error:
+        raise ValueError(f'Поле {name} должно быть числом') from error
 
 
 def _csrf_token() -> str:
@@ -239,6 +273,48 @@ def _render_deck_error(deck_id: str, message: str, status: int = 409):
 def decks_list():
     decks = ListDecks(_repo()).execute()
     return render_template('cards/decks.html', decks=decks)
+
+
+@cards_bp.route('/printer_profiles', methods=['GET'])
+def printer_profiles():
+    return _render_printer_profiles()
+
+
+@cards_bp.route('/printer_profiles/save', methods=['POST'])
+def save_printer_profile():
+    save_profile = getattr(_repo(), 'save_printer_profile', None)
+    if save_profile is None:
+        abort(501, description='Хранилище профилей недоступно')
+    try:
+        key = request.form.get('key', '').strip()
+        if key in current_app.config.get('PRINT_PROFILES', {}):
+            raise ValueError('Встроенный профиль нельзя перезаписать')
+        profile = PrinterProfile(
+            key=key,
+            name=request.form.get('name', '').strip(),
+            duplex_mode=request.form.get('duplex_mode', 'long-edge'),
+            front_offset_x_mm=_profile_offset('front_offset_x_mm'),
+            front_offset_y_mm=_profile_offset('front_offset_y_mm'),
+            back_offset_x_mm=_profile_offset('back_offset_x_mm'),
+            back_offset_y_mm=_profile_offset('back_offset_y_mm'),
+            back_border=request.form.get('back_border') == 'on',
+            registration_marks=request.form.get('registration_marks') == 'on',
+        )
+        save_profile(profile)
+    except ValueError as error:
+        return _render_printer_profiles(str(error), 400)
+    return redirect(url_for('cards.printer_profiles'))
+
+
+@cards_bp.route('/printer_profiles/<key>/delete', methods=['POST'])
+def delete_printer_profile(key):
+    if key in current_app.config.get('PRINT_PROFILES', {}):
+        abort(400, description='Встроенный профиль нельзя удалить')
+    delete_profile = getattr(_repo(), 'delete_printer_profile', None)
+    if delete_profile is None:
+        abort(501, description='Хранилище профилей недоступно')
+    delete_profile(key)
+    return redirect(url_for('cards.printer_profiles'))
 
 
 @cards_bp.route('/create_deck', methods=['POST'])

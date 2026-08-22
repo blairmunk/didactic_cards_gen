@@ -7,11 +7,13 @@ import uuid
 
 import pytest
 
-from config import PrinterProfile
+from config import AppConfig
+from didactic_cards.domain.printing import PrinterProfile
 from didactic_cards.adapters.json_repository import RepositoryCorruptionError
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import CompileResult
+from run import create_app
 
 
 def test_deck_crud_pages(client, repo):
@@ -559,6 +561,97 @@ def test_print_routes_reject_unknown_profile(client, deck_id, path):
         path.format(deck=deck_id), data={'profile_id': 'missing'}
     )
     assert response.status_code == 400
+
+
+def test_persistent_printer_profile_web_crud_and_print_job(tmp_path):
+    class RecordingCompiler:
+        def __init__(self):
+            self.sources = []
+
+        def is_available(self):
+            return True
+
+        def compile(self, source):
+            self.sources.append(source)
+            return CompileResult(True, b'%PDF-profile', '')
+
+    compiler = RecordingCompiler()
+    profile_app = create_app(
+        config=AppConfig(secret_key='profile-test', csrf_enabled=False),
+        data_dir=tmp_path / 'profiles',
+        compiler=compiler,
+    )
+    profile_app.config['TESTING'] = True
+    profile_client = profile_app.test_client()
+
+    response = profile_client.post('/printer_profiles/save', data={
+        'key': 'office-printer',
+        'name': 'Office <printer>',
+        'duplex_mode': 'short-edge',
+        'front_offset_x_mm': '0,25',
+        'front_offset_y_mm': '0',
+        'back_offset_x_mm': '-1.5',
+        'back_offset_y_mm': '0.75',
+        'back_border': 'on',
+        'registration_marks': 'on',
+    })
+    assert response.status_code == 302
+    saved = profile_app.config['REPO'].list_printer_profiles()[0]
+    assert saved.key == 'office-printer'
+    assert saved.front_offset_x_mm == 0.25
+    assert saved.duplex_mode.value == 'short-edge'
+
+    page = profile_client.get('/printer_profiles')
+    assert 'Office &lt;printer&gt;' in page.text
+    deck = profile_app.config['REPO'].create_deck('Profile deck')
+    profile_app.config['REPO'].save_cards(
+        deck.id, CardDeck([Card(front='Q', back='A')])
+    )
+    generated = profile_client.post(
+        f'/deck/{deck.id}/generate', data={'profile_id': saved.key}
+    )
+    assert generated.status_code == 200
+    assert r'\hspace*{-1.5mm}' in compiler.sources[-1]
+    assert compiler.sources[-1].count(r'\registrationmarks') == 3
+
+    deleted = profile_client.post(f'/printer_profiles/{saved.key}/delete')
+    assert deleted.status_code == 302
+    assert profile_app.config['REPO'].list_printer_profiles() == []
+
+
+@pytest.mark.parametrize(
+    'form',
+    [
+        {'key': 'Invalid', 'name': 'Name'},
+        {'key': 'valid', 'name': '', 'duplex_mode': 'long-edge'},
+        {'key': 'valid', 'name': 'Name', 'duplex_mode': 'diagonal'},
+        {'key': 'valid', 'name': 'Name', 'back_offset_x_mm': 'not-number'},
+        {'key': 'valid', 'name': 'Name', 'back_offset_x_mm': '11'},
+        {'key': 'standard-long-edge', 'name': 'Override built-in'},
+    ],
+)
+def test_persistent_printer_profile_validation_is_atomic(tmp_path, form):
+    profile_app = create_app(
+        config=AppConfig(secret_key='profile-test', csrf_enabled=False),
+        data_dir=tmp_path / 'profiles',
+    )
+    profile_app.config['TESTING'] = True
+    response = profile_app.test_client().post('/printer_profiles/save', data=form)
+    assert response.status_code == 400
+    assert profile_app.config['REPO'].list_printer_profiles() == []
+
+
+def test_configured_printer_profile_cannot_be_deleted(client, app):
+    profile = PrinterProfile('built-in', 'Built in')
+    app.config['PRINT_PROFILES'] = {profile.key: profile}
+    assert client.post('/printer_profiles/built-in/delete').status_code == 400
+
+
+def test_json_backend_reports_profile_storage_as_unavailable(client):
+    assert client.get('/printer_profiles').status_code == 200
+    assert client.post('/printer_profiles/save', data={
+        'key': 'profile', 'name': 'Profile'
+    }).status_code == 501
 
 
 def test_security_headers_are_added(client):

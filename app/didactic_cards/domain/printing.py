@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+import math
+import re
 from typing import Sequence
 
 from .entities import Card
@@ -12,6 +14,42 @@ class DuplexMode(str, Enum):
 
     LONG_EDGE = "long-edge"
     SHORT_EDGE = "short-edge"
+
+
+@dataclass(frozen=True)
+class PrinterProfile:
+    """Named printer-specific calibration layered over the base card layout."""
+
+    key: str
+    name: str
+    duplex_mode: DuplexMode = DuplexMode.LONG_EDGE
+    front_offset_x_mm: float = 0.0
+    front_offset_y_mm: float = 0.0
+    back_offset_x_mm: float = 0.0
+    back_offset_y_mm: float = 0.0
+    back_border: bool = False
+    registration_marks: bool = False
+
+    def __post_init__(self) -> None:
+        if not re.fullmatch(r'[a-z0-9][a-z0-9-]{0,63}', self.key):
+            raise ValueError('printer profile key must be a lowercase slug')
+        if not self.name.strip() or len(self.name) > 100:
+            raise ValueError('printer profile name must contain 1..100 characters')
+        offsets = (
+            self.front_offset_x_mm,
+            self.front_offset_y_mm,
+            self.back_offset_x_mm,
+            self.back_offset_y_mm,
+        )
+        if not all(math.isfinite(offset) for offset in offsets):
+            raise ValueError('printer profile offsets must be finite')
+        if any(abs(offset) > 10 for offset in offsets):
+            raise ValueError('printer profile offsets must be within +/- 10 mm')
+        if not isinstance(self.back_border, bool) or not isinstance(
+            self.registration_marks, bool
+        ):
+            raise ValueError('printer profile flags must be boolean')
+        object.__setattr__(self, 'duplex_mode', DuplexMode(self.duplex_mode))
 
 
 @dataclass(frozen=True)

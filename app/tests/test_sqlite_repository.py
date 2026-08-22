@@ -16,6 +16,7 @@ from didactic_cards.adapters.sqlite_repository import (
 )
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import ConcurrentModificationError
+from didactic_cards.domain.printing import PrinterProfile
 from didactic_cards.use_cases.card_use_cases import AddCard
 
 
@@ -40,7 +41,9 @@ def test_database_initializes_wal_schema_and_foreign_keys(sqlite_repo):
                 "SELECT name FROM sqlite_master WHERE type = 'table'"
             )
         }
-    assert {'repository_meta', 'decks', 'cards', 'deck_cards'} <= tables
+    assert {
+        'repository_meta', 'decks', 'cards', 'deck_cards', 'printer_profiles'
+    } <= tables
     assert sqlite_repo.integrity_check() == []
     assert sqlite_repo.readiness_check() == []
 
@@ -61,6 +64,49 @@ def test_readiness_reports_unavailable_write_transaction(sqlite_repo, monkeypatc
     monkeypatch.setattr(sqlite_repo, 'integrity_check', lambda: [])
     monkeypatch.setattr(sqlite_repo, '_connect', BrokenConnection)
     assert sqlite_repo.readiness_check() == ['write-transaction-unavailable']
+
+
+def test_printer_profile_crud_round_trip(sqlite_repo):
+    original = PrinterProfile(
+        key='office-printer',
+        name='Office printer',
+        duplex_mode='short-edge',
+        front_offset_x_mm=0.25,
+        back_offset_x_mm=-1.5,
+        back_offset_y_mm=0.75,
+        back_border=True,
+        registration_marks=True,
+    )
+    assert sqlite_repo.save_printer_profile(original) == original
+    assert sqlite_repo.list_printer_profiles() == [original]
+
+    updated = PrinterProfile(
+        key='office-printer',
+        name='Office printer updated',
+        back_offset_x_mm=1.0,
+    )
+    sqlite_repo.save_printer_profile(updated)
+    assert sqlite_repo.list_printer_profiles() == [updated]
+    assert sqlite_repo.delete_printer_profile('missing') is False
+    assert sqlite_repo.delete_printer_profile(original.key) is True
+    assert sqlite_repo.list_printer_profiles() == []
+
+
+def test_schema_one_database_migrates_to_two_without_losing_decks(tmp_path):
+    data_dir = tmp_path / 'schema-one'
+    repository = SqliteRepository(data_dir)
+    deck = repository.create_deck('Preserved')
+    with closing(repository._connect()) as connection:
+        connection.execute('DROP TABLE printer_profiles')
+        connection.execute('PRAGMA user_version = 1')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+
+    assert migrated.get_deck(deck.id).name == 'Preserved'
+    assert migrated.list_printer_profiles() == []
+    with closing(migrated._connect()) as connection:
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 2
 
 
 def test_deck_and_ordered_card_round_trip(sqlite_repo):

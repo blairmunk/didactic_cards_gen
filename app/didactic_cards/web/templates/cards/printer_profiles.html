@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Профили принтеров</title>
+    <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
+    <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
+</head>
+<body>
+    <div class="breadcrumb"><a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> → Профили принтеров</div>
+    <h1>Профили принтеров и калибровка</h1>
+
+    {% if error %}<div class="error-message">{{ error }}</div>{% endif %}
+
+    <div class="info-panel">
+        Сначала распечатайте один лист со встроенным калибровочным профилем при масштабе 100%,
+        измерьте сдвиг оборота относительно лица по X/Y и сохраните компенсацию ниже.
+        Повторите пробный лист до достижения требуемого допуска.
+    </div>
+
+    <h2>Встроенные профили</h2>
+    <ul>
+        {% for profile in configured_profiles %}
+        <li><strong>{{ profile.name }}</strong> — {{ profile.duplex_mode.value }}, offsets F({{ profile.front_offset_x_mm }}, {{ profile.front_offset_y_mm }}) мм / B({{ profile.back_offset_x_mm }}, {{ profile.back_offset_y_mm }}) мм</li>
+        {% endfor %}
+    </ul>
+
+    <h2>Сохранённые профили</h2>
+    {% if saved_profiles %}
+    <table class="cards-table">
+        <thead><tr><th>Ключ / имя</th><th>Режим</th><th>Offsets, мм</th><th>Метки</th><th>Действия</th></tr></thead>
+        <tbody>
+        {% for profile in saved_profiles %}
+        <tr>
+            <td><code>{{ profile.key }}</code><br>{{ profile.name }}</td>
+            <td>{{ profile.duplex_mode.value }}</td>
+            <td>F: {{ profile.front_offset_x_mm }}, {{ profile.front_offset_y_mm }}<br>B: {{ profile.back_offset_x_mm }}, {{ profile.back_offset_y_mm }}</td>
+            <td>{{ 'да' if profile.registration_marks else 'нет' }}</td>
+            <td>
+                <form method="post" action="{{ url_for('cards.delete_printer_profile', key=profile.key) }}" onsubmit="return confirm('Удалить профиль?')">
+                    <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                    <button class="btn-danger btn-small" type="submit">Удалить</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}<p>Пользовательских профилей пока нет.</p>{% endif %}
+
+    <h2>Создать или обновить профиль</h2>
+    <form class="card-form profile-form" method="post" action="{{ url_for('cards.save_printer_profile') }}">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label for="key">Ключ (lowercase slug)</label>
+        <input id="key" name="key" type="text" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="office-hp">
+        <label for="profile-name">Название</label>
+        <input id="profile-name" name="name" type="text" maxlength="100" required placeholder="HP в кабинете 12">
+        <label for="profile-duplex">Переворот</label>
+        <select id="profile-duplex" name="duplex_mode">
+            <option value="long-edge">long-edge</option>
+            <option value="short-edge">short-edge</option>
+        </select>
+        <div class="profile-offset-grid">
+            {% for field, label in (
+                ('front_offset_x_mm', 'Лицо X'), ('front_offset_y_mm', 'Лицо Y'),
+                ('back_offset_x_mm', 'Оборот X'), ('back_offset_y_mm', 'Оборот Y')
+            ) %}
+            <label>{{ label }}, мм
+                <input name="{{ field }}" type="number" min="-10" max="10" step="0.05" value="0" required>
+            </label>
+            {% endfor %}
+        </div>
+        <label><input type="checkbox" name="back_border"> Видимая рамка оборота</label>
+        <label><input type="checkbox" name="registration_marks"> Registration marks</label>
+        <button class="btn-primary" type="submit">Сохранить профиль</button>
+    </form>
+</body>
+</html>
