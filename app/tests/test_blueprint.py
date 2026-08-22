@@ -13,6 +13,7 @@ from didactic_cards.adapters.json_repository import RepositoryCorruptionError
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import CompileResult
+from didactic_cards.domain.rendering import DeckRenderSettings
 from run import create_app
 
 
@@ -90,12 +91,20 @@ def test_card_html_workflow(client, repo, deck_id):
 
     response = client.post(
         f"/deck/{deck_id}/add_card",
-        data={"front": "  Question  ", "back": "  Answer  "},
+        data={
+            "front": "  Question  ",
+            "back": "  Answer  ",
+            "section": "  Mechanics  ",
+        },
     )
     assert response.status_code == 302
     assert repo.load_cards(deck_id).cards[0].front == "Question"
+    assert repo.load_cards(deck_id).cards[0].section == "Mechanics"
 
-    client.post(f"/deck/{deck_id}/add_cards_bulk", data={"bulk": "Q2 || A2"})
+    client.post(
+        f"/deck/{deck_id}/add_cards_bulk",
+        data={"bulk": "Q2 || A2", "section": "Dynamics"},
+    )
     second_id = repo.load_cards(deck_id).cards[1].id
     edit_page = client.get(f"/deck/{deck_id}/edit_card/{second_id}")
     assert edit_page.status_code == 200
@@ -103,9 +112,10 @@ def test_card_html_workflow(client, repo, deck_id):
 
     client.post(
         f"/deck/{deck_id}/edit_card/{second_id}",
-        data={"front": "Q2+", "back": "A2+"},
+        data={"front": "Q2+", "back": "A2+", "section": "Kinematics"},
     )
     assert repo.load_cards(deck_id).cards[1].front == "Q2+"
+    assert repo.load_cards(deck_id).cards[1].section == "Kinematics"
 
     first_id = repo.load_cards(deck_id).cards[0].id
     response = client.post(
@@ -206,10 +216,12 @@ def test_csv_preview_validates_file_encoding_dialect_and_deck(client, deck_id):
 
 def test_api_card_workflow(client, deck_id):
     added = client.post(
-        f"/api/deck/{deck_id}/add_card", json={"front": "A", "back": "1"}
+        f"/api/deck/{deck_id}/add_card",
+        json={"front": "A", "back": "1", "section": "Algebra"},
     )
     assert added.status_code == 200
     assert added.json["cards_count"] == 1
+    assert added.json["card"]["section"] == "Algebra"
     first_id = added.json["card"]["id"]
 
     second = client.post(
@@ -223,9 +235,10 @@ def test_api_card_workflow(client, deck_id):
 
     edited = client.put(
         f"/api/deck/{deck_id}/edit_card/{second_id}",
-        json={"front": "B+", "back": "2+"},
+        json={"front": "B+", "back": "2+", "section": "Geometry"},
     )
     assert edited.json["card"]["front"] == "B+"
+    assert edited.json["card"]["section"] == "Geometry"
 
     deleted = client.delete(f"/api/deck/{deck_id}/delete_card/{first_id}")
     assert deleted.status_code == 200
@@ -245,6 +258,101 @@ def test_api_card_workflow(client, deck_id):
 def test_api_validation(client, deck_id, method, path, payload, status):
     response = getattr(client, method)(path.format(deck=deck_id), **payload)
     assert response.status_code == status
+
+
+def test_render_settings_form_is_versioned_and_updates_preview_contract(
+    client, repo, deck_id
+):
+    initial = repo.get_deck(deck_id)
+    page = client.get(f'/deck/{deck_id}')
+    assert 'data-horizontal-alignment="center"' in page.text
+    assert 'PDF-превью является точным' in page.text
+
+    response = client.post(
+        f'/deck/{deck_id}/render_settings',
+        data={
+            'version': initial.version,
+            'preset': 'custom',
+            'horizontal_alignment': 'right',
+            'vertical_alignment': 'bottom',
+            'header_visibility': 'both',
+            'header_position': 'bottom',
+            'header_alignment': 'center',
+        },
+    )
+
+    assert response.status_code == 302
+    assert repo.get_render_settings(deck_id) == DeckRenderSettings(
+        preset='custom',
+        horizontal_alignment='right',
+        vertical_alignment='bottom',
+        header_visibility='both',
+        header_position='bottom',
+        header_alignment='center',
+    )
+    assert repo.get_deck(deck_id).version == initial.version + 1
+    updated_page = client.get(f'/deck/{deck_id}')
+    assert 'data-horizontal-alignment="right"' in updated_page.text
+    assert 'data-header-position="bottom"' in updated_page.text
+
+    stale = client.post(
+        f'/deck/{deck_id}/render_settings',
+        data={'version': initial.version, 'preset': 'centered'},
+    )
+    assert stale.status_code == 409
+
+
+def test_render_settings_form_rejects_unknown_values_atomically(
+    client, repo, deck_id
+):
+    before = repo.get_deck(deck_id)
+    response = client.post(
+        f'/deck/{deck_id}/render_settings',
+        data={
+            'version': before.version,
+            'preset': 'custom',
+            'horizontal_alignment': 'justify',
+        },
+    )
+
+    assert response.status_code == 400
+    assert repo.get_render_settings(deck_id) == DeckRenderSettings.centered()
+    assert repo.get_deck(deck_id).version == before.version
+
+
+@pytest.mark.parametrize(
+    ('preset', 'horizontal', 'vertical'),
+    [
+        ('legacy-top-left', 'left', 'top'),
+        ('centered', 'center', 'center'),
+    ],
+)
+def test_render_settings_presets_are_canonical(
+    client, repo, deck_id, preset, horizontal, vertical
+):
+    deck = repo.get_deck(deck_id)
+    response = client.post(
+        f'/deck/{deck_id}/render_settings',
+        data={
+            'version': deck.version,
+            'preset': preset,
+            'horizontal_alignment': 'right',
+            'vertical_alignment': 'bottom',
+        },
+    )
+
+    assert response.status_code == 302
+    saved = repo.get_render_settings(deck_id)
+    assert saved.horizontal_alignment.value == horizontal
+    assert saved.vertical_alignment.value == vertical
+
+
+def test_api_rejects_non_string_section(client, deck_id):
+    response = client.post(
+        f'/api/deck/{deck_id}/add_card',
+        json={'front': 'Q', 'back': 'A', 'section': 42},
+    )
+    assert response.status_code == 400
 
 
 def test_generate_preview_success_and_failure(client, repo, deck_id, app, app_fail_compiler):

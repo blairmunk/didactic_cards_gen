@@ -17,7 +17,13 @@
     </script>
     <script id="MathJax-script" src="{{ url_for('cards.static', filename='vendor/mathjax/tex-mml-chtml.js') }}" async></script>
 </head>
-<body data-deck-id="{{ deck.id }}" data-deck-version="{{ deck.version }}" data-cards-per-page="{{ cards_per_page }}">
+<body data-deck-id="{{ deck.id }}" data-deck-version="{{ deck.version }}" data-cards-per-page="{{ cards_per_page }}"
+      data-horizontal-alignment="{{ deck.render_settings.horizontal_alignment.value }}"
+      data-vertical-alignment="{{ deck.render_settings.vertical_alignment.value }}"
+      data-header-visibility="{{ deck.render_settings.header_visibility.value }}"
+      data-header-position="{{ deck.render_settings.header_position.value }}"
+      data-header-alignment="{{ deck.render_settings.header_alignment.value }}"
+      class="align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }}">
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> → {{ deck.name }}
     </div>
@@ -44,10 +50,73 @@
         <span id="empty-count">{% if cards_count > 0 %}{{ ((((cards_count + cards_per_page - 1) // cards_per_page) * cards_per_page) - cards_count) }}{% else %}0{% endif %}</span>
     </div>
 
+    <h2>Оформление карточек</h2>
+    <div class="card-form render-settings-panel">
+        <form action="{{ url_for('cards.update_render_settings', deck_id=deck.id) }}" method="post" id="render-settings-form">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="version" value="{{ deck.version }}">
+            <div class="settings-grid">
+                <div>
+                    <label for="style-preset">Режим:</label>
+                    <select name="preset" id="style-preset">
+                        <option value="legacy-top-left" {% if deck.render_settings.preset.value == 'legacy-top-left' %}selected{% endif %}>Legacy: сверху слева</option>
+                        <option value="centered" {% if deck.render_settings.preset.value == 'centered' %}selected{% endif %}>По центру</option>
+                        <option value="custom" {% if deck.render_settings.preset.value == 'custom' %}selected{% endif %}>Настроить вручную</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="horizontal-alignment">По горизонтали:</label>
+                    <select name="horizontal_alignment" id="horizontal-alignment">
+                        {% for value, label in [('left', 'Слева'), ('center', 'По центру'), ('right', 'Справа')] %}
+                        <option value="{{ value }}" {% if deck.render_settings.horizontal_alignment.value == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="vertical-alignment">По вертикали:</label>
+                    <select name="vertical_alignment" id="vertical-alignment">
+                        {% for value, label in [('top', 'Сверху'), ('center', 'По центру'), ('bottom', 'Снизу')] %}
+                        <option value="{{ value }}" {% if deck.render_settings.vertical_alignment.value == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="header-visibility">Колонтитул из секции:</label>
+                    <select name="header_visibility" id="header-visibility">
+                        {% for value, label in [('none', 'Не показывать'), ('front', 'Только на лицах'), ('back', 'Только на оборотах'), ('both', 'На обеих сторонах')] %}
+                        <option value="{{ value }}" {% if deck.render_settings.header_visibility.value == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label for="header-position">Положение колонтитула:</label>
+                    <select name="header_position" id="header-position">
+                        <option value="top" {% if deck.render_settings.header_position.value == 'top' %}selected{% endif %}>Сверху</option>
+                        <option value="bottom" {% if deck.render_settings.header_position.value == 'bottom' %}selected{% endif %}>Снизу</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="header-alignment">Выравнивание колонтитула:</label>
+                    <select name="header_alignment" id="header-alignment">
+                        {% for value, label in [('left', 'Слева'), ('center', 'По центру'), ('right', 'Справа')] %}
+                        <option value="{{ value }}" {% if deck.render_settings.header_alignment.value == value %}selected{% endif %}>{{ label }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <p class="preview-notice">HTML-превью приблизительно передаёт оформление; PDF-превью является точным предпечатным результатом.</p>
+            <button type="submit" class="btn-primary">Сохранить оформление</button>
+        </form>
+    </div>
+
     <!-- Добавление одной карточки -->
     <h2>Добавить карточку</h2>
     <div class="card-form">
         <form id="single-card-form">
+            <div class="form-group section-field">
+                <label for="section">Секция / тема:</label>
+                <input type="text" name="section" id="section" placeholder="Например: Механика">
+            </div>
             <div class="form-row">
                 <div class="form-group">
                     <label for="front">Лицевая сторона (задание):</label>
@@ -68,6 +137,8 @@
         <form action="{{ url_for('cards.add_cards_bulk', deck_id=deck.id) }}" method="post">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="version" value="{{ deck.version }}">
+            <label for="bulk-section">Секция / тема для всей пачки:</label>
+            <input type="text" name="section" id="bulk-section" placeholder="Можно оставить пустым">
             <label for="bulk">Формат: <code>лицевая || оборотная</code>, каждая с новой строки:</label>
             <textarea name="bulk" id="bulk" rows="8"
                       placeholder="Найти ускорение тела массой 5кг || a = F/m = 10/5 = 2 м/с²&#10;Чему равна сила тяжести тела 3кг || F = mg = 3·10 = 30 Н"></textarea>
@@ -115,6 +186,7 @@
                 <tr>
                     <th style="width:30px"></th>
                     <th style="width:40px">#</th>
+                    <th>Секция</th>
                     <th>Лицевая сторона</th>
                     <th>Оборотная сторона</th>
                     <th style="width:100px">Действия</th>
@@ -125,6 +197,7 @@
                 <tr draggable="true" data-card-id="{{ card.id }}">
                     <td class="drag-handle" tabindex="0" role="button" aria-label="Переместить карточку {{ loop.index }}; стрелки вверх и вниз меняют порядок" title="Перетащите или используйте стрелки для сортировки">⠿</td>
                     <td class="row-number">{{ loop.index }}</td>
+                    <td class="card-section">{{ card.section }}</td>
                     <td class="card-text">{{ card.front }}</td>
                     <td class="card-text">{{ card.back }}</td>
                     <td class="actions">
@@ -149,11 +222,15 @@
                 </span>
                 <div class="preview-card-inner">
                     <div class="preview-side preview-front">
+                        {% if deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section">{{ card.section }}</div>{% endif %}
                         <div class="preview-content">{{ card.front }}</div>
+                        {% if deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section">{{ card.section }}</div>{% endif %}
                         <span class="preview-side-label">задание</span>
                     </div>
                     <div class="preview-side preview-back">
+                        {% if deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section">{{ card.section }}</div>{% endif %}
                         <div class="preview-content">{{ card.back }}</div>
+                        {% if deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section">{{ card.section }}</div>{% endif %}
                         <span class="preview-side-label">решение</span>
                     </div>
                 </div>

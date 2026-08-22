@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from didactic_cards.domain.entities import Card, CardDeck
+from didactic_cards.domain.rendering import DeckRenderSettings
 from didactic_cards.adapters.latex_renderer import (
     LatexRenderer,
     UnsafeLatexError,
@@ -168,6 +169,111 @@ class TestLatexRenderer:
         assert 'Q2' in result
         assert 'A1' in result
         assert 'A2' in result
+
+    @pytest.mark.parametrize(
+        ('horizontal', 'command'),
+        [
+            ('left', r'\raggedright'),
+            ('center', r'\centering'),
+            ('right', r'\raggedleft'),
+        ],
+    )
+    def test_safe_horizontal_alignment_is_emitted(self, horizontal, command):
+        renderer = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                preset='custom',
+                horizontal_alignment=horizontal,
+            ),
+            cards_per_row=1,
+            rows_per_page=1,
+        )
+
+        source = renderer.render_fronts(self.make_deck(1))
+
+        assert rf'\newcommand{{\cardbodyalign}}{{{command}}}' in source
+
+    @pytest.mark.parametrize(
+        ('vertical', 'position'),
+        [('top', 't'), ('center', 'c'), ('bottom', 'b')],
+    )
+    def test_safe_vertical_alignment_uses_fixed_body_box(
+        self, vertical, position
+    ):
+        renderer = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                preset='custom', vertical_alignment=vertical
+            ),
+            cards_per_row=1,
+            rows_per_page=1,
+        )
+
+        source = renderer.render_fronts(self.make_deck(1))
+
+        assert rf'\begin{{minipage}}[t][#3][{position}]' in source
+
+    def test_legacy_settings_keep_top_left_body_without_wrapper(self):
+        source = LatexRenderer(
+            render_settings=DeckRenderSettings.legacy(),
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render_fronts(self.make_deck(1))
+
+        assert r'\legacycheckedcardcontent{1}{front}{Q1}' in source
+
+    def test_header_visibility_and_position_are_side_specific_and_escaped(self):
+        deck = CardDeck([
+            Card(front='Q', back='A', section='Тема & раздел')
+        ])
+        top_front = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                preset='custom',
+                header_visibility='front',
+                header_position='top',
+                header_alignment='center',
+            ),
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render(deck)
+
+        front_source, back_source = top_front.split('задние стороны', 1)
+        front_card = front_source.split(r'\begin{document}', 1)[1]
+        assert r'\checkedcardheader{1}{front}{Тема \& раздел}' in front_source
+        assert r'\fitcardcontent{#1}{#2}{#3}{#4}' in top_front
+        assert r'\relax>#3' in top_front
+        assert front_card.index(r'\checkedcardheader') < front_card.index(
+            r'\checkedcardcontent'
+        )
+        assert 'Тема' not in back_source
+        assert r'\newcommand{\cardheaderalign}{\centering}' in top_front
+
+        bottom = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                preset='custom',
+                header_visibility='both',
+                header_position='bottom',
+            ),
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render_fronts(deck)
+        card_source = bottom.split(r'\begin{document}', 1)[1]
+        assert card_source.index(r'\checkedcardcontent') < card_source.index(
+            r'\checkedcardheader'
+        )
+
+    def test_renderer_copy_applies_deck_settings_without_mutating_base(self):
+        base = LatexRenderer(cards_per_row=1, rows_per_page=1)
+        configured = base.with_render_settings(DeckRenderSettings.centered())
+
+        assert configured is not base
+        assert base.render_settings == DeckRenderSettings.legacy()
+        assert configured.render_settings == DeckRenderSettings.centered()
+
+    @pytest.mark.parametrize('value', [object(), 'centered'])
+    def test_renderer_rejects_non_settings_objects(self, value):
+        with pytest.raises(TypeError):
+            LatexRenderer(render_settings=value)
+        with pytest.raises(TypeError):
+            LatexRenderer().with_render_settings(value)
 
     def test_render_escapes_special_chars(self):
         deck = CardDeck(cards=[Card(front='100% & $5', back='a_b')])
@@ -625,6 +731,133 @@ def test_real_latex_auto_fits_before_minimum_size_overflow():
     assert without_fit.success, without_fit.log
     assert 'DIDACTIC-CARDS-AUTOFIT' not in without_fit.log
     assert 'DIDACTIC-CARDS-OVERFLOW:1:front' in without_fit.log
+
+
+@pytest.mark.integration
+def test_real_pdf_honours_all_nine_safe_body_alignments(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdftotext'):
+        pytest.skip('pdflatex/pdftotext are required for alignment test')
+
+    coordinates = {}
+    compiler = PdfLatexCompiler()
+    for horizontal in ('left', 'center', 'right'):
+        for vertical in ('top', 'center', 'bottom'):
+            settings = DeckRenderSettings(
+                preset='custom',
+                horizontal_alignment=horizontal,
+                vertical_alignment=vertical,
+            )
+            source = LatexRenderer(
+                cards_per_row=1,
+                rows_per_page=1,
+                render_settings=settings,
+            ).render_fronts(CardDeck([Card(front='ALIGNMENT')]))
+            result = compiler.compile(source)
+            assert result.success, result.log
+            pdf_path = tmp_path / f'{horizontal}-{vertical}.pdf'
+            pdf_path.write_bytes(result.pdf_data)
+            bbox = subprocess.run(
+                ['pdftotext', '-bbox', str(pdf_path), '-'],
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            match = re.search(
+                r'<word xMin="([0-9.]+)" yMin="([0-9.]+)"[^>]*>'
+                r'ALIGNMENT</word>',
+                bbox,
+            )
+            assert match, bbox
+            coordinates[(horizontal, vertical)] = tuple(
+                float(value) for value in match.groups()
+            )
+
+    for vertical in ('top', 'center', 'bottom'):
+        assert (
+            coordinates[('left', vertical)][0]
+            < coordinates[('center', vertical)][0]
+            < coordinates[('right', vertical)][0]
+        )
+    for horizontal in ('left', 'center', 'right'):
+        assert (
+            coordinates[(horizontal, 'top')][1]
+            < coordinates[(horizontal, 'center')][1]
+            < coordinates[(horizontal, 'bottom')][1]
+        )
+
+
+@pytest.mark.integration
+def test_real_pdf_compiles_fixed_header_band_on_both_sides(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdftotext'):
+        pytest.skip('pdflatex/pdftotext are required for header test')
+
+    settings = DeckRenderSettings(
+        preset='custom',
+        header_visibility='both',
+        header_position='bottom',
+        header_alignment='center',
+    )
+    result = PdfLatexCompiler().compile(
+        LatexRenderer(
+            cards_per_row=1,
+            rows_per_page=1,
+            back_rotation_deg=0,
+            render_settings=settings,
+        ).render(CardDeck([
+            Card(front='ЛИЦО', back='ОБОРОТ', section='МЕХАНИКА')
+        ]))
+    )
+    assert result.success, result.log
+    assert 'DIDACTIC-CARDS-HEADER-OVERFLOW' not in result.log
+    pdf_path = tmp_path / 'headers.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    extracted = subprocess.run(
+        ['pdftotext', str(pdf_path), '-'],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert extracted.count('МЕХАНИКА') == 2
+
+
+@pytest.mark.integration
+def test_real_header_band_keeps_each_body_inside_its_own_card(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdftotext'):
+        pytest.skip('pdflatex/pdftotext are required for header geometry test')
+
+    settings = DeckRenderSettings(
+        preset='centered',
+        header_visibility='front',
+    )
+    result = PdfLatexCompiler().compile(
+        LatexRenderer(
+            cards_per_row=2,
+            rows_per_page=1,
+            render_settings=settings,
+        ).render_fronts(CardDeck([
+            Card(front='LEFTBODY', section='LEFTHEADER'),
+            Card(front='RIGHTBODY', section='RIGHTHEADER'),
+        ]))
+    )
+    assert result.success, result.log
+    pdf_path = tmp_path / 'header-geometry.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    bbox = subprocess.run(
+        ['pdftotext', '-bbox', str(pdf_path), '-'],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+    def x_min(word):
+        match = re.search(
+            rf'<word xMin="([0-9.]+)"[^>]*>{word}</word>', bbox
+        )
+        assert match, bbox
+        return float(match.group(1))
+
+    assert x_min('LEFTBODY') < 250
+    assert x_min('RIGHTBODY') > 300
 
 
 @pytest.mark.integration

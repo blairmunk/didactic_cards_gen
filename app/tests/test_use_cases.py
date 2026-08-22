@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from didactic_cards.domain.interfaces import DocumentRenderer
+from didactic_cards.domain.rendering import DeckRenderSettings
 from didactic_cards.use_cases.card_use_cases import (
     AddCard,
     AddCardsBulk,
@@ -166,6 +168,17 @@ def test_generate_and_preview_pad_to_whole_sheet(repo, deck_id, app):
     assert result.success is True
     assert [len(seen) for seen in renderer.decks] == [8, 8]
     assert len(compiler.sources) == 1
+    assert renderer.render_settings == [
+        repo.get_render_settings(deck_id),
+        repo.get_render_settings(deck_id),
+    ]
+
+
+def test_document_renderer_default_settings_hook_is_backward_compatible(app):
+    renderer = app.config['RENDERER']
+    assert DocumentRenderer.with_render_settings(
+        renderer, DeckRenderSettings.centered()
+    ) is renderer
 
 
 @pytest.mark.parametrize(('side', 'expected'), [('front', 'front'), ('back', 'back')])
@@ -206,6 +219,10 @@ def test_preflight_reports_card_and_compiler_issues(repo, deck_id, app):
                 'DIDACTIC-CARDS-HBOX-BEGIN:1:front\n'
                 'Overfull \\hbox\n'
                 'DIDACTIC-CARDS-HBOX-END:1:front\n'
+                'DIDACTIC-CARDS-HEADER-OVERFLOW:1:back\n'
+                'DIDACTIC-CARDS-HBOX-BEGIN:1:back:header\n'
+                'Overfull \\hbox\n'
+                'DIDACTIC-CARDS-HBOX-END:1:back:header\n'
                 'Missing character:',
             )
 
@@ -219,8 +236,10 @@ def test_preflight_reports_card_and_compiler_issues(repo, deck_id, app):
     assert by_code['partial-sheet'].severity == 'info'
     assert by_code['vertical-overflow'].side == 'front'
     assert by_code['horizontal-overflow'].severity == 'error'
+    assert by_code['header-vertical-overflow'].side == 'back'
+    assert by_code['header-horizontal-overflow'].side == 'back'
     assert by_code['missing-glyph'].severity == 'error'
-    assert report.to_dict()['error_count'] == 3
+    assert report.to_dict()['error_count'] == 5
     assert report.to_dict()['warning_count'] == 1
 
 
@@ -313,6 +332,35 @@ def test_preflight_reports_auto_fit_as_addressable_warning(repo, deck_id, app):
     assert issue.card_id == card.id
     assert issue.side == 'front'
     assert 'footnotesize' in issue.message
+
+
+def test_preflight_reports_header_autofit_once_and_ignores_padding(
+    repo, deck_id, app
+):
+    card, _ = AddCard(repo).execute(deck_id, 'Q', 'A', section='Long header')
+
+    class HeaderAutoFitCompiler:
+        def compile(self, _source):
+            from didactic_cards.domain.interfaces import CompileResult
+            return CompileResult(
+                True,
+                b'%PDF',
+                'DIDACTIC-CARDS-HEADER-AUTOFIT:1:front:scriptsize\n'
+                'DIDACTIC-CARDS-HEADER-AUTOFIT:1:front:scriptsize\n'
+                'DIDACTIC-CARDS-HEADER-AUTOFIT:9:back:scriptsize\n'
+                'DIDACTIC-CARDS-HEADER-OVERFLOW:9:back\n'
+                'DIDACTIC-CARDS-HBOX-BEGIN:9:back:header\n'
+                'Overfull \\hbox\n'
+                'DIDACTIC-CARDS-HBOX-END:9:back:header\n',
+            )
+
+    report = PreflightDocument(
+        repo, app.config['RENDERER'], HeaderAutoFitCompiler(), 8
+    ).execute(deck_id)
+    issues = [issue for issue in report.issues if issue.code == 'header-auto-fit']
+    assert len(issues) == 1
+    assert issues[0].card_id == card.id
+    assert issues[0].side == 'front'
 
 
 def test_generate_rejects_non_positive_page_capacity(repo, deck_id, app):

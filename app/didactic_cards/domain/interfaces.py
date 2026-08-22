@@ -131,6 +131,16 @@ class DeckRepository(ABC):
 
 class DocumentRenderer(ABC):
 
+    def with_render_settings(
+        self, settings: DeckRenderSettings
+    ) -> DocumentRenderer:
+        """Return a renderer configured for one deck.
+
+        The compatibility default keeps simple renderers usable when they do
+        not implement presentation settings.
+        """
+        return self
+
     @abstractmethod
     def render(self, deck: CardDeck) -> str:
         ...

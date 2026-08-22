@@ -2,16 +2,27 @@ from __future__ import annotations
 
 import math
 import re
+from copy import copy
 
 from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import DocumentRenderer
 from ..domain.printing import DuplexMode, build_sheets
+from ..domain.rendering import (
+    DeckRenderSettings,
+    HeaderPosition,
+    HeaderVisibility,
+    HorizontalAlignment,
+    StylePreset,
+    VerticalAlignment,
+)
 
 
 PT_TO_CM = 2.54 / 72.27
 PAGE_WIDTH_MM = 210.0
 PAGE_HEIGHT_MM = 297.0
 PAGE_MARGIN_MM = 5.0
+HEADER_HEIGHT_CM = 0.48
+HEADER_GAP_CM = 0.12
 
 ALLOWED_MATH_COMMANDS = {
     'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta',
@@ -129,6 +140,7 @@ class LatexRenderer(DocumentRenderer):
         back_offset_y_mm: float = 0.0,
         registration_marks: bool = False,
         auto_fit: bool = True,
+        render_settings: DeckRenderSettings | None = None,
     ):
         if cards_per_row <= 0 or rows_per_page <= 0:
             raise ValueError('cards_per_row and rows_per_page must be positive')
@@ -175,7 +187,23 @@ class LatexRenderer(DocumentRenderer):
         self.back_offset = (back_offset_x_mm, back_offset_y_mm)
         self.registration_marks = registration_marks
         self.auto_fit = auto_fit
+        self.render_settings = (
+            render_settings
+            if render_settings is not None
+            else DeckRenderSettings.legacy()
+        )
+        if not isinstance(self.render_settings, DeckRenderSettings):
+            raise TypeError('render_settings must be DeckRenderSettings')
         self.cards_per_page = cards_per_row * rows_per_page
+
+    def with_render_settings(
+        self, settings: DeckRenderSettings
+    ) -> LatexRenderer:
+        if not isinstance(settings, DeckRenderSettings):
+            raise TypeError('settings must be DeckRenderSettings')
+        configured = copy(self)
+        configured.render_settings = settings
+        return configured
 
     def render(self, deck: CardDeck) -> str:
         return self._render_sides(deck, ('front', 'back'))
@@ -294,15 +322,34 @@ class LatexRenderer(DocumentRenderer):
 
     def _preamble(self) -> str:
         back_frame = r'\fbox' if self.back_border else r'\cardblankframe'
+        horizontal_commands = {
+            HorizontalAlignment.LEFT: r'\raggedright',
+            HorizontalAlignment.CENTER: r'\centering',
+            HorizontalAlignment.RIGHT: r'\raggedleft',
+        }
+        vertical_positions = {
+            VerticalAlignment.TOP: 't',
+            VerticalAlignment.CENTER: 'c',
+            VerticalAlignment.BOTTOM: 'b',
+        }
+        body_alignment = horizontal_commands[
+            self.render_settings.horizontal_alignment
+        ]
+        header_alignment = horizontal_commands[
+            self.render_settings.header_alignment
+        ]
+        vertical_position = vertical_positions[
+            self.render_settings.vertical_alignment
+        ]
         if self.auto_fit:
             fit_logic = r'''
-    \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
-        \setcardcontentbox{\small}{#3}{#1}{#2}%
-        \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
-            \setcardcontentbox{\footnotesize}{#3}{#1}{#2}%
-            \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
-                \setcardcontentbox{\scriptsize}{#3}{#1}{#2}%
-                \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
+    \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
+        \setcardcontentbox{\small}{#4}{#1}{#2}%
+        \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
+            \setcardcontentbox{\footnotesize}{#4}{#1}{#2}%
+            \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
+                \setcardcontentbox{\scriptsize}{#4}{#1}{#2}%
+                \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
                     \typeout{DIDACTIC-CARDS-OVERFLOW:#1:#2}%
                 \else
                     \typeout{DIDACTIC-CARDS-AUTOFIT:#1:#2:scriptsize}%
@@ -316,7 +363,7 @@ class LatexRenderer(DocumentRenderer):
     \fi'''
         else:
             fit_logic = r'''
-    \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
+    \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
         \typeout{DIDACTIC-CARDS-OVERFLOW:#1:#2}%
     \fi'''
         return rf'''\documentclass[a4paper,12pt]{{extarticle}}
@@ -343,6 +390,9 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\cardheight}}{{{self.card_height}cm}}
 \newcommand{{\cardcontentwidth}}{{{self.card_content_width:.6f}cm}}
 \newcommand{{\cardcontentheight}}{{{self.card_content_height:.6f}cm}}
+\newcommand{{\cardheaderheight}}{{{HEADER_HEIGHT_CM}cm}}
+\newcommand{{\cardbodyalign}}{{{body_alignment}}}
+\newcommand{{\cardheaderalign}}{{{header_alignment}}}
 
 \setlength{{\fboxsep}}{{{self.fbox_sep}pt}}
 \setlength{{\fboxrule}}{{{self.fbox_rule}pt}}
@@ -360,16 +410,47 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\frontcard}}[1]{{\cardbox{{\fbox}}{{#1}}}}
 \newcommand{{\backcard}}[1]{{\cardbox{{{back_frame}}}{{#1}}}}
 \newbox\cardcontentbox
+\newbox\cardheaderbox
 \newcommand{{\setcardcontentbox}}[4]{{%
-    \typeout{{DIDACTIC-CARDS-HBOX-BEGIN:#3:#4}}%
+    \typeout{{DIDACTIC-CARDS-HBOX-BEGIN:#3:#4:body}}%
     \setbox\cardcontentbox=\vbox{{%
-        \hsize=\cardcontentwidth #1\noindent #2\par
+        \hsize=\cardcontentwidth #1\cardbodyalign\noindent #2\par
     }}%
-    \typeout{{DIDACTIC-CARDS-HBOX-END:#3:#4}}%
+    \typeout{{DIDACTIC-CARDS-HBOX-END:#3:#4:body}}%
 }}
-\newcommand{{\checkedcardcontent}}[3]{{%
-    \setcardcontentbox{{\normalsize}}{{#3}}{{#1}}{{#2}}%{fit_logic}
+\newcommand{{\fitcardcontent}}[4]{{%
+    \setcardcontentbox{{\normalsize}}{{#4}}{{#1}}{{#2}}%{fit_logic}
+}}
+\newcommand{{\legacycheckedcardcontent}}[3]{{%
+    \fitcardcontent{{#1}}{{#2}}{{\cardcontentheight}}{{#3}}%
     \box\cardcontentbox
+}}
+\newcommand{{\checkedcardcontent}}[4]{{%
+    \fitcardcontent{{#1}}{{#2}}{{#3}}{{#4}}%
+    \begin{{minipage}}[t][#3][{vertical_position}]{{\cardcontentwidth}}%
+        \box\cardcontentbox
+    \end{{minipage}}%
+}}
+\newcommand{{\setcardheaderbox}}[4]{{%
+    \typeout{{DIDACTIC-CARDS-HBOX-BEGIN:#3:#4:header}}%
+    \setbox\cardheaderbox=\vbox{{%
+        \hsize=\cardcontentwidth #1\cardheaderalign\noindent #2\par
+    }}%
+    \typeout{{DIDACTIC-CARDS-HBOX-END:#3:#4:header}}%
+}}
+\newcommand{{\checkedcardheader}}[3]{{%
+    \setcardheaderbox{{\footnotesize}}{{#3}}{{#1}}{{#2}}%
+    \ifdim\dimexpr\ht\cardheaderbox+\dp\cardheaderbox\relax>\cardheaderheight
+        \setcardheaderbox{{\scriptsize}}{{#3}}{{#1}}{{#2}}%
+        \ifdim\dimexpr\ht\cardheaderbox+\dp\cardheaderbox\relax>\cardheaderheight
+            \typeout{{DIDACTIC-CARDS-HEADER-OVERFLOW:#1:#2}}%
+        \else
+            \typeout{{DIDACTIC-CARDS-HEADER-AUTOFIT:#1:#2:scriptsize}}%
+        \fi
+    \fi
+    \begin{{minipage}}[t][\cardheaderheight][c]{{\cardcontentwidth}}%
+        \box\cardheaderbox
+    \end{{minipage}}%
 }}
 \newcommand{{\registrationmarks}}{{%
     \AddToShipoutPictureFG*{{%
@@ -414,9 +495,11 @@ class LatexRenderer(DocumentRenderer):
                 card = cards[index]
                 text = getattr(card, side)
                 card_number = card_numbers[id(card)]
-                checked_content = (
-                    r'\checkedcardcontent'
-                    f'{{{card_number}}}{{{side}}}{{{_card_content(text)}}}'
+                checked_content = self._render_card_content(
+                    card,
+                    side=side,
+                    card_number=card_number,
+                    text=text,
                 )
                 rendered_card = command + '{' + checked_content + '}'
                 if side == 'back' and self.back_rotation_deg == 180:
@@ -427,3 +510,58 @@ class LatexRenderer(DocumentRenderer):
             if row < self.rows_per_page - 1:
                 result += '\n'
         return result + r'\end{minipage}' + '\n'
+
+    def _header_is_visible(self, side: str) -> bool:
+        visibility = self.render_settings.header_visibility
+        return visibility is HeaderVisibility.BOTH or (
+            visibility is HeaderVisibility.FRONT and side == 'front'
+        ) or (
+            visibility is HeaderVisibility.BACK and side == 'back'
+        )
+
+    def _render_card_content(
+        self,
+        card: Card,
+        *,
+        side: str,
+        card_number: int,
+        text: str,
+    ) -> str:
+        settings = self.render_settings
+        legacy_layout = (
+            settings.preset is StylePreset.LEGACY_TOP_LEFT
+            and settings.horizontal_alignment is HorizontalAlignment.LEFT
+            and settings.vertical_alignment is VerticalAlignment.TOP
+            and settings.header_visibility is HeaderVisibility.NONE
+        )
+        content = _card_content(text)
+        if legacy_layout:
+            return (
+                r'\legacycheckedcardcontent'
+                f'{{{card_number}}}{{{side}}}{{{content}}}'
+            )
+
+        header_visible = self._header_is_visible(side)
+        reserved_height = (
+            HEADER_HEIGHT_CM + HEADER_GAP_CM if header_visible else 0.0
+        )
+        body_height = self.card_content_height - reserved_height
+        body = (
+            r'\checkedcardcontent'
+            f'{{{card_number}}}{{{side}}}{{{body_height:.6f}cm}}'
+            f'{{{content}}}'
+        )
+        if not header_visible:
+            return body
+
+        header = (
+            r'\checkedcardheader'
+            f'{{{card_number}}}{{{side}}}{{{_card_content(card.section)}}}'
+        )
+        gap = (
+            r'\par\nointerlineskip'
+            rf'\vspace*{{{HEADER_GAP_CM}cm}}\noindent'
+        )
+        if settings.header_position is HeaderPosition.TOP:
+            return header + gap + body
+        return body + gap + header

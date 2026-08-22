@@ -103,6 +103,27 @@ document.addEventListener('DOMContentLoaded', function() {
         return div.innerHTML;
     }
 
+    const stylePreset = document.getElementById('style-preset');
+    const horizontalAlignment = document.getElementById('horizontal-alignment');
+    const verticalAlignment = document.getElementById('vertical-alignment');
+    function applyPresetControls() {
+        if (!stylePreset) return;
+        const custom = stylePreset.value === 'custom';
+        horizontalAlignment.disabled = !custom;
+        verticalAlignment.disabled = !custom;
+        if (stylePreset.value === 'legacy-top-left') {
+            horizontalAlignment.value = 'left';
+            verticalAlignment.value = 'top';
+        } else if (stylePreset.value === 'centered') {
+            horizontalAlignment.value = 'center';
+            verticalAlignment.value = 'center';
+        }
+    }
+    if (stylePreset) {
+        stylePreset.addEventListener('change', applyPresetControls);
+        applyPresetControls();
+    }
+
     const printProfile = document.getElementById('print-profile');
     document.querySelectorAll('.print-form').forEach(function(form) {
         form.addEventListener('submit', function() {
@@ -133,6 +154,20 @@ document.addEventListener('DOMContentLoaded', function() {
         const div = document.createElement('div');
         div.className = 'preview-card';
         div.dataset.cardId = cardData.id;
+        const visibility = document.body.dataset.headerVisibility;
+        const position = document.body.dataset.headerPosition;
+        function sideHtml(side, content, label) {
+            const visible = visibility === 'both' || visibility === side;
+            const header = visible
+                ? '<div class="preview-section">' + escapeHtml(cardData.section || '') + '</div>'
+                : '';
+            return '<div class="preview-side preview-' + side + '">' +
+                (position === 'top' ? header : '') +
+                '<div class="preview-content">' + escapeHtml(content) + '</div>' +
+                (position === 'bottom' ? header : '') +
+                '<span class="preview-side-label">' + label + '</span>' +
+                '</div>';
+        }
         div.innerHTML =
             '<span class="card-number">#' + (index + 1) + '</span>' +
             '<span class="card-actions">' +
@@ -140,14 +175,8 @@ document.addEventListener('DOMContentLoaded', function() {
             '    <a href="#" class="delete-btn" data-card-id="' + cardData.id + '" aria-label="Удалить карточку" title="Удалить">🗑️</a>' +
             '</span>' +
             '<div class="preview-card-inner">' +
-            '    <div class="preview-side preview-front">' +
-            '        <div class="preview-content">' + escapeHtml(cardData.front) + '</div>' +
-            '        <span class="preview-side-label">задание</span>' +
-            '    </div>' +
-            '    <div class="preview-side preview-back">' +
-            '        <div class="preview-content">' + escapeHtml(cardData.back) + '</div>' +
-            '        <span class="preview-side-label">решение</span>' +
-            '    </div>' +
+            sideHtml('front', cardData.front, 'задание') +
+            sideHtml('back', cardData.back, 'решение') +
             '</div>';
         grid.appendChild(div);
         attachDeleteEvent(div.querySelector('.delete-btn'));
@@ -166,8 +195,10 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const frontEl = document.getElementById('front');
             const backEl = document.getElementById('back');
+            const sectionEl = document.getElementById('section');
             const front = frontEl.value.trim();
             const back = backEl.value.trim();
+            const section = sectionEl.value.trim();
 
             if (!front && !back) {
                 alert('Заполните хотя бы одно поле');
@@ -178,7 +209,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 const resp = await fetch(API.addCard, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ front: front, back: back, version: deckVersion })
+                    body: JSON.stringify({
+                        front: front,
+                        back: back,
+                        section: section,
+                        version: deckVersion
+                    })
                 });
                 const data = await resp.json();
 
@@ -195,6 +231,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
                 frontEl.value = '';
                 backEl.value = '';
+                sectionEl.value = '';
                 frontEl.focus();
 
                 if (!document.getElementById('view-table')) {
@@ -222,6 +259,7 @@ document.addEventListener('DOMContentLoaded', function() {
         tr.innerHTML =
             '<td class="drag-handle" tabindex="0" role="button" aria-label="Переместить карточку; стрелки вверх и вниз меняют порядок" title="Перетащите или используйте стрелки для сортировки">⠿</td>' +
             '<td class="row-number">' + (index + 1) + '</td>' +
+            '<td class="card-section">' + escapeHtml(card.section || '') + '</td>' +
             '<td class="card-text">' + escapeHtml(card.front) + '</td>' +
             '<td class="card-text">' + escapeHtml(card.back) + '</td>' +
             '<td class="actions">' +
@@ -302,7 +340,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 const list = document.createElement('ol');
                 data.cards.forEach(function(card) {
                     const item = document.createElement('li');
-                    item.textContent = card.front + ' → ' + card.back;
+                    item.textContent = (card.section ? '[' + card.section + '] ' : '') +
+                        card.front + ' → ' + card.back;
                     list.appendChild(item);
                 });
                 result.appendChild(list);

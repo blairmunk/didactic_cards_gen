@@ -11,6 +11,7 @@ from ..adapters.latex_renderer import UnsafeLatexError
 from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
 from ..domain.interfaces import ConcurrentModificationError
 from ..domain.printing import PrinterProfile
+from ..domain.rendering import DeckRenderSettings, StylePreset
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
@@ -20,7 +21,7 @@ from ..use_cases.card_use_cases import (
 )
 from ..use_cases.deck_use_cases import (
     ListDecks, GetDeckInfo, CreateDeck, UpdateDeck,
-    DeleteDeck, CloneDeck
+    DeleteDeck, CloneDeck, UpdateDeckRenderSettings,
 )
 from ..use_cases.deck_transfer import (
     DeckTransferError,
@@ -157,6 +158,29 @@ def _profile_back_rotation() -> int:
     if value not in {0, 180}:
         raise ValueError('Поворот оборота должен быть 0° или 180°')
     return value
+
+
+def _render_settings_from_form() -> DeckRenderSettings:
+    preset = StylePreset(request.form.get('preset', 'centered'))
+    if preset is StylePreset.LEGACY_TOP_LEFT:
+        horizontal_alignment = 'left'
+        vertical_alignment = 'top'
+    elif preset is StylePreset.CENTERED:
+        horizontal_alignment = 'center'
+        vertical_alignment = 'center'
+    else:
+        horizontal_alignment = request.form.get(
+            'horizontal_alignment', 'left'
+        )
+        vertical_alignment = request.form.get('vertical_alignment', 'top')
+    return DeckRenderSettings(
+        preset=preset,
+        horizontal_alignment=horizontal_alignment,
+        vertical_alignment=vertical_alignment,
+        header_visibility=request.form.get('header_visibility', 'none'),
+        header_position=request.form.get('header_position', 'top'),
+        header_alignment=request.form.get('header_alignment', 'left'),
+    )
 
 
 def _csrf_token() -> str:
@@ -450,14 +474,35 @@ def deck_view(deck_id):
                            print_profiles=_print_profiles())
 
 
+@cards_bp.route('/deck/<deck_id>/render_settings', methods=['POST'])
+def update_render_settings(deck_id):
+    try:
+        settings = _render_settings_from_form()
+        UpdateDeckRenderSettings(_repo()).execute(
+            deck_id,
+            settings,
+            _optional_version(request.form.get('version')),
+        )
+    except ValueError as error:
+        return _render_deck_error(
+            deck_id, f'Некорректные настройки оформления: {error}', 400
+        )
+    return redirect(url_for('cards.deck_view', deck_id=deck_id))
+
+
 @cards_bp.route('/deck/<deck_id>/add_card', methods=['POST'])
 def add_card(deck_id):
     front = request.form.get('front', '').strip()
     back = request.form.get('back', '').strip()
+    section = request.form.get('section', '').strip()
     if front or back:
         try:
             AddCard(_repo(), _max_cards()).execute(
-                deck_id, front, back, _optional_version(request.form.get('version'))
+                deck_id,
+                front,
+                back,
+                _optional_version(request.form.get('version')),
+                section=section,
             )
         except CardLimitExceeded as error:
             return _render_deck_error(deck_id, str(error))
@@ -467,9 +512,13 @@ def add_card(deck_id):
 @cards_bp.route('/deck/<deck_id>/add_cards_bulk', methods=['POST'])
 def add_cards_bulk(deck_id):
     bulk = request.form.get('bulk', '')
+    section = request.form.get('section', '').strip()
     try:
         AddCardsBulk(_repo(), _max_cards()).execute(
-            deck_id, bulk, _optional_version(request.form.get('version'))
+            deck_id,
+            bulk,
+            _optional_version(request.form.get('version')),
+            section=section,
         )
     except CardLimitExceeded as error:
         return _render_deck_error(deck_id, str(error))
@@ -548,9 +597,11 @@ def edit_card(deck_id, card_id):
     if request.method == 'POST':
         front = request.form.get('front', '')
         back = request.form.get('back', '')
+        section = request.form.get('section', '').strip()
         EditCard(_repo()).execute(
             deck_id, card_id, front, back,
             _optional_version(request.form.get('version')),
+            section=section,
         )
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
@@ -734,16 +785,26 @@ def api_add_card(deck_id):
 
     front_value = data.get('front', '')
     back_value = data.get('back', '')
-    if not isinstance(front_value, str) or not isinstance(back_value, str):
+    section_value = data.get('section', '')
+    if (
+        not isinstance(front_value, str)
+        or not isinstance(back_value, str)
+        or not isinstance(section_value, str)
+    ):
         return jsonify({'error': 'Поля карточки должны быть строками'}), 400
     front = front_value.strip()
     back = back_value.strip()
+    section = section_value.strip()
     if not front and not back:
         return jsonify({'error': 'Заполните хотя бы одно поле'}), 400
 
     try:
         card, index = AddCard(_repo(), _max_cards()).execute(
-            deck_id, front, back, _optional_version(data.get('version'))
+            deck_id,
+            front,
+            back,
+            _optional_version(data.get('version')),
+            section=section,
         )
     except CardLimitExceeded as error:
         return jsonify({'error': str(error)}), 409
@@ -804,10 +865,21 @@ def api_edit_card(deck_id, card_id):
         return jsonify({'error': 'Нет данных'}), 400
     front = data.get('front', '')
     back = data.get('back', '')
-    if not isinstance(front, str) or not isinstance(back, str):
+    section = data.get('section')
+    if (
+        not isinstance(front, str)
+        or not isinstance(back, str)
+        or (section is not None and not isinstance(section, str))
+    ):
         return jsonify({'error': 'Поля карточки должны быть строками'}), 400
     result = EditCard(_repo()).execute(
-        deck_id, card_id, front, back, _optional_version(data.get('version')))
+        deck_id,
+        card_id,
+        front,
+        back,
+        _optional_version(data.get('version')),
+        section=section.strip() if section is not None else None,
+    )
     if not result:
         return jsonify({'error': 'Неверный индекс'}), 404
     card_deck = GetDeck(_repo()).execute(deck_id)

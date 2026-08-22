@@ -43,7 +43,26 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             page.click('.deck-name-link'),
         )
 
-        async def add_card(front: str, back: str, expected_count: int) -> None:
+        assert await page.Jeval(
+            'body', 'element => element.dataset.horizontalAlignment'
+        ) == 'center'
+        await page.select('#style-preset', 'custom')
+        await page.select('#horizontal-alignment', 'right')
+        await page.select('#vertical-alignment', 'bottom')
+        await page.select('#header-visibility', 'both')
+        await page.select('#header-alignment', 'center')
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('#render-settings-form button[type="submit"]'),
+        )
+        assert await page.Jeval(
+            'body', 'element => element.dataset.verticalAlignment'
+        ) == 'bottom'
+
+        async def add_card(
+            front: str, back: str, expected_count: int, section: str = ''
+        ) -> None:
+            await page.type('#section', section)
             await page.type('#front', front)
             await page.type('#back', back)
             table = await page.querySelector('#cards-tbody')
@@ -58,11 +77,17 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
                 f"document.getElementById('cards-count').textContent === '{expected_count}'"
             )
 
-        await add_card('$x^2$', 'first', 1)
+        await add_card('$x^2$', 'first', 1, 'Алгебра')
         await add_card('second', 'answer', 2)
         await page.waitForFunction(
             "document.getElementById('math-status').textContent === 'Формулы готовы'"
         )
+        await page.click('#btn-view-preview')
+        assert await page.Jeval(
+            '.preview-card:first-child .preview-section',
+            'element => element.textContent',
+        ) == 'Алгебра'
+        await page.click('#btn-view-table')
 
         handles = await page.querySelectorAll('.drag-handle')
         await handles[0].focus()

@@ -17,7 +17,12 @@
     </script>
     <script id="MathJax-script" src="{{ url_for('cards.static', filename='vendor/mathjax/tex-mml-chtml.js') }}" async></script>
 </head>
-<body>
+<body data-horizontal-alignment="{{ deck.render_settings.horizontal_alignment.value }}"
+      data-vertical-alignment="{{ deck.render_settings.vertical_alignment.value }}"
+      data-header-visibility="{{ deck.render_settings.header_visibility.value }}"
+      data-header-position="{{ deck.render_settings.header_position.value }}"
+      data-header-alignment="{{ deck.render_settings.header_alignment.value }}"
+      class="align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }}">
     <div id="math-status" class="status-message" role="status" aria-live="polite">Загрузка формул…</div>
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> →
@@ -31,6 +36,10 @@
         <form method="post">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="version" value="{{ deck.version }}">
+            <div class="form-group section-field">
+                <label for="section">Секция / тема:</label>
+                <input type="text" id="section" name="section" value="{{ card.section }}">
+            </div>
             <div class="form-row">
                 <div class="form-group">
                     <label for="front">Лицевая сторона:</label>
@@ -54,11 +63,15 @@
         <div class="preview-card">
             <div class="preview-card-inner">
                 <div class="preview-side preview-front">
+                    {% if deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section" id="previewFrontSection">{{ card.section }}</div>{% endif %}
                     <div class="preview-content mathjax-content" id="previewFront">{{ card.front }}</div>
+                    {% if deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section" id="previewFrontSection">{{ card.section }}</div>{% endif %}
                     <span class="preview-side-label">задание</span>
                 </div>
                 <div class="preview-side preview-back">
+                    {% if deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section" id="previewBackSection">{{ card.section }}</div>{% endif %}
                     <div class="preview-content mathjax-content" id="previewBack">{{ card.back }}</div>
+                    {% if deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section" id="previewBackSection">{{ card.section }}</div>{% endif %}
                     <span class="preview-side-label">решение</span>
                 </div>
             </div>
@@ -68,14 +81,19 @@
     <script>
         const frontInput = document.getElementById('front');
         const backInput = document.getElementById('back');
+        const sectionInput = document.getElementById('section');
         const previewFront = document.getElementById('previewFront');
         const previewBack = document.getElementById('previewBack');
+        const previewFrontSection = document.getElementById('previewFrontSection');
+        const previewBackSection = document.getElementById('previewBackSection');
         let timeout;
         function updatePreview() {
             clearTimeout(timeout);
             timeout = setTimeout(() => {
                 previewFront.textContent = frontInput.value;
                 previewBack.textContent = backInput.value;
+                if (previewFrontSection) previewFrontSection.textContent = sectionInput.value;
+                if (previewBackSection) previewBackSection.textContent = sectionInput.value;
                 if (window.MathJax && MathJax.typesetPromise) {
                     MathJax.typesetPromise([previewFront, previewBack]);
                 }
@@ -83,6 +101,7 @@
         }
         frontInput.addEventListener('input', updatePreview);
         backInput.addEventListener('input', updatePreview);
+        sectionInput.addEventListener('input', updatePreview);
         const mathStatus = document.getElementById('math-status');
         const mathScript = document.getElementById('MathJax-script');
         function reportMathReady() {

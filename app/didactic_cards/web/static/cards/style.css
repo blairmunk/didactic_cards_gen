@@ -76,6 +76,32 @@ button:hover, .btn:hover,
     padding: 0.5rem;
 }
 
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(11rem, 1fr));
+    gap: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+}
+
+.settings-grid select {
+    width: 100%;
+    margin: 0;
+}
+
+.settings-grid select:disabled {
+    background: #eee;
+    color: #666;
+}
+
+.preview-notice {
+    color: #555;
+    font-size: 0.9rem;
+}
+
+.section-field {
+    margin-bottom: 1rem;
+}
+
 /* ─── Формы ─── */
 .card-form {
     border: 1px solid #ddd;
@@ -393,15 +419,51 @@ summary {
     padding: 24px 12px 12px 12px;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
     word-break: break-word;
     font-size: 14px;
     line-height: 1.4;
     overflow: hidden;
     position: relative;
 }
+
+.preview-content {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    width: 100%;
+    min-height: 0;
+}
+
+.align-h-left .preview-content { align-items: flex-start; text-align: left; }
+.align-h-center .preview-content { align-items: center; text-align: center; }
+.align-h-right .preview-content { align-items: flex-end; text-align: right; }
+.align-v-top .preview-content { justify-content: flex-start; }
+.align-v-center .preview-content { justify-content: center; }
+.align-v-bottom .preview-content { justify-content: flex-end; }
+
+.preview-section {
+    width: 100%;
+    flex: 0 0 1.35rem;
+    overflow: hidden;
+    padding-bottom: 0.2rem;
+    border-bottom: 1px solid #ddd;
+    color: #666;
+    font-size: 0.75rem;
+    line-height: 1.1rem;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.preview-content + .preview-section {
+    padding-top: 0.2rem;
+    padding-bottom: 0;
+    border-top: 1px solid #ddd;
+    border-bottom: 0;
+}
+
+.header-align-left .preview-section { text-align: left; }
+.header-align-center .preview-section { text-align: center; }
+.header-align-right .preview-section { text-align: right; }
 
 .preview-front {
     background: #fafafa;
@@ -494,6 +556,9 @@ summary {
         gap: 10px;
     }
     .preview-grid {
+        grid-template-columns: 1fr;
+    }
+    .settings-grid {
         grid-template-columns: 1fr;
     }
 }

@@ -306,7 +306,10 @@ class GenerateDocument:
     def execute(self, deck_id: str) -> CompileResult:
         deck = self.repo.load_cards(deck_id)
         padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
-        latex = self.renderer.render(padded_deck)
+        renderer = self.renderer.with_render_settings(
+            self.repo.get_render_settings(deck_id)
+        )
+        latex = renderer.render(padded_deck)
         return self.compiler.compile(latex)
 
 
@@ -328,7 +331,10 @@ class GenerateDocumentSide(GenerateDocument):
         deck = self.repo.load_cards(deck_id)
         padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
         method_name = 'render_fronts' if self.side == 'front' else 'render_backs'
-        render_side = getattr(self.renderer, method_name)
+        renderer = self.renderer.with_render_settings(
+            self.repo.get_render_settings(deck_id)
+        )
+        render_side = getattr(renderer, method_name)
         return self.compiler.compile(render_side(padded_deck))
 
 
@@ -339,8 +345,15 @@ class PreflightDocument:
     AUTOFIT_MARKER = re.compile(
         r'DIDACTIC-CARDS-AUTOFIT:(\d+):(front|back):([a-z]+)'
     )
+    HEADER_OVERFLOW_MARKER = re.compile(
+        r'DIDACTIC-CARDS-HEADER-OVERFLOW:(\d+):(front|back)'
+    )
+    HEADER_AUTOFIT_MARKER = re.compile(
+        r'DIDACTIC-CARDS-HEADER-AUTOFIT:(\d+):(front|back):([a-z]+)'
+    )
     HBOX_MARKER = re.compile(
         r'DIDACTIC-CARDS-HBOX-(BEGIN|END):(\d+):(front|back)'
+        r'(?::(body|header))?'
     )
 
     def __init__(
@@ -364,6 +377,10 @@ class PreflightDocument:
                 severity='error',
                 message='Добавьте хотя бы одну карточку',
             ),))
+
+        renderer = self.renderer.with_render_settings(
+            self.repo.get_render_settings(deck_id)
+        )
 
         issues: list[PreflightIssue] = []
         for number, card in enumerate(deck.cards, start=1):
@@ -391,12 +408,12 @@ class PreflightDocument:
                 message=f'Последний лист содержит {empty_slots} пустых ячеек',
             ))
 
-        for message in self.renderer.printable_area_warnings():
+        for message in renderer.printable_area_warnings():
             issues.append(PreflightIssue(
                 code='printable-area', severity='warning', message=message
             ))
 
-        result = self.compiler.compile(self.renderer.render(padded_deck))
+        result = self.compiler.compile(renderer.render(padded_deck))
         if not result.success:
             issues.append(PreflightIssue(
                 code='compile-failed',
@@ -444,29 +461,91 @@ class PreflightDocument:
                 side=side,
             ))
 
-        horizontal_overflows: set[tuple[int, str]] = set()
-        measured_side: tuple[int, str] | None = None
+        seen_header_overflows: set[tuple[int, str]] = set()
+        for match in self.HEADER_OVERFLOW_MARKER.finditer(result.log):
+            number = int(match.group(1))
+            side = match.group(2)
+            if (
+                number > len(deck.cards)
+                or (number, side) in seen_header_overflows
+            ):
+                continue
+            seen_header_overflows.add((number, side))
+            card = deck.cards[number - 1]
+            side_label = 'лицевой' if side == 'front' else 'оборотной'
+            issues.append(PreflightIssue(
+                code='header-vertical-overflow',
+                severity='error',
+                message=(
+                    f'Карточка {number}: колонтитул {side_label} стороны '
+                    'не помещается по высоте'
+                ),
+                card_id=card.id,
+                card_number=number,
+                side=side,
+            ))
+
+        seen_header_autofit: set[tuple[int, str]] = set()
+        for match in self.HEADER_AUTOFIT_MARKER.finditer(result.log):
+            number = int(match.group(1))
+            side = match.group(2)
+            size = match.group(3)
+            if (
+                number > len(deck.cards)
+                or (number, side) in seen_header_autofit
+            ):
+                continue
+            seen_header_autofit.add((number, side))
+            card = deck.cards[number - 1]
+            side_label = 'лицевой' if side == 'front' else 'оборотной'
+            issues.append(PreflightIssue(
+                code='header-auto-fit',
+                severity='warning',
+                message=(
+                    f'Карточка {number}: колонтитул {side_label} стороны '
+                    f'уменьшен до {size}'
+                ),
+                card_id=card.id,
+                card_number=number,
+                side=side,
+            ))
+
+        horizontal_overflows: set[tuple[int, str, str]] = set()
+        measured_side: tuple[int, str, str] | None = None
         for line in result.log.splitlines():
             marker = self.HBOX_MARKER.search(line)
             if marker:
                 measured_side = (
-                    (int(marker.group(2)), marker.group(3))
+                    (
+                        int(marker.group(2)),
+                        marker.group(3),
+                        marker.group(4) or 'body',
+                    )
                     if marker.group(1) == 'BEGIN' else None
                 )
             elif measured_side and 'Overfull \\hbox' in line:
                 horizontal_overflows.add(measured_side)
 
-        for number, side in sorted(horizontal_overflows):
+        for number, side, component in sorted(horizontal_overflows):
             if number > len(deck.cards):
                 continue
             card = deck.cards[number - 1]
             side_label = 'лицевая' if side == 'front' else 'оборотная'
+            header_side_label = 'лицевой' if side == 'front' else 'оборотной'
+            is_header = component == 'header'
             issues.append(PreflightIssue(
-                code='horizontal-overflow',
+                code=(
+                    'header-horizontal-overflow'
+                    if is_header else 'horizontal-overflow'
+                ),
                 severity='error',
                 message=(
-                    f'Карточка {number}: {side_label} сторона '
-                    'не помещается по ширине'
+                    f'Карточка {number}: '
+                    + (
+                        f'колонтитул {header_side_label} стороны '
+                        if is_header else f'{side_label} сторона '
+                    )
+                    + 'не помещается по ширине'
                 ),
                 card_id=card.id,
                 card_number=number,
@@ -495,4 +574,7 @@ class PreviewDocument:
     def execute(self, deck_id: str) -> str:
         deck = self.repo.load_cards(deck_id)
         padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
-        return self.renderer.render(padded_deck)
+        renderer = self.renderer.with_render_settings(
+            self.repo.get_render_settings(deck_id)
+        )
+        return renderer.render(padded_deck)
