@@ -6,6 +6,7 @@ import io
 
 import pytest
 
+from config import PrinterProfile
 from didactic_cards.adapters.json_repository import RepositoryCorruptionError
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.domain.entities import Card, CardDeck
@@ -502,6 +503,61 @@ def test_preflight_api_rejects_empty_deck_without_compilation(client, app, deck_
     assert response.json['ready'] is False
     assert response.json['issues'][0]['code'] == 'empty-deck'
     assert app.config['COMPILER'].sources == []
+
+
+def test_print_profile_is_applied_to_generate_preview_and_preflight(
+    client, app, deck_id
+):
+    profile = PrinterProfile(
+        'test-printer',
+        'Тестовый принтер',
+        back_offset_x_mm=1.5,
+        registration_marks=True,
+    )
+    app.config['PRINT_PROFILES'] = {profile.key: profile}
+    app.config['RENDERER_FACTORY'] = lambda selected: LatexRenderer(
+        cards_per_row=2,
+        rows_per_page=4,
+        back_offset_x_mm=selected.back_offset_x_mm,
+        registration_marks=selected.registration_marks,
+    )
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
+
+    page = client.get(f'/deck/{deck_id}')
+    assert 'Тестовый принтер' in page.text
+    preview = client.post(
+        f'/deck/{deck_id}/preview_latex', data={'profile_id': profile.key}
+    )
+    assert r'\hspace*{1.5mm}' in preview.text
+    generated = client.post(
+        f'/deck/{deck_id}/generate', data={'profile_id': profile.key}
+    )
+    assert generated.status_code == 200
+    assert r'\hspace*{1.5mm}' in app.config['COMPILER'].sources[-1]
+    preflight = client.post(
+        f'/api/deck/{deck_id}/preflight', data={'profile_id': profile.key}
+    )
+    assert preflight.status_code == 200
+    assert preflight.json['ready'] is True
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        '/deck/{deck}/generate',
+        '/deck/{deck}/generate/fronts',
+        '/deck/{deck}/generate/backs',
+        '/deck/{deck}/preview_pdf',
+        '/deck/{deck}/preview_latex',
+        '/api/deck/{deck}/preflight',
+    ],
+)
+def test_print_routes_reject_unknown_profile(client, deck_id, path):
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
+    response = client.post(
+        path.format(deck=deck_id), data={'profile_id': 'missing'}
+    )
+    assert response.status_code == 400
 
 
 def test_security_headers_are_added(client):

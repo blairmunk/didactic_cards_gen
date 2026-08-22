@@ -166,27 +166,43 @@
     <!-- Генерация -->
     <div id="generate-buttons" {% if not cards %}style="display:none"{% endif %}>
         <h2>Генерация</h2>
+        {% if print_profiles %}
+        <div class="print-profile-control">
+            <label for="print-profile">Профиль принтера:</label>
+            <select id="print-profile">
+                <option value="">Базовая конфигурация</option>
+                {% for profile in print_profiles %}
+                <option value="{{ profile.key }}">{{ profile.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endif %}
         <div class="buttons">
             <a href="{{ url_for('cards.export_deck_as_json', deck_id=deck.id) }}" class="btn-secondary" download>Экспорт JSON</a>
             <a href="{{ url_for('cards.export_deck_as_csv', deck_id=deck.id) }}" class="btn-secondary" download>Экспорт CSV</a>
-            <form action="{{ url_for('cards.preview_latex', deck_id=deck.id) }}" method="post" style="display:inline">
+            <form class="print-form" action="{{ url_for('cards.preview_latex', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="profile_id" value="">
                 <button type="submit" class="btn-secondary">👁 Предпросмотр LaTeX</button>
             </form>
-            <form action="{{ url_for('cards.generate', deck_id=deck.id) }}" method="post" style="display:inline">
+            <form class="print-form" action="{{ url_for('cards.generate', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="profile_id" value="">
                 <button type="submit" class="btn-primary">📄 Сгенерировать PDF</button>
             </form>
-            <form action="{{ url_for('cards.generate_fronts', deck_id=deck.id) }}" method="post" style="display:inline">
+            <form class="print-form" action="{{ url_for('cards.generate_fronts', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="profile_id" value="">
                 <button type="submit" class="btn-secondary">PDF: только лица</button>
             </form>
-            <form action="{{ url_for('cards.generate_backs', deck_id=deck.id) }}" method="post" style="display:inline">
+            <form class="print-form" action="{{ url_for('cards.generate_backs', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="profile_id" value="">
                 <button type="submit" class="btn-secondary">PDF: только обороты</button>
             </form>
-            <form id="pdf-preview-form" action="{{ url_for('cards.preview_pdf', deck_id=deck.id) }}" method="post" style="display:inline">
+            <form id="pdf-preview-form" class="print-form" action="{{ url_for('cards.preview_pdf', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="profile_id" value="">
                 <button type="submit" class="btn-secondary">🔎 PDF-превью</button>
             </form>
             <button type="button" id="preflight-button" class="btn-warning">Проверить перед печатью</button>

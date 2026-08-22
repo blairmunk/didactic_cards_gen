@@ -26,23 +26,34 @@ def create_app(
     )
 
     layout = cfg.layout
+
+    def build_renderer(profile=None):
+        if renderer is not None:
+            return renderer
+        profile = profile or layout
+        return LatexRenderer(
+            card_width_cm=layout.card_width_cm,
+            card_height_cm=layout.card_height_cm,
+            cards_per_row=layout.cards_per_row,
+            rows_per_page=layout.rows_per_page,
+            fbox_sep_pt=layout.fbox_sep_pt,
+            fbox_rule_pt=layout.fbox_rule_pt,
+            back_border=profile.back_border,
+            duplex_mode=profile.duplex_mode,
+            front_offset_x_mm=profile.front_offset_x_mm,
+            front_offset_y_mm=profile.front_offset_y_mm,
+            back_offset_x_mm=profile.back_offset_x_mm,
+            back_offset_y_mm=profile.back_offset_y_mm,
+            registration_marks=profile.registration_marks,
+        )
+
     app.config['REPO'] = repo
     app.config['INTEGRITY_REPORT'] = getattr(repo, 'integrity_report', None)
-    app.config['RENDERER'] = renderer if renderer is not None else LatexRenderer(
-        card_width_cm=layout.card_width_cm,
-        card_height_cm=layout.card_height_cm,
-        cards_per_row=layout.cards_per_row,
-        rows_per_page=layout.rows_per_page,
-        fbox_sep_pt=layout.fbox_sep_pt,
-        fbox_rule_pt=layout.fbox_rule_pt,
-        back_border=layout.back_border,
-        duplex_mode=layout.duplex_mode,
-        front_offset_x_mm=layout.front_offset_x_mm,
-        front_offset_y_mm=layout.front_offset_y_mm,
-        back_offset_x_mm=layout.back_offset_x_mm,
-        back_offset_y_mm=layout.back_offset_y_mm,
-        registration_marks=layout.registration_marks,
-    )
+    app.config['RENDERER'] = build_renderer()
+    app.config['RENDERER_FACTORY'] = build_renderer
+    app.config['PRINT_PROFILES'] = {
+        profile.key: profile for profile in cfg.printer_profiles
+    }
     app.config['COMPILER'] = compiler if compiler is not None else PdfLatexCompiler(
         pdflatex_path=cfg.pdflatex_path,
         timeout=cfg.pdflatex_timeout,

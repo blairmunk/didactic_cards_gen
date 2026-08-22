@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from config import AppConfig, CardLayoutConfig
+from config import AppConfig, CardLayoutConfig, PrinterProfile
 from run import create_app
 
 
@@ -22,7 +22,10 @@ def test_default_layout_fits_inside_a4_printable_area():
 def test_create_app_registers_required_services(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     app = create_app(data_dir=tmp_path / 'data')
-    assert {'REPO', 'RENDERER', 'COMPILER', 'CARDS_PER_PAGE'} <= app.config.keys()
+    assert {
+        'REPO', 'RENDERER', 'RENDERER_FACTORY', 'PRINT_PROFILES',
+        'COMPILER', 'CARDS_PER_PAGE'
+    } <= app.config.keys()
     assert app.url_map.bind('').match('/')[0] == 'cards.decks_list'
     assert app.config['REPO'].database_file == (tmp_path / 'data' / 'cards.sqlite3')
     assert app.config['REPO'].database_file.exists()
@@ -75,3 +78,52 @@ def test_app_factory_accepts_configuration_override(tmp_path):
     app = create_app(config=config, data_dir=tmp_path / 'data')
     assert app.secret_key == 'override'
     assert app.config['REPO'].data_dir == Path(tmp_path / 'data')
+
+
+@pytest.mark.parametrize(
+    'kwargs',
+    [
+        {'key': 'Upper', 'name': 'Name'},
+        {'key': 'valid', 'name': ''},
+        {'key': 'valid', 'name': 'x' * 101},
+        {'key': 'valid', 'name': 'Name', 'back_offset_x_mm': 11},
+        {'key': 'valid', 'name': 'Name', 'front_offset_y_mm': float('nan')},
+        {'key': 'valid', 'name': 'Name', 'duplex_mode': 'diagonal'},
+        {'key': 'valid', 'name': 'Name', 'back_border': 1},
+        {'key': 'valid', 'name': 'Name', 'registration_marks': 'yes'},
+    ],
+)
+def test_printer_profile_rejects_invalid_values(kwargs):
+    with pytest.raises(ValueError):
+        PrinterProfile(**kwargs)
+
+
+def test_app_config_rejects_duplicate_profile_keys():
+    with pytest.raises(ValueError, match='unique'):
+        AppConfig(printer_profiles=(
+            PrinterProfile('same', 'First'),
+            PrinterProfile('same', 'Second'),
+        ))
+
+
+def test_renderer_factory_creates_isolated_profile_renderer(tmp_path):
+    profile = PrinterProfile(
+        'office-printer',
+        'Office printer',
+        duplex_mode='short-edge',
+        back_offset_x_mm=1.25,
+        registration_marks=True,
+    )
+    app = create_app(
+        config=AppConfig(printer_profiles=(profile,)),
+        data_dir=tmp_path / 'data',
+    )
+
+    first = app.config['RENDERER_FACTORY'](profile)
+    second = app.config['RENDERER_FACTORY'](profile)
+
+    assert first is not second
+    assert first.back_offset == (1.25, 0.0)
+    assert first.duplex_mode.value == 'short-edge'
+    assert first.registration_marks is True
+    assert list(app.config['PRINT_PROFILES']) == ['office-printer']

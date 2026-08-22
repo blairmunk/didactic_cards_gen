@@ -103,6 +103,14 @@ document.addEventListener('DOMContentLoaded', function() {
         return div.innerHTML;
     }
 
+    const printProfile = document.getElementById('print-profile');
+    document.querySelectorAll('.print-form').forEach(function(form) {
+        form.addEventListener('submit', function() {
+            const input = form.querySelector('input[name="profile_id"]');
+            if (input) input.value = printProfile ? printProfile.value : '';
+        });
+    });
+
     // ── Удаление/добавление в превью ──
 
     function removeCardFromPreview(cardId) {
@@ -366,7 +374,11 @@ document.addEventListener('DOMContentLoaded', function() {
             preflightResult.className = 'preflight-result';
             preflightResult.textContent = 'Компиляция и проверка…';
             try {
-                const response = await fetch(API.preflight, { method: 'POST' });
+                const body = new FormData();
+                body.set('profile_id', printProfile ? printProfile.value : '');
+                const response = await fetch(API.preflight, {
+                    method: 'POST', body: body
+                });
                 const data = await response.json();
                 if (!response.ok) {
                     preflightResult.classList.add('has-errors');

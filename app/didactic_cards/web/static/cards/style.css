@@ -45,6 +45,18 @@ button:hover, .btn:hover { opacity: 0.85; }
     margin-top: 10px;
 }
 
+.print-profile-control {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin: 0.5rem 0 1rem;
+}
+
+.print-profile-control label,
+.print-profile-control select {
+    margin: 0;
+}
+
 /* ─── Формы ─── */
 .card-form {
     border: 1px solid #ddd;

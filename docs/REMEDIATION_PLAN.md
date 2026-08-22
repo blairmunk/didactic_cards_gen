@@ -47,7 +47,8 @@
   - [x] Versioned JSON/CSV export и транзакционный import-копия с lineage.
   - [x] Раздельные front-only/back-only PDF сохраняют sheet mapping, duplex transform и offsets для ручной подачи.
   - [x] Компилируемый preflight проверяет overflow, missing glyphs, unsupported formulas и printable area до печати.
-  - [ ] Printer profiles, расширенная layout-конфигурация и auto-fit/clip policy.
+  - [x] Именованные config-профили принтера выбираются на print job и изолированы между запросами.
+  - [ ] Web calibration wizard с сохранением пользовательских профилей, расширенная layout-конфигурация и auto-fit/clip policy.
 
 ## 1. Итог аудита
 
@@ -71,7 +72,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 281 проходящий тест, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.86% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 298 проходящих тестов, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.80% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -114,7 +115,7 @@
 - ✅ `BUG-UI-002`: видимый хвост `HTML` после `</html>` удалён и покрыт проверкой всех templates.
 - ✅ `BUG-UI-003`: MathJax 3.2.2 + fonts vendored локально, CDN удалён из templates/CSP, есть status/fallback.
 - ✅ Добавлен inline preview реально скомпилированного PDF; визуальный front/back overlay остаётся дальнейшим улучшением.
-- `back_border=False` скрывает совмещение. Нужен режим calibration/debug с крестами, crop marks и идентификаторами slot/page.
+- ✅ Встроенный calibration-профиль включает видимые рамки и registration marks; измеряемый wizard и идентификаторы slot/page остаются в roadmap.
 - ✅ Preflight обнаруживает vertical overflow точным TeX-измерением и horizontal overflow по log до печати. Auto-fit/controlled clipping пока не реализованы, поэтому пользователь должен сократить помеченную сторону.
 - Single newline в исходном тексте не равен видимому переносу LaTeX; нужен определённый markdown/rich-text contract.
 - ✅ Routes адресуют карточки UUID; deck `version` защищает параллельные add/edit/delete/reorder/reset от lost update.
@@ -198,7 +199,7 @@
 
 Приоритетный roadmap:
 
-1. Профили принтеров и calibration wizard с измеряемыми X/Y offsets.
+1. [ ] Профили принтеров и calibration wizard: [x] config-defined профили и выбор на print job; [ ] измеряемые X/Y offsets и сохранение пользовательского профиля.
 2. Выбор формата A4/Letter, ориентации, сетки, внешнего размера карточки, margins/gaps/bleed/safe area.
 3. [x] Двусторонний PDF и два отдельных файла front/back для принтеров без duplex. Раздельные документы сохраняют одинаковую нумерацию физических листов, back permutation и калибровочные offsets; unit, HTTP и реальный `pdflatex` page-count test проходят.
 4. [x] Импорт/экспорт колоды в versioned JSON schema 1 и UTF-8-BOM CSV; импорт создаёт транзакционную копию с lineage, validation/quota и без перезаписи существующих данных. Полный backup/restore всей базы остаётся эксплуатационным пунктом.

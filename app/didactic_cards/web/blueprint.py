@@ -38,8 +38,18 @@ def _repo():
     return current_app.config['REPO']
 
 
-def _renderer():
-    return current_app.config['RENDERER']
+def _renderer(profile_id: str | None = None):
+    if not profile_id:
+        return current_app.config['RENDERER']
+    profile = current_app.config.get('PRINT_PROFILES', {}).get(profile_id)
+    factory = current_app.config.get('RENDERER_FACTORY')
+    if profile is None or factory is None:
+        abort(400, description='Неизвестный профиль принтера')
+    return factory(profile)
+
+
+def _print_profiles():
+    return tuple(current_app.config.get('PRINT_PROFILES', {}).values())
 
 
 def _compiler():
@@ -77,7 +87,10 @@ def _csrf_token() -> str:
 
 @cards_bp.context_processor
 def inject_csrf_token():
-    return {'csrf_token': _csrf_token}
+    return {
+        'csrf_token': _csrf_token,
+        'print_profiles': _print_profiles(),
+    }
 
 
 @cards_bp.before_app_request
@@ -261,7 +274,8 @@ def deck_view(deck_id):
                            deck=deck_info,
                            cards=card_deck.to_list(),
                            cards_count=len(card_deck),
-                           cards_per_page=_cards_per_page())
+                           cards_per_page=_cards_per_page(),
+                           print_profiles=_print_profiles())
 
 
 @cards_bp.route('/deck/<deck_id>/add_card', methods=['POST'])
@@ -400,11 +414,13 @@ def _generate_pdf_response(
     try:
         if side is None:
             generator = GenerateDocument(
-                _repo(), _renderer(), _compiler(), _cards_per_page()
+                _repo(), _renderer(request.form.get('profile_id')), _compiler(),
+                _cards_per_page()
             )
         else:
             generator = GenerateDocumentSide(
-                _repo(), _renderer(), _compiler(), _cards_per_page(), side
+                _repo(), _renderer(request.form.get('profile_id')), _compiler(),
+                _cards_per_page(), side
             )
         result = generator.execute(deck_id)
     except UnsafeLatexError as error:
@@ -462,7 +478,8 @@ def generate_backs(deck_id):
 def preflight_document(deck_id):
     try:
         report = PreflightDocument(
-            _repo(), _renderer(), _compiler(), _cards_per_page()
+            _repo(), _renderer(request.form.get('profile_id')), _compiler(),
+            _cards_per_page()
         ).execute(deck_id)
         return jsonify(report.to_dict())
     except UnsafeLatexError as error:
@@ -494,7 +511,9 @@ def preview_latex(deck_id):
                                error='Добавьте хотя бы одну карточку!')
 
     try:
-        latex = PreviewDocument(_repo(), _renderer(), _cards_per_page()).execute(deck_id)
+        latex = PreviewDocument(
+            _repo(), _renderer(request.form.get('profile_id')), _cards_per_page()
+        ).execute(deck_id)
     except UnsafeLatexError as error:
         return render_template(
             'cards/error.html', deck=deck_info,

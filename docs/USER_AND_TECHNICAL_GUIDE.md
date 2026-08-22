@@ -91,6 +91,7 @@ MathJax 3.2.2 вместе с web fonts хранится локально в sta
 
 ### Генерация PDF
 
+- Перед генерацией выберите профиль принтера. Встроены «Стандартный long-edge», «Калибровочный long-edge» с рамками/метками и «Стандартный short-edge»; «Базовая конфигурация» использует поля `CardLayoutConfig` без переопределения.
 - «Предпросмотр LaTeX» показывает исходник.
 - «PDF-превью» компилирует тот же документ и открывает inline PDF в модальном окне; это точнее декоративной HTML-сетки по шрифту, pagination и duplex-порядку.
 - «Сгенерировать PDF» запускает `pdflatex` с таймаутом 30 секунд.
@@ -121,6 +122,8 @@ MathJax 3.2.2 вместе с web fonts хранится локально в sta
 3. Напечатайте первую страницу `*-backs.pdf` с теми же форматом бумаги, ориентацией, масштабом и layout-профилем.
 4. Проверьте соответствие пары, направление текста и registration marks. Только после этого печатайте всю пачку.
 5. Если драйвер выдаёт листы в обратном порядке, включите обратный порядок страниц только для второго прохода. Не переставляйте страницы внутри PDF: их номера уже сопоставлены по физическим листам.
+
+Выбранный профиль применяется одинаково к LaTeX preview, полному/раздельным PDF и preflight. Для каждого HTTP-запроса создаётся отдельный renderer, поэтому одновременная печать с разными профилями не смешивает offsets. Дополнительные deployment-профили задаются в `AppConfig(printer_profiles=(PrinterProfile(...), ...))`; ключ — lowercase slug, имя ограничено 100 символами, offsets — диапазоном ±10 мм. Web-мастер, который сохраняет измерения конкретного принтера, пока не реализован.
 
 ## 4. Хранение данных
 
@@ -188,7 +191,7 @@ JSON files             PdfLatexCompiler
 - `web/blueprint.py`: HTML и AJAX endpoints.
 - `xelatex_compiler.py`: протестированная альтернативная реализация компилятора; активная конфигурация пока использует `pdflatex`.
 
-`CardLayoutConfig` задаёт внешний cut size `9.3 × 6.3 см`, 2 столбца, 4 ряда, `fboxsep=8pt`, толщину рамки и `duplex_mode`. Внутренняя `minipage` автоматически уменьшается на padding и border, поэтому они не увеличивают физическую рамку. Поля `front_offset_x_mm`, `front_offset_y_mm`, `back_offset_x_mm`, `back_offset_y_mm` принимают калибровку в диапазоне ±10 мм; `registration_marks=True` добавляет кресты на обе стороны листа.
+`CardLayoutConfig` задаёт внешний cut size `9.3 × 6.3 см`, 2 столбца, 4 ряда, `fboxsep=8pt`, толщину рамки и базовый `duplex_mode`. Внутренняя `minipage` автоматически уменьшается на padding и border, поэтому они не увеличивают физическую рамку. `PrinterProfile` переопределяет duplex mode, рамку, метки и поля `front_offset_x_mm`, `front_offset_y_mm`, `back_offset_x_mm`, `back_offset_y_mm` в диапазоне ±10 мм; размеры и сетка остаются общими для приложения.
 
 Рекомендуемый цикл калибровки:
 
@@ -208,7 +211,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 281 проходящий тест, 0 `xfail`, общий branch coverage 98.86%. В него входят unit/HTTP-контракты раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
+Текущее состояние основного набора: 298 проходящих тестов, 0 `xfail`, общий branch coverage 98.80%. В него входят unit/HTTP-контракты профилей, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
 
 Скриншоты можно переснять на запущенном приложении:
 
