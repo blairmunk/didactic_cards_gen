@@ -14,6 +14,8 @@ from didactic_cards.use_cases.card_use_cases import (
     ReorderCards,
     ResetCards,
     CardLimitExceeded,
+    CsvValidationError,
+    preview_csv_import,
 )
 
 
@@ -34,12 +36,12 @@ def test_card_crud_and_reorder(repo, deck_id):
     assert len(repo.load_cards(deck_id)) == 0
 
 
-def test_bulk_import_accepts_single_pipe(repo, deck_id):
+def test_bulk_import_requires_exact_double_pipe(repo, deck_id):
     count = AddCardsBulk(repo).execute(deck_id, "q1 | a1\nq2\n\nq3 | a3")
     cards = repo.load_cards(deck_id).cards
     assert count == 3
     assert [(card.front, card.back) for card in cards] == [
-        ("q1", "a1"), ("q2", ""), ("q3", "a3")
+        ("q1 | a1", ""), ("q2", ""), ("q3 | a3", "")
     ]
 
 
@@ -57,14 +59,16 @@ def test_bulk_limit_is_atomic(repo, deck_id):
     assert [card.front for card in repo.load_cards(deck_id).cards] == ['existing']
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-IMP-001: UI documents '||', but the parser leaves one pipe in the back",
-)
 def test_bulk_import_matches_documented_double_pipe(repo, deck_id):
     AddCardsBulk(repo).execute(deck_id, "question || answer")
     card = repo.load_cards(deck_id).cards[0]
     assert (card.front, card.back) == ("question", "answer")
+
+
+def test_bulk_import_supports_escaped_delimiter_and_backslash(repo, deck_id):
+    AddCardsBulk(repo).execute(deck_id, r"question \|| literal || C:\\cards")
+    card = repo.load_cards(deck_id).cards[0]
+    assert (card.front, card.back) == ("question || literal", r"C:\cards")
 
 
 def test_csv_import_accepts_comma_and_utf8_bom(repo, deck_id):
@@ -79,14 +83,39 @@ def test_csv_import_skips_blank_rows_and_empty_cells(repo, deck_id):
     assert repo.load_cards(deck_id).cards[0].front == "front-only"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-IMP-002: UI promises semicolon CSV while csv.reader uses comma",
-)
 def test_csv_import_matches_documented_semicolon(repo, deck_id):
     ImportCsv(repo).execute(deck_id, "front;back".encode())
     card = repo.load_cards(deck_id).cards[0]
     assert (card.front, card.back) == ("front", "back")
+
+
+def test_csv_import_explicit_dialect_and_header(repo, deck_id):
+    ImportCsv(repo).execute(
+        deck_id,
+        "front\tback\nQ\tA".encode(),
+        delimiter="tab",
+        has_header=True,
+    )
+    card = repo.load_cards(deck_id).cards[0]
+    assert (card.front, card.back) == ("Q", "A")
+
+
+def test_csv_import_rejects_unknown_dialect(repo, deck_id):
+    with pytest.raises(ValueError, match="delimiter"):
+        ImportCsv(repo).execute(deck_id, b"Q,A", delimiter="pipes")
+
+
+def test_csv_preview_reports_rejected_rows_and_import_is_atomic(repo, deck_id):
+    source = b"front;back\nQ;A\ninvalid;row;extra"
+    preview = preview_csv_import(source, has_header=True)
+    assert preview.delimiter == ";"
+    assert [(card.front, card.back) for card in preview.cards] == [("Q", "A")]
+    assert preview.rejected_rows[0]["row"] == 3
+    assert preview.to_dict(preview_limit=0)["truncated"] is True
+
+    with pytest.raises(CsvValidationError, match="отклонённые строки"):
+        ImportCsv(repo).execute(deck_id, source, has_header=True)
+    assert len(repo.load_cards(deck_id)) == 0
 
 
 def test_csv_import_rejects_non_utf8(repo, deck_id):
@@ -114,10 +143,6 @@ def test_generate_and_preview_pad_to_whole_sheet(repo, deck_id, app):
     assert len(compiler.sources) == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-VAL-001: cards_per_page is not validated before modulo",
-)
 def test_generate_rejects_non_positive_page_capacity(repo, deck_id, app):
     AddCard(repo).execute(deck_id, "Q", "A")
     with pytest.raises(ValueError, match="cards_per_page"):

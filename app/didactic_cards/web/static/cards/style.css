@@ -77,6 +77,77 @@ textarea, input[type="text"], input[type="file"] {
     font-size: 14px;
 }
 
+select {
+    margin: 0.5rem;
+    padding: 0.5rem;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+    background: white;
+}
+
+.import-preview {
+    margin-top: 1rem;
+    max-height: 18rem;
+    overflow: auto;
+}
+
+.status-message {
+    min-height: 1.25rem;
+    color: #666;
+    font-size: 0.9rem;
+}
+
+.is-saving .drag-handle {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.drag-handle:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+    outline: 3px solid #1565c0;
+    outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+    #view-table {
+        overflow-x: auto;
+    }
+
+    .cards-table {
+        min-width: 680px;
+    }
+}
+
+.pdf-preview-dialog {
+    width: min(96vw, 1100px);
+    height: 92vh;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+}
+
+.pdf-preview-dialog::backdrop {
+    background: rgb(0 0 0 / 55%);
+}
+
+.pdf-preview-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+}
+
+#pdf-preview-frame {
+    width: 100%;
+    height: calc(92vh - 3.5rem);
+    border: 0;
+}
+
 textarea {
     height: 120px;
     resize: vertical;

@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Мои колоды</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
+    <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
 </head>
 <body>
     <h1>📚 Мои колоды</h1>
@@ -54,15 +55,15 @@
                 <td>{{ deck.card_ids | length }}</td>
                 <td>{{ deck.updated_at.strftime('%d.%m.%Y %H:%M') }}</td>
                 <td class="actions">
-                    <a href="{{ url_for('cards.edit_deck', deck_id=deck.id) }}" title="Редактировать">✏️</a>
+                    <a href="{{ url_for('cards.edit_deck', deck_id=deck.id) }}" aria-label="Редактировать колоду {{ deck.name }}" title="Редактировать">✏️</a>
                     <form method="post" action="{{ url_for('cards.clone_deck', deck_id=deck.id) }}">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn-small btn-secondary" title="Копировать">📋</button>
+                        <button type="submit" class="btn-small btn-secondary" aria-label="Копировать колоду {{ deck.name }}" title="Копировать">📋</button>
                     </form>
                     <form method="post" action="{{ url_for('cards.delete_deck', deck_id=deck.id) }}"
                           onsubmit="return confirm('Удалить колоду «{{ deck.name }}»?')">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn-small btn-danger" title="Удалить">🗑️</button>
+                        <button type="submit" class="btn-small btn-danger" aria-label="Удалить колоду {{ deck.name }}" title="Удалить">🗑️</button>
                     </form>
                 </td>
             </tr>
@@ -74,4 +75,3 @@
     {% endif %}
 </body>
 </html>
-HTML

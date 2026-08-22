@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Редактирование карточки</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
+    <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
     <script>
     window.MathJax = {
         tex: {
@@ -14,9 +15,10 @@
         startup: { pageReady: () => MathJax.startup.defaultPageReady() }
     };
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" async></script>
+    <script id="MathJax-script" src="{{ url_for('cards.static', filename='vendor/mathjax/tex-mml-chtml.js') }}" async></script>
 </head>
 <body>
+    <div id="math-status" class="status-message" role="status" aria-live="polite">Загрузка формул…</div>
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> →
         <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}">{{ deck.name }}</a> →
@@ -81,6 +83,22 @@
         }
         frontInput.addEventListener('input', updatePreview);
         backInput.addEventListener('input', updatePreview);
+        const mathStatus = document.getElementById('math-status');
+        const mathScript = document.getElementById('MathJax-script');
+        function reportMathReady() {
+            if (window.MathJax && MathJax.startup && MathJax.startup.promise) {
+                MathJax.startup.promise.then(() => {
+                    mathStatus.textContent = 'Формулы готовы';
+                }).catch(() => {
+                    mathStatus.textContent = 'Не удалось отобразить формулы';
+                });
+            }
+        }
+        mathScript.addEventListener('load', reportMathReady);
+        mathScript.addEventListener('error', () => {
+            mathStatus.textContent = 'Не удалось загрузить локальный MathJax';
+        });
+        reportMathReady();
     </script>
 </body>
 </html>

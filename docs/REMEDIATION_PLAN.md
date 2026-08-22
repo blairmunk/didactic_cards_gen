@@ -36,6 +36,13 @@
   - [x] Активное хранилище мигрировано в SQLite schema 1 с FK, WAL, транзакциями и одноразовым backup/import legacy JSON.
   - [x] Карточные HTML/API операции переведены с индексов на UUID; deck version даёт HTTP 409 при stale mutation.
 - [ ] Этап 4: импорт и web UX.
+  - [x] Bulk использует exact `||` и документированное escaping.
+  - [x] CSV поддерживает auto/explicit dialect, UTF-8 BOM, header toggle, read-only preview и atomic reject при bad rows.
+  - [x] DnD/keyboard reorder использует UUID, loading state и DOM rollback.
+  - [x] MathJax 3.2.2 и fonts vendored локально; добавлен status/fallback.
+  - [x] Декоративный preview дополнен inline preview того же сгенерированного PDF.
+  - [x] Устранён stray HTML, добавлены favicon, focus styles и aria-label для icon actions.
+  - [ ] Финально прогнать Chromium E2E после исправления offline resource assertion; расширить PDF overlay/accessibility review.
 - [ ] Этап 5: функциональное развитие.
 
 ## 1. Итог аудита
@@ -60,7 +67,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 225 проходящих тестов и 5 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 98.66% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 242 проходящих теста, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.84% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -86,8 +93,8 @@
 | ~~BUG-DATA-005~~ ✅ | Deep-clone создавал новые UUID, но терял `parent_id` карточек. | Выполнено через `Card.clone()`; lineage contract стал обычным тестом. |
 | ~~BUG-ARCH-001~~ ✅ | Старый `JsonFileStorage` импортировал удалённый `StorageBackend`; весь старый test collection раньше падал. | Выполнено на этапе 0: неиспользуемые `JsonFileStorage` и `FlaskSessionRepository` удалены вместе с устаревшими тестами; активным остаётся один `JsonRepository`. |
 | ~~BUG-UI-001~~ ✅ | Drag-and-drop вызывал `renumberRows()` до построения permutation и отправлял identity order. | Выполнено: DOM и API используют card UUID, payload строится до renumber, failure восстанавливает прежний DOM без reload, stale version даёт 409. Browser E2E остаётся проверкой этапа 4. |
-| BUG-IMP-001 | UI обещает `||`, parser делит по первому одиночному `|`. | Единый parser с exact delimiter `||`, escaping/quoting и preview результата до commit. |
-| BUG-IMP-002 | UI обещает `;`, `csv.reader` использует `,`. | `csv.Sniffer` с явным выбором delimiter; UTF-8/UTF-8-BOM; header toggle; preview и отчёт rejected rows. |
+| ~~BUG-IMP-001~~ ✅ | UI обещал `||`, parser делил по первому одиночному `|`. | Выполнено: exact `||`, `\||` и `\\`; parser/UI/docs и regression tests синхронизированы. |
+| ~~BUG-IMP-002~~ ✅ | UI обещал `;`, `csv.reader` использовал `,`. | Выполнено: auto/explicit comma-semicolon-tab, UTF-8/BOM, header toggle, read-only preview, rejected counts и atomic reject. |
 | ~~BUG-PDF-001~~ ✅ | Partial PDF считался успехом даже при non-zero exit code. | Выполнено: обязательный return code 0, наличие PDF, safe failure flags и fallback stdout/stderr log. |
 | ~~BUG-LIMIT-001~~ ✅ | `max_cards=200` не использовался. | Выполнено: единый quota в use cases и web/API; bulk/CSV проверяют будущую ёмкость до сохранения. |
 | ~~BUG-CONF-001~~ ✅ | База зависела от process CWD. | Выполнено: стабильный абсолютный `app/data`, override через `DIDACTIC_CARDS_DATA_DIR`; оба CWD дают один путь. Диагностика legacy-каталогов остаётся частью миграции. |
@@ -100,9 +107,9 @@
 
 ### P2 — надёжность, эксплуатация и качество UX
 
-- `BUG-UI-002`: удалить видимый хвост `HTML` после `</html>`.
-- `BUG-UI-003`: MathJax полностью зависит от CDN; vendor assets локально или предусмотреть понятный fallback/status.
-- Preview не соответствует PDF по шрифту, размеру, top alignment, padding, pagination и orientation. Нужен PDF/image preview, а не декоративная HTML-карточка.
+- ✅ `BUG-UI-002`: видимый хвост `HTML` после `</html>` удалён и покрыт проверкой всех templates.
+- ✅ `BUG-UI-003`: MathJax 3.2.2 + fonts vendored локально, CDN удалён из templates/CSP, есть status/fallback.
+- ✅ Добавлен inline preview реально скомпилированного PDF; визуальный front/back overlay остаётся дальнейшим улучшением.
 - `back_border=False` скрывает совмещение. Нужен режим calibration/debug с крестами, crop marks и идентификаторами slot/page.
 - Длинный текст не получает overflow warning, auto-fit или clip policy; возможен выход за границы соседней карточки.
 - Single newline в исходном тексте не равен видимому переносу LaTeX; нужен определённый markdown/rich-text contract.
@@ -174,12 +181,12 @@
 
 ### Этап 4. Исправить импорт и web UX
 
-1. Единая спецификация bulk delimiter; исправить UI, parser и docs одновременно.
-2. CSV wizard: dialect/encoding/header preview, validation counts, atomic import или rollback.
-3. Исправить DnD на stable IDs; keyboard reorder; loading/error/rollback states.
-4. Локальный MathJax bundle и явный статус typesetting.
-5. Заменить HTML preview на raster/PDF preview конкретного листа front/back с overlay mode.
-6. Accessibility: semantic buttons, `aria-label`, focus, confirmation dialogs, responsive table.
+1. [x] Единая спецификация bulk delimiter; UI, parser, escaping и docs синхронизированы.
+2. [x] CSV wizard: dialect/encoding/header preview, validation counts и atomic rollback.
+3. [x] DnD на stable IDs; keyboard reorder; loading/error/rollback states.
+4. [x] Локальный MathJax bundle и явный status/fallback typesetting.
+5. [ ] Preview: [x] inline PDF конкретного print job; [ ] front/back raster overlay с совмещением.
+6. [ ] Accessibility: [x] aria-label, keyboard reorder, focus, responsive table; [ ] полный screen-reader/contrast/dialog audit.
 
 Выход: Playwright/pyppeteer E2E проходит create → import → reorder → edit → generate → reload; порядок и формулы сохраняются.
 

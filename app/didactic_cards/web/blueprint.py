@@ -12,7 +12,8 @@ from ..domain.interfaces import ConcurrentModificationError
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
     EditCard, ReorderCards, ResetCards, GetDeck,
-    GenerateDocument, PreviewDocument, CardLimitExceeded
+    GenerateDocument, PreviewDocument, CardLimitExceeded,
+    CsvValidationError, preview_csv_import,
 )
 from ..use_cases.deck_use_cases import (
     ListDecks, GetDeckInfo, CreateDeck, UpdateDeck,
@@ -96,10 +97,10 @@ def add_security_headers(response):
     response.headers.setdefault('Referrer-Policy', 'no-referrer')
     response.headers.setdefault(
         'Content-Security-Policy',
-        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
-        "font-src 'self' data: https://cdn.jsdelivr.net; object-src 'none'; "
-        "base-uri 'self'; frame-ancestors 'none'",
+        "font-src 'self' data:; object-src 'none'; "
+        "frame-src 'self' blob:; base-uri 'self'; frame-ancestors 'none'",
     )
     return response
 
@@ -237,6 +238,26 @@ def add_cards_bulk(deck_id):
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
+@cards_bp.route('/api/deck/<deck_id>/preview_csv', methods=['POST'])
+def api_preview_csv(deck_id):
+    if GetDeckInfo(_repo()).execute(deck_id) is None:
+        raise DeckNotFoundError(deck_id)
+    file = request.files.get('csv_file')
+    if not file or file.filename == '':
+        return jsonify({'error': 'Выберите CSV-файл'}), 400
+    try:
+        preview = preview_csv_import(
+            file.stream.read(),
+            request.form.get('delimiter', 'auto'),
+            request.form.get('has_header') == 'on',
+        )
+    except UnicodeDecodeError:
+        return jsonify({'error': 'CSV должен быть сохранён в UTF-8'}), 400
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    return jsonify({'ok': True, **preview.to_dict()})
+
+
 @cards_bp.route('/deck/<deck_id>/import_csv', methods=['POST'])
 def import_csv(deck_id):
     file = request.files.get('csv_file')
@@ -245,7 +266,11 @@ def import_csv(deck_id):
     try:
         file_bytes = file.stream.read()
         ImportCsv(_repo(), _max_cards()).execute(
-            deck_id, file_bytes, _optional_version(request.form.get('version'))
+            deck_id,
+            file_bytes,
+            _optional_version(request.form.get('version')),
+            delimiter=request.form.get('delimiter', 'auto'),
+            has_header=request.form.get('has_header') == 'on',
         )
     except CardLimitExceeded as error:
         return _render_deck_error(deck_id, str(error))
@@ -258,6 +283,8 @@ def import_csv(deck_id):
                                cards_count=len(card_deck),
                                cards_per_page=_cards_per_page(),
                                error='Ошибка кодировки. Сохраните CSV в UTF-8.')
+    except (CsvValidationError, ValueError) as error:
+        return _render_deck_error(deck_id, str(error), 400)
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
@@ -302,8 +329,7 @@ def reset(deck_id):
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-@cards_bp.route('/deck/<deck_id>/generate', methods=['POST'])
-def generate(deck_id):
+def _generate_pdf_response(deck_id: str, *, attachment: bool):
     deck_info = GetDeckInfo(_repo()).execute(deck_id)
     card_deck = GetDeck(_repo()).execute(deck_id)
 
@@ -343,9 +369,19 @@ def generate(deck_id):
     return send_file(
         io.BytesIO(result.pdf_data),
         mimetype='application/pdf',
-        as_attachment=True,
+        as_attachment=attachment,
         download_name=filename,
     )
+
+
+@cards_bp.route('/deck/<deck_id>/generate', methods=['POST'])
+def generate(deck_id):
+    return _generate_pdf_response(deck_id, attachment=True)
+
+
+@cards_bp.route('/deck/<deck_id>/preview_pdf', methods=['POST'])
+def preview_pdf(deck_id):
+    return _generate_pdf_response(deck_id, attachment=False)
 
 
 @cards_bp.route('/deck/<deck_id>/preview_latex', methods=['POST'])

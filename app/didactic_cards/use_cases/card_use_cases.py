@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import csv
 import io
+from dataclasses import dataclass
 
 from ..domain.interfaces import (
     CardRepository, DeckRepository,
@@ -12,9 +15,94 @@ class CardLimitExceeded(ValueError):
     pass
 
 
+class CsvValidationError(ValueError):
+    def __init__(self, preview: CsvImportPreview):
+        self.preview = preview
+        super().__init__(
+            f'CSV содержит отклонённые строки: {len(preview.rejected_rows)}'
+        )
+
+
+@dataclass(frozen=True)
+class CsvImportPreview:
+    cards: tuple[Card, ...]
+    rejected_rows: tuple[dict, ...]
+    delimiter: str
+
+    def to_dict(self, preview_limit: int = 20) -> dict:
+        return {
+            'accepted_count': len(self.cards),
+            'rejected_count': len(self.rejected_rows),
+            'delimiter': self.delimiter,
+            'cards': [card.to_dict() for card in self.cards[:preview_limit]],
+            'rejected_rows': list(self.rejected_rows[:preview_limit]),
+            'truncated': max(len(self.cards), len(self.rejected_rows)) > preview_limit,
+        }
+
+
+def _parse_bulk_line(line: str) -> tuple[str, str]:
+    sides: list[list[str]] = [[], []]
+    side = 0
+    index = 0
+    while index < len(line):
+        if line.startswith(r'\||', index):
+            sides[side].append('||')
+            index += 3
+        elif line.startswith(r'\\', index):
+            sides[side].append('\\')
+            index += 2
+        elif side == 0 and line.startswith('||', index):
+            side = 1
+            index += 2
+        else:
+            sides[side].append(line[index])
+            index += 1
+    return ''.join(sides[0]).strip(), ''.join(sides[1]).strip()
+
+
 def _ensure_capacity(deck: CardDeck, incoming: int, max_cards: int | None) -> None:
     if max_cards is not None and len(deck) + incoming > max_cards:
         raise CardLimitExceeded(f'Максимум карточек в колоде: {max_cards}')
+
+
+def preview_csv_import(
+    file_bytes: bytes,
+    delimiter: str = 'auto',
+    has_header: bool = False,
+) -> CsvImportPreview:
+    text = file_bytes.decode('utf-8-sig')
+    delimiters = {'comma': ',', 'semicolon': ';', 'tab': '\t'}
+    if delimiter == 'auto':
+        try:
+            dialect = csv.Sniffer().sniff(text[:4096], delimiters=',;\t')
+            selected_delimiter = dialect.delimiter
+        except csv.Error:
+            sample = text[:4096]
+            selected_delimiter = max(',;\t', key=sample.count)
+    elif delimiter in delimiters:
+        selected_delimiter = delimiters[delimiter]
+    else:
+        raise ValueError('Unsupported CSV delimiter')
+
+    cards: list[Card] = []
+    rejected: list[dict] = []
+    reader = csv.reader(io.StringIO(text), delimiter=selected_delimiter)
+    for row_index, row in enumerate(reader, start=1):
+        if row_index == 1 and has_header:
+            continue
+        if not row or not any(cell.strip() for cell in row):
+            continue
+        if len(row) > 2:
+            rejected.append({
+                'row': row_index,
+                'reason': 'Ожидалось не более двух колонок',
+            })
+            continue
+        front = row[0].strip() if row else ''
+        back = row[1].strip() if len(row) > 1 else ''
+        if front or back:
+            cards.append(Card(front=front, back=back))
+    return CsvImportPreview(tuple(cards), tuple(rejected), selected_delimiter)
 
 
 class AddCard:
@@ -49,11 +137,7 @@ class AddCardsBulk:
             line = line.strip()
             if not line:
                 continue
-            if '|' in line:
-                parts = line.split('|', 1)
-                front, back = parts[0].strip(), parts[1].strip()
-            else:
-                front, back = line, ''
+            front, back = _parse_bulk_line(line)
             new_cards.append(Card(front=front, back=back))
         def add_all(deck: CardDeck):
             _ensure_capacity(deck, len(new_cards), self.max_cards)
@@ -74,17 +158,13 @@ class ImportCsv:
     def execute(
         self, deck_id: str, file_bytes: bytes,
         expected_version: int | None = None,
+        delimiter: str = 'auto',
+        has_header: bool = False,
     ) -> int:
-        text = file_bytes.decode('utf-8-sig')
-        reader = csv.reader(io.StringIO(text))
-        new_cards = []
-        for row in reader:
-            if not row:
-                continue
-            front = row[0].strip() if len(row) > 0 else ''
-            back = row[1].strip() if len(row) > 1 else ''
-            if front or back:
-                new_cards.append(Card(front=front, back=back))
+        preview = preview_csv_import(file_bytes, delimiter, has_header)
+        if preview.rejected_rows:
+            raise CsvValidationError(preview)
+        new_cards = list(preview.cards)
         def add_all(deck: CardDeck):
             _ensure_capacity(deck, len(new_cards), self.max_cards)
             for card in new_cards:

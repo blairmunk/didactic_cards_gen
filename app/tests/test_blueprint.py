@@ -51,7 +51,7 @@ def test_card_html_workflow(client, repo, deck_id):
     assert response.status_code == 302
     assert repo.load_cards(deck_id).cards[0].front == "Question"
 
-    client.post(f"/deck/{deck_id}/add_cards_bulk", data={"bulk": "Q2 | A2"})
+    client.post(f"/deck/{deck_id}/add_cards_bulk", data={"bulk": "Q2 || A2"})
     second_id = repo.load_cards(deck_id).cards[1].id
     edit_page = client.get(f"/deck/{deck_id}/edit_card/{second_id}")
     assert edit_page.status_code == 200
@@ -102,6 +102,58 @@ def test_csv_import_and_encoding_error(client, repo, deck_id):
     assert "Ошибка кодировки" in response.text
 
 
+def test_csv_preview_is_read_only_and_reports_validation(client, repo, deck_id):
+    response = client.post(
+        f"/api/deck/{deck_id}/preview_csv",
+        data={
+            "csv_file": (io.BytesIO(b"front;back\nQ;A\nbad;row;extra"), "cards.csv"),
+            "has_header": "on",
+            "delimiter": "auto",
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 200
+    assert response.json["accepted_count"] == 1
+    assert response.json["rejected_count"] == 1
+    assert len(repo.load_cards(deck_id)) == 0
+
+    imported = client.post(
+        f"/deck/{deck_id}/import_csv",
+        data={
+            "csv_file": (io.BytesIO(b"Q;A\nbad;row;extra"), "cards.csv"),
+            "delimiter": "semicolon",
+        },
+        content_type="multipart/form-data",
+    )
+    assert imported.status_code == 400
+    assert len(repo.load_cards(deck_id)) == 0
+
+
+def test_csv_preview_validates_file_encoding_dialect_and_deck(client, deck_id):
+    assert client.post(f"/api/deck/{deck_id}/preview_csv").status_code == 400
+    invalid_encoding = client.post(
+        f"/api/deck/{deck_id}/preview_csv",
+        data={"csv_file": (io.BytesIO(b"\xff\xfe"), "bad.csv")},
+        content_type="multipart/form-data",
+    )
+    assert invalid_encoding.status_code == 400
+    invalid_dialect = client.post(
+        f"/api/deck/{deck_id}/preview_csv",
+        data={
+            "csv_file": (io.BytesIO(b"Q,A"), "cards.csv"),
+            "delimiter": "pipes",
+        },
+        content_type="multipart/form-data",
+    )
+    assert invalid_dialect.status_code == 400
+    missing_deck = client.post(
+        "/api/deck/missing/preview_csv",
+        data={"csv_file": (io.BytesIO(b"Q,A"), "cards.csv")},
+        content_type="multipart/form-data",
+    )
+    assert missing_deck.status_code == 404
+
+
 def test_api_card_workflow(client, deck_id):
     added = client.post(
         f"/api/deck/{deck_id}/add_card", json={"front": "A", "back": "1"}
@@ -149,6 +201,9 @@ def test_generate_preview_success_and_failure(client, repo, deck_id, app, app_fa
     empty = client.post(f"/deck/{deck_id}/generate")
     assert "Добавьте хотя бы одну карточку" in empty.text
     assert "Добавьте хотя бы одну карточку" in client.post(
+        f"/deck/{deck_id}/preview_pdf"
+    ).text
+    assert "Добавьте хотя бы одну карточку" in client.post(
         f"/deck/{deck_id}/preview_latex"
     ).text
 
@@ -161,6 +216,11 @@ def test_generate_preview_success_and_failure(client, repo, deck_id, app, app_fa
     assert generated.mimetype == "application/pdf"
     assert generated.data.startswith(b"%PDF")
     assert len(app.config["RENDERER"].decks[-1]) == 8
+
+    inline_preview = client.post(f"/deck/{deck_id}/preview_pdf")
+    assert inline_preview.status_code == 200
+    assert inline_preview.mimetype == "application/pdf"
+    assert inline_preview.headers["Content-Disposition"].startswith("inline;")
 
     failing_repo = app_fail_compiler.config["REPO"]
     failing_deck = failing_repo.create_deck("Fail")
@@ -346,6 +406,13 @@ def test_security_headers_are_added(client):
     assert response.headers['X-Frame-Options'] == 'DENY'
     assert response.headers['Referrer-Policy'] == 'no-referrer'
     assert "object-src 'none'" in response.headers['Content-Security-Policy']
+    assert "frame-src 'self' blob:" in response.headers['Content-Security-Policy']
+
+
+def test_local_favicon_is_served(client):
+    response = client.get('/cards/static/cards/favicon.svg')
+    assert response.status_code == 200
+    assert response.mimetype == 'image/svg+xml'
 
 
 def test_request_size_limit_is_enforced(client, app, deck_id):

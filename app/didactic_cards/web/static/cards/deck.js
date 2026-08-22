@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', function() {
         addCard:    '/api/deck/' + DECK_ID + '/add_card',
         deleteCard: '/api/deck/' + DECK_ID + '/delete_card/',
         reorder:    '/api/deck/' + DECK_ID + '/reorder',
+        previewCsv: '/api/deck/' + DECK_ID + '/preview_csv',
         editPage:   '/deck/' + DECK_ID + '/edit_card/',
     };
 
@@ -23,6 +24,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (previewDiv) previewDiv.style.display = view === 'preview' ? '' : 'none';
         document.getElementById('btn-view-table').classList.toggle('active', view === 'table');
         document.getElementById('btn-view-preview').classList.toggle('active', view === 'preview');
+        document.getElementById('btn-view-table').setAttribute('aria-pressed', view === 'table');
+        document.getElementById('btn-view-preview').setAttribute('aria-pressed', view === 'preview');
 
         if (view === 'preview' && !mathjaxRendered) {
             mathjaxRendered = true;
@@ -58,6 +61,25 @@ document.addEventListener('DOMContentLoaded', function() {
         document.querySelectorAll('input[name="version"]').forEach(function(input) {
             input.value = version;
         });
+    }
+
+    const mathStatus = document.getElementById('math-status');
+    const mathScript = document.getElementById('MathJax-script');
+    function reportMathReady() {
+        if (window.MathJax && MathJax.startup && MathJax.startup.promise) {
+            MathJax.startup.promise.then(function() {
+                mathStatus.textContent = 'Формулы готовы';
+            }).catch(function() {
+                mathStatus.textContent = 'Не удалось отобразить формулы';
+            });
+        }
+    }
+    if (mathScript) {
+        mathScript.addEventListener('load', reportMathReady);
+        mathScript.addEventListener('error', function() {
+            mathStatus.textContent = 'Не удалось загрузить локальный MathJax';
+        });
+        reportMathReady();
     }
 
     function renumberRows() {
@@ -105,8 +127,8 @@ document.addEventListener('DOMContentLoaded', function() {
         div.innerHTML =
             '<span class="card-number">#' + (index + 1) + '</span>' +
             '<span class="card-actions">' +
-            '    <a href="' + API.editPage + cardData.id + '" title="Редактировать">✏️</a>' +
-            '    <a href="#" class="delete-btn" data-card-id="' + cardData.id + '" title="Удалить">🗑️</a>' +
+            '    <a href="' + API.editPage + cardData.id + '" aria-label="Редактировать карточку" title="Редактировать">✏️</a>' +
+            '    <a href="#" class="delete-btn" data-card-id="' + cardData.id + '" aria-label="Удалить карточку" title="Удалить">🗑️</a>' +
             '</span>' +
             '<div class="preview-card-inner">' +
             '    <div class="preview-side preview-front">' +
@@ -189,13 +211,13 @@ document.addEventListener('DOMContentLoaded', function() {
         tr.draggable = true;
         tr.dataset.cardId = card.id;
         tr.innerHTML =
-            '<td class="drag-handle" title="Перетащите для сортировки">⠿</td>' +
+            '<td class="drag-handle" tabindex="0" role="button" aria-label="Переместить карточку; стрелки вверх и вниз меняют порядок" title="Перетащите или используйте стрелки для сортировки">⠿</td>' +
             '<td class="row-number">' + (index + 1) + '</td>' +
             '<td class="card-text">' + escapeHtml(card.front) + '</td>' +
             '<td class="card-text">' + escapeHtml(card.back) + '</td>' +
             '<td class="actions">' +
-            '    <a href="' + API.editPage + card.id + '" title="Редактировать">✏️</a>' +
-            '    <a href="#" class="delete-btn" data-card-id="' + card.id + '" title="Удалить">🗑️</a>' +
+            '    <a href="' + API.editPage + card.id + '" aria-label="Редактировать карточку" title="Редактировать">✏️</a>' +
+            '    <a href="#" class="delete-btn" data-card-id="' + card.id + '" aria-label="Удалить карточку" title="Удалить">🗑️</a>' +
             '</td>';
         tbody.appendChild(tr);
         attachRowDragEvents(tr);
@@ -243,11 +265,165 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.querySelectorAll('.delete-btn').forEach(attachDeleteEvent);
 
+    // ── Read-only CSV preview ──
+
+    const csvForm = document.getElementById('csv-import-form');
+    const csvPreviewButton = document.getElementById('csv-preview-button');
+    if (csvForm && csvPreviewButton) {
+        csvPreviewButton.addEventListener('click', async function() {
+            const result = document.getElementById('csv-preview-result');
+            result.textContent = 'Проверка…';
+            csvPreviewButton.disabled = true;
+            try {
+                const response = await fetch(API.previewCsv, {
+                    method: 'POST',
+                    body: new FormData(csvForm)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    result.textContent = data.error || 'Не удалось проверить CSV';
+                    return;
+                }
+                result.replaceChildren();
+                const summary = document.createElement('p');
+                summary.textContent = 'Принято: ' + data.accepted_count +
+                    '; отклонено: ' + data.rejected_count +
+                    '; разделитель: ' + JSON.stringify(data.delimiter);
+                result.appendChild(summary);
+                const list = document.createElement('ol');
+                data.cards.forEach(function(card) {
+                    const item = document.createElement('li');
+                    item.textContent = card.front + ' → ' + card.back;
+                    list.appendChild(item);
+                });
+                result.appendChild(list);
+                if (data.rejected_count > 0) {
+                    const warning = document.createElement('p');
+                    warning.className = 'error-message';
+                    warning.textContent = 'Исправьте отклонённые строки до импорта.';
+                    result.appendChild(warning);
+                }
+            } catch (error) {
+                console.error(error);
+                result.textContent = 'Ошибка сети';
+            } finally {
+                csvPreviewButton.disabled = false;
+            }
+        });
+    }
+
+    // ── Exact generated-PDF preview ──
+
+    const pdfPreviewForm = document.getElementById('pdf-preview-form');
+    const pdfPreviewDialog = document.getElementById('pdf-preview-dialog');
+    const pdfPreviewFrame = document.getElementById('pdf-preview-frame');
+    const pdfPreviewClose = document.getElementById('pdf-preview-close');
+    let pdfPreviewUrl = null;
+    if (pdfPreviewForm && pdfPreviewDialog) {
+        pdfPreviewForm.addEventListener('submit', async function(event) {
+            event.preventDefault();
+            const button = pdfPreviewForm.querySelector('button[type="submit"]');
+            button.disabled = true;
+            button.textContent = 'Генерация…';
+            try {
+                const response = await fetch(pdfPreviewForm.action, {
+                    method: 'POST', body: new FormData(pdfPreviewForm)
+                });
+                if (!response.ok) {
+                    alert('Не удалось создать PDF-превью (HTTP ' + response.status + ')');
+                    return;
+                }
+                if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+                pdfPreviewUrl = URL.createObjectURL(await response.blob());
+                pdfPreviewFrame.src = pdfPreviewUrl;
+                pdfPreviewDialog.showModal();
+            } catch (error) {
+                console.error(error);
+                alert('Ошибка сети при создании PDF-превью');
+            } finally {
+                button.disabled = false;
+                button.textContent = '🔎 PDF-превью';
+            }
+        });
+        pdfPreviewClose.addEventListener('click', function() {
+            pdfPreviewDialog.close();
+        });
+        pdfPreviewDialog.addEventListener('close', function() {
+            pdfPreviewFrame.removeAttribute('src');
+            if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
+            pdfPreviewUrl = null;
+        });
+    }
+
     // ── Drag & Drop ──
 
     var dragSrcRow = null;
 
+    function restoreRowOrder(previousRows) {
+        const tbody = document.getElementById('cards-tbody');
+        previousRows.forEach(function(previousRow) {
+            tbody.appendChild(previousRow);
+        });
+        renumberRows();
+        rebuildPreviewOrder();
+    }
+
+    async function persistRowOrder(previousRows) {
+        const tbody = document.getElementById('cards-tbody');
+        const newRows = Array.from(tbody.querySelectorAll('tr'));
+        const order = newRows.map(function(r) { return r.dataset.cardId; });
+        tbody.setAttribute('aria-busy', 'true');
+        document.body.classList.add('is-saving');
+        try {
+            const resp = await fetch(API.reorder, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ order: order, version: deckVersion })
+            });
+            const data = await resp.json();
+            if (!resp.ok) {
+                alert(data.error || 'Ошибка сортировки');
+                restoreRowOrder(previousRows);
+                if (resp.status === 409) updateDeckVersion(data.current_version);
+                return false;
+            }
+            renumberRows();
+            rebuildPreviewOrder();
+            updateDeckVersion(data.deck_version);
+            showSuccess('Порядок сохранён');
+            return true;
+        } catch (error) {
+            console.error(error);
+            restoreRowOrder(previousRows);
+            return false;
+        } finally {
+            tbody.removeAttribute('aria-busy');
+            document.body.classList.remove('is-saving');
+        }
+    }
+
     function attachRowDragEvents(row) {
+        const handle = row.querySelector('.drag-handle');
+        if (handle) {
+            handle.addEventListener('keydown', async function(event) {
+                if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+                event.preventDefault();
+                const tbody = document.getElementById('cards-tbody');
+                const previousRows = Array.from(tbody.querySelectorAll('tr'));
+                const currentIndex = previousRows.indexOf(row);
+                const targetIndex = event.key === 'ArrowUp'
+                    ? currentIndex - 1 : currentIndex + 1;
+                if (targetIndex < 0 || targetIndex >= previousRows.length) return;
+                if (event.key === 'ArrowUp') {
+                    tbody.insertBefore(row, previousRows[targetIndex]);
+                } else {
+                    tbody.insertBefore(row, previousRows[targetIndex].nextSibling);
+                }
+                await persistRowOrder(previousRows);
+                handle.focus();
+            });
+        }
+
         row.addEventListener('dragstart', function(e) {
             dragSrcRow = row;
             row.classList.add('dragging');
@@ -292,39 +468,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 tbody.insertBefore(dragSrcRow, row);
             }
 
-            const newRows = Array.from(tbody.querySelectorAll('tr'));
-            const order = newRows.map(function(r) { return r.dataset.cardId; });
-
-            function restorePreviousOrder() {
-                previousRows.forEach(function(previousRow) {
-                    tbody.appendChild(previousRow);
-                });
-                renumberRows();
-                rebuildPreviewOrder();
-            }
-
-            try {
-                const resp = await fetch(API.reorder, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ order: order, version: deckVersion })
-                });
-                const data = await resp.json();
-
-                if (resp.ok) {
-                    renumberRows();
-                    rebuildPreviewOrder();
-                    updateDeckVersion(data.deck_version);
-                    showSuccess('Порядок сохранён');
-                } else {
-                    alert(data.error || 'Ошибка сортировки');
-                    restorePreviousOrder();
-                    if (resp.status === 409) updateDeckVersion(data.current_version);
-                }
-            } catch (err) {
-                console.error(err);
-                restorePreviousOrder();
-            }
+            await persistRowOrder(previousRows);
         });
     }
 

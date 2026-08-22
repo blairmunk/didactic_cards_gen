@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ deck.name }} — Карточки</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
+    <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
     <script>
     window.MathJax = {
         tex: {
@@ -14,7 +15,7 @@
         startup: { typeset: false }
     };
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" async></script>
+    <script id="MathJax-script" src="{{ url_for('cards.static', filename='vendor/mathjax/tex-mml-chtml.js') }}" async></script>
 </head>
 <body data-deck-id="{{ deck.id }}" data-deck-version="{{ deck.version }}" data-cards-per-page="{{ cards_per_page }}">
     <div class="breadcrumb">
@@ -31,6 +32,7 @@
     {% endif %}
 
     <div class="success-message" id="success-msg"></div>
+    <div id="math-status" class="status-message" role="status" aria-live="polite">Загрузка формул…</div>
 
     <!-- Информационная панель -->
     <div class="info-panel">
@@ -77,13 +79,23 @@
     <!-- Импорт CSV -->
     <h2>Импорт из CSV</h2>
     <div class="card-form">
-        <form action="{{ url_for('cards.import_csv', deck_id=deck.id) }}" method="post" enctype="multipart/form-data">
+        <form id="csv-import-form" action="{{ url_for('cards.import_csv', deck_id=deck.id) }}" method="post" enctype="multipart/form-data">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="version" value="{{ deck.version }}">
             <label for="csv_file">Файл CSV (<code>лицевая;оборотная</code>):</label>
             <input type="file" name="csv_file" id="csv_file" accept=".csv">
+            <label for="delimiter">Разделитель:</label>
+            <select name="delimiter" id="delimiter">
+                <option value="auto">Определить автоматически</option>
+                <option value="semicolon">Точка с запятой</option>
+                <option value="comma">Запятая</option>
+                <option value="tab">Табуляция</option>
+            </select>
+            <label><input type="checkbox" name="has_header"> Первая строка — заголовок</label>
             <br><br>
+            <button type="button" id="csv-preview-button" class="btn-secondary">Проверить файл</button>
             <button type="submit" class="btn-primary">📂 Импортировать</button>
+            <div id="csv-preview-result" class="import-preview" role="status" aria-live="polite"></div>
         </form>
     </div>
 
@@ -92,8 +104,8 @@
     <h2>Добавленные карточки</h2>
 
     <div class="view-toggle">
-        <button id="btn-view-table" class="active" onclick="switchView('table')">📋 Таблица</button>
-        <button id="btn-view-preview" onclick="switchView('preview')">🃏 Превью</button>
+        <button id="btn-view-table" class="active" aria-pressed="true" onclick="switchView('table')">📋 Таблица</button>
+        <button id="btn-view-preview" aria-pressed="false" onclick="switchView('preview')">🃏 Превью</button>
     </div>
 
     <!-- Таблица -->
@@ -111,13 +123,13 @@
             <tbody id="cards-tbody">
                 {% for card in cards %}
                 <tr draggable="true" data-card-id="{{ card.id }}">
-                    <td class="drag-handle" title="Перетащите для сортировки">⠿</td>
+                    <td class="drag-handle" tabindex="0" role="button" aria-label="Переместить карточку {{ loop.index }}; стрелки вверх и вниз меняют порядок" title="Перетащите или используйте стрелки для сортировки">⠿</td>
                     <td class="row-number">{{ loop.index }}</td>
                     <td class="card-text">{{ card.front }}</td>
                     <td class="card-text">{{ card.back }}</td>
                     <td class="actions">
-                        <a href="{{ url_for('cards.edit_card', deck_id=deck.id, card_id=card.id) }}" title="Редактировать">✏️</a>
-                        <a href="#" class="delete-btn" data-card-id="{{ card.id }}" title="Удалить">🗑️</a>
+                        <a href="{{ url_for('cards.edit_card', deck_id=deck.id, card_id=card.id) }}" aria-label="Редактировать карточку {{ loop.index }}" title="Редактировать">✏️</a>
+                        <a href="#" class="delete-btn" data-card-id="{{ card.id }}" aria-label="Удалить карточку {{ loop.index }}" title="Удалить">🗑️</a>
                     </td>
                 </tr>
                 {% endfor %}
@@ -132,8 +144,8 @@
             <div class="preview-card" data-card-id="{{ card.id }}">
                 <span class="card-number">#{{ loop.index }}</span>
                 <span class="card-actions">
-                    <a href="{{ url_for('cards.edit_card', deck_id=deck.id, card_id=card.id) }}" title="Редактировать">✏️</a>
-                    <a href="#" class="delete-btn" data-card-id="{{ card.id }}" title="Удалить">🗑️</a>
+                    <a href="{{ url_for('cards.edit_card', deck_id=deck.id, card_id=card.id) }}" aria-label="Редактировать карточку {{ loop.index }}" title="Редактировать">✏️</a>
+                    <a href="#" class="delete-btn" data-card-id="{{ card.id }}" aria-label="Удалить карточку {{ loop.index }}" title="Удалить">🗑️</a>
                 </span>
                 <div class="preview-card-inner">
                     <div class="preview-side preview-front">
@@ -163,6 +175,10 @@
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn-primary">📄 Сгенерировать PDF</button>
             </form>
+            <form id="pdf-preview-form" action="{{ url_for('cards.preview_pdf', deck_id=deck.id) }}" method="post" style="display:inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-secondary">🔎 PDF-превью</button>
+            </form>
             <form action="{{ url_for('cards.reset', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="version" value="{{ deck.version }}">
@@ -171,6 +187,14 @@
             </form>
         </div>
     </div>
+
+    <dialog id="pdf-preview-dialog" class="pdf-preview-dialog">
+        <div class="pdf-preview-toolbar">
+            <strong>Печатный PDF: стороны идут front/back по физическим листам</strong>
+            <button type="button" id="pdf-preview-close" aria-label="Закрыть PDF-превью">×</button>
+        </div>
+        <iframe id="pdf-preview-frame" title="Предпросмотр печатного PDF"></iframe>
+    </dialog>
 
     <script src="{{ url_for('cards.static', filename='cards/deck.js') }}"></script>
 </body>

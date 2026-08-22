@@ -37,7 +37,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Подтверждённые дефекты зафиксированы строгими `xfail`-тестами, а их актуальный статус отмечается непосредственно в [плане ревизии](docs/REMEDIATION_PLAN.md). Текущая база — 225 проходящих тестов, 5 строгих `xfail`, branch coverage 98.66%. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с порогом branch coverage 98%.
+Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 242 проходящих теста без `xfail`, branch coverage 98.84%; отдельный Chromium E2E запускается marker-ом `browser`. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с порогом branch coverage 98%.
 
 Проверить целостность хранилища без автоматического исправления:
 
@@ -59,7 +59,7 @@ app/
     adapters/                # SQLite, legacy JSON/recovery, LaTeX, compilers
     web/                     # routes, шаблоны, CSS и JavaScript
   data/                      # cards.sqlite3 и сохранённый legacy JSON
-  tests/                     # unit, web, integration и xfail-контракты
+  tests/                     # unit, web, TeX/PDF integration и browser E2E
 docs/
   USER_AND_TECHNICAL_GUIDE.md
   REMEDIATION_PLAN.md

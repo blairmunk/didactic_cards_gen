@@ -198,6 +198,12 @@ class CardDeck:
         self.cards.clear()
 
     def padded(self, cards_per_page: int) -> list[Card]:
+        if (
+            isinstance(cards_per_page, bool)
+            or not isinstance(cards_per_page, int)
+            or cards_per_page <= 0
+        ):
+            raise ValueError('cards_per_page must be a positive integer')
         total = len(self.cards)
         if total == 0:
             return []
