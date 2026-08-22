@@ -1,5 +1,9 @@
+import io
+
 from flask import (Blueprint, render_template, request, redirect,
-                   url_for, make_response, jsonify, current_app)
+                   url_for, jsonify, current_app, send_file)
+
+from ..adapters.latex_renderer import UnsafeLatexError
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
@@ -175,20 +179,28 @@ def generate(deck_id):
                                cards_per_page=_cards_per_page(),
                                error='Добавьте хотя бы одну карточку!')
 
-    result = GenerateDocument(
-        _repo(), _renderer(), _compiler(), _cards_per_page()
-    ).execute(deck_id)
+    try:
+        result = GenerateDocument(
+            _repo(), _renderer(), _compiler(), _cards_per_page()
+        ).execute(deck_id)
+    except UnsafeLatexError as error:
+        return render_template(
+            'cards/error.html', deck=deck_info,
+            errors=[str(error)], full_log=''
+        ), 422
 
     if not result.success:
         return render_template('cards/error.html', deck=deck_info,
                                errors=[result.log],
-                               full_log=result.log)
+                               full_log=result.log), 422
 
     filename = f'{deck_info.name}.pdf' if deck_info else 'cards.pdf'
-    response = make_response(result.pdf_data)
-    response.headers['Content-Type'] = 'application/pdf'
-    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
-    return response
+    return send_file(
+        io.BytesIO(result.pdf_data),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=filename,
+    )
 
 
 @cards_bp.route('/deck/<deck_id>/preview_latex', methods=['POST'])
@@ -203,7 +215,13 @@ def preview_latex(deck_id):
                                cards_per_page=_cards_per_page(),
                                error='Добавьте хотя бы одну карточку!')
 
-    latex = PreviewDocument(_repo(), _renderer(), _cards_per_page()).execute(deck_id)
+    try:
+        latex = PreviewDocument(_repo(), _renderer(), _cards_per_page()).execute(deck_id)
+    except UnsafeLatexError as error:
+        return render_template(
+            'cards/error.html', deck=deck_info,
+            errors=[str(error)], full_log=''
+        ), 422
     return render_template('cards/result.html', deck=deck_info, latex_content=latex)
 
 

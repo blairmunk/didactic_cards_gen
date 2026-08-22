@@ -3,7 +3,11 @@ import re
 import shutil
 import subprocess
 from didactic_cards.domain.entities import Card, CardDeck
-from didactic_cards.adapters.latex_renderer import LatexRenderer, escape_latex
+from didactic_cards.adapters.latex_renderer import (
+    LatexRenderer,
+    UnsafeLatexError,
+    escape_latex,
+)
 from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 
 
@@ -225,14 +229,37 @@ class TestLatexRenderer:
         assert without_marks.count(r'\registrationmarks') == 1  # macro definition only
         assert with_marks.count(r'\registrationmarks') == 3  # definition + two pages
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason='BUG-SEC-001: arbitrary TeX commands are preserved inside user math delimiters',
-    )
     def test_math_input_cannot_close_document_or_read_files(self):
-        escaped = escape_latex(r'$x\end{document}\input{/etc/passwd}$')
-        assert r'\end{document}' not in escaped
-        assert r'\input' not in escaped
+        with pytest.raises(UnsafeLatexError):
+            escape_latex(r'$x\end{document}\input{/etc/passwd}$')
+
+    @pytest.mark.parametrize(
+        'formula',
+        [
+            r'$x=\frac{-b\pm\sqrt{D}}{2a}$',
+            r'$$\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$$',
+            r'$\alpha \leq \beta \quad \text{при } n\ge 1$',
+            r'$x\;y$',
+        ],
+    )
+    def test_supported_math_allowlist_is_preserved(self, formula):
+        assert escape_latex(formula) == formula
+
+    @pytest.mark.parametrize(
+        'formula',
+        [
+            r'$\write18{touch /tmp/pwned}$',
+            r'$\include{/etc/passwd}$',
+            r'$\def\x{unsafe}$',
+            '$x% hidden command$',
+            '$x_{1$',
+            '$x}1$',
+            '$x\\$',
+        ],
+    )
+    def test_unsupported_or_malformed_math_is_rejected(self, formula):
+        with pytest.raises(UnsafeLatexError):
+            escape_latex(formula)
 
 
 @pytest.mark.integration

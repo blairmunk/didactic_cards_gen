@@ -64,10 +64,6 @@ class TestPdfLatexCompiler:
         assert result.success is False
         assert 'not found' in result.log
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason='BUG-PDF-001: a partial PDF is reported as success even when pdflatex exits non-zero',
-    )
     def test_nonzero_exit_code_is_failure_even_if_partial_pdf_exists(self):
         compiler = PdfLatexCompiler()
 
@@ -81,10 +77,6 @@ class TestPdfLatexCompiler:
             result = compiler.compile('broken')
         assert result.success is False
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason='BUG-SEC-002: compiler does not explicitly disable TeX shell escape',
-    )
     def test_shell_escape_is_explicitly_disabled(self):
         compiler = PdfLatexCompiler()
         seen = {}

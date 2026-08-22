@@ -23,11 +23,13 @@ class XelatexCompiler(PdfCompiler):
                 f.write(latex_source)
 
             try:
-                subprocess.run(
+                completed = subprocess.run(
                     [self.xelatex_path, '-interaction=nonstopmode',
+                     '-no-shell-escape', '-halt-on-error', '-file-line-error',
                      '-output-directory', tmpdir, tex_path],
                     capture_output=True,
                     timeout=self.timeout,
+                    cwd=tmpdir,
                 )
             except (subprocess.TimeoutExpired, FileNotFoundError) as e:
                 return CompileResult(success=False, pdf_data=b'', log=str(e))
@@ -37,7 +39,14 @@ class XelatexCompiler(PdfCompiler):
                 with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
                     log = f.read()
 
-            if os.path.exists(pdf_path):
+            process_output = b'\n'.join(
+                output for output in (completed.stdout, completed.stderr)
+                if isinstance(output, bytes) and output
+            ).decode('utf-8', errors='replace')
+            if process_output and not log:
+                log = process_output
+
+            if completed.returncode == 0 and os.path.exists(pdf_path):
                 with open(pdf_path, 'rb') as f:
                     pdf_data = f.read()
                 return CompileResult(success=True, pdf_data=pdf_data, log=log)

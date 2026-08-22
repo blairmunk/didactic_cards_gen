@@ -6,6 +6,8 @@ import io
 
 import pytest
 
+from didactic_cards.adapters.latex_renderer import LatexRenderer
+
 
 def test_deck_crud_pages(client, repo):
     assert client.get("/").status_code == 200
@@ -154,7 +156,7 @@ def test_generate_preview_success_and_failure(client, repo, deck_id, app, app_fa
         f"/api/deck/{failing_deck.id}/add_card", json={"front": "Q", "back": "A"}
     )
     failure = failing_client.post(f"/deck/{failing_deck.id}/generate")
-    assert failure.status_code == 200
+    assert failure.status_code == 422
     assert "pdflatex error" in failure.text
 
 
@@ -237,10 +239,6 @@ def test_card_limit_is_enforced(client, app, deck_id):
     ).status_code == 409
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-HTTP-002: compilation failures are returned as HTTP 200",
-)
 def test_compile_failure_has_error_status(app_fail_compiler):
     repo = app_fail_compiler.config["REPO"]
     deck = repo.create_deck("Fail")
@@ -249,13 +247,31 @@ def test_compile_failure_has_error_status(app_fail_compiler):
     assert client.post(f"/deck/{deck.id}/generate").status_code >= 400
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-HTTP-003: Cyrillic filename is not encoded as RFC 5987 and breaks a real WSGI server",
-)
 def test_pdf_content_disposition_is_latin1_safe(client, deck_id):
     client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
     response = client.post(f"/deck/{deck_id}/generate")
     disposition = response.headers["Content-Disposition"]
     disposition.encode("latin-1")
     assert "filename*=" in disposition
+
+
+def test_unsafe_math_is_rejected_before_compilation(client, app, deck_id):
+    app.config['RENDERER'] = LatexRenderer(cards_per_row=2, rows_per_page=4)
+    client.post(
+        f"/api/deck/{deck_id}/add_card",
+        json={"front": r"$\input{/etc/passwd}$", "back": "A"},
+    )
+    response = client.post(f"/deck/{deck_id}/generate")
+    assert response.status_code == 422
+    assert "не поддерживается" in response.text
+    assert app.config['COMPILER'].sources == []
+
+
+def test_unsafe_math_preview_is_rejected(client, app, deck_id):
+    app.config['RENDERER'] = LatexRenderer(cards_per_row=2, rows_per_page=4)
+    client.post(
+        f"/api/deck/{deck_id}/add_card",
+        json={"front": r"$\write18{unsafe}$", "back": "A"},
+    )
+    response = client.post(f"/deck/{deck_id}/preview_latex")
+    assert response.status_code == 422

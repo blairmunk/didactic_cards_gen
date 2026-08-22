@@ -41,6 +41,17 @@ def test_xelatex_no_output_is_failure():
     assert result.log == ''
 
 
+def test_xelatex_uses_process_output_when_log_is_missing():
+    completed = MagicMock(returncode=1, stdout=b'xelatex stdout', stderr=b'xelatex stderr')
+    with patch(
+        'didactic_cards.adapters.xelatex_compiler.subprocess.run',
+        return_value=completed,
+    ):
+        result = XelatexCompiler().compile('broken')
+    assert 'xelatex stdout' in result.log
+    assert 'xelatex stderr' in result.log
+
+
 def test_xelatex_missing_binary_is_failure():
     with patch(
         'didactic_cards.adapters.xelatex_compiler.subprocess.run',
@@ -49,3 +60,16 @@ def test_xelatex_missing_binary_is_failure():
         result = XelatexCompiler().compile('source')
     assert result.success is False
     assert 'missing' in result.log
+
+
+def test_xelatex_uses_safe_failure_flags():
+    seen = {}
+
+    def fake_run(cmd, **_kwargs):
+        seen['cmd'] = cmd
+        return MagicMock(returncode=1)
+
+    with patch('didactic_cards.adapters.xelatex_compiler.subprocess.run', side_effect=fake_run):
+        XelatexCompiler().compile('source')
+    assert '-no-shell-escape' in seen['cmd']
+    assert '-halt-on-error' in seen['cmd']

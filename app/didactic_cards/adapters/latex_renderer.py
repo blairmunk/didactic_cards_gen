@@ -10,6 +10,56 @@ from ..domain.printing import DuplexMode, build_sheets
 
 PT_TO_CM = 2.54 / 72.27
 
+ALLOWED_MATH_COMMANDS = {
+    'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta',
+    'theta', 'vartheta', 'iota', 'kappa', 'lambda', 'mu', 'nu', 'xi', 'pi',
+    'varpi', 'rho', 'varrho', 'sigma', 'varsigma', 'tau', 'upsilon', 'phi',
+    'varphi', 'chi', 'psi', 'omega', 'Gamma', 'Delta', 'Theta', 'Lambda', 'Xi',
+    'Pi', 'Sigma', 'Upsilon', 'Phi', 'Psi', 'Omega',
+    'frac', 'dfrac', 'tfrac', 'sqrt', 'pm', 'mp', 'cdot', 'times', 'div',
+    'le', 'leq', 'ge', 'geq', 'ne', 'neq', 'approx', 'equiv', 'sim', 'simeq',
+    'infty', 'sum', 'prod', 'int', 'iint', 'iiint', 'lim', 'min', 'max',
+    'sin', 'cos', 'tan', 'cot', 'arcsin', 'arccos', 'arctan', 'log', 'ln', 'exp',
+    'left', 'right', 'big', 'Big', 'bigg', 'Bigg', 'overline', 'underline',
+    'vec', 'hat', 'bar', 'dot', 'ddot', 'mathrm', 'mathbf', 'mathit', 'mathbb',
+    'mathcal', 'operatorname', 'text', 'quad', 'qquad', 'ldots', 'cdots', 'dots',
+}
+ALLOWED_MATH_SYMBOL_COMMANDS = {',', ';', ':', '!', ' ', '{', '}', '|', '_'}
+
+
+class UnsafeLatexError(ValueError):
+    """Raised when a formula contains TeX outside the supported math subset."""
+
+
+def _validate_math(content: str) -> None:
+    if '\x00' in content or '%' in content or '#' in content:
+        raise UnsafeLatexError('Формула содержит запрещённые TeX-символы')
+
+    command_pattern = re.compile(r'\\([A-Za-z]+|.)', flags=re.DOTALL)
+    for match in command_pattern.finditer(content):
+        command = match.group(1)
+        if command.isalpha():
+            allowed = command in ALLOWED_MATH_COMMANDS
+        else:
+            allowed = command in ALLOWED_MATH_SYMBOL_COMMANDS
+        if not allowed:
+            raise UnsafeLatexError(f'Команда \\{command} не поддерживается')
+
+    without_commands = command_pattern.sub('', content)
+    if '\\' in without_commands:
+        raise UnsafeLatexError('Формула содержит незавершённую TeX-команду')
+
+    balance = 0
+    for char in without_commands:
+        if char == '{':
+            balance += 1
+        elif char == '}':
+            balance -= 1
+            if balance < 0:
+                raise UnsafeLatexError('В формуле нарушен баланс фигурных скобок')
+    if balance:
+        raise UnsafeLatexError('В формуле нарушен баланс фигурных скобок')
+
 
 def escape_latex(text: str) -> str:
     """Экранирование спецсимволов LaTeX, с сохранением математических формул."""
@@ -18,8 +68,10 @@ def escape_latex(text: str) -> str:
     result = []
     for part in parts:
         if part.startswith('$$') and part.endswith('$$'):
+            _validate_math(part[2:-2])
             result.append(part)
         elif part.startswith('$') and part.endswith('$') and len(part) > 1:
+            _validate_math(part[1:-1])
             result.append(part)
         else:
             result.append(_escape_text(part))

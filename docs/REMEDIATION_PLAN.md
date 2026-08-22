@@ -19,6 +19,12 @@
   - [ ] Добавить overflow preflight.
   - [ ] Выполнить raster golden tests и физический прогон.
 - [ ] Этап 2: безопасная граница TeX/HTTP.
+  - [x] Математические команды ограничены allowlist; malicious/malformed fixtures отклоняются до компиляции.
+  - [x] `pdflatex`/`xelatex` используют `-no-shell-escape -halt-on-error -file-line-error`.
+  - [x] Non-zero return code не считается успешным даже при наличии partial PDF.
+  - [x] Unicode download names отдаются через RFC 5987; проверены реальным Werkzeug/curl запросом.
+  - [x] Validation/compile errors больше не маскируются HTTP 200.
+  - [ ] Добавить CSRF, quotas, safe external logs и security headers.
 - [ ] Этап 3: транзакционное persistence.
 - [ ] Этап 4: импорт и web UX.
 - [ ] Этап 5: функциональное развитие.
@@ -31,8 +37,8 @@
 
 1. ✅ Для двух и более листов все лицевые страницы выводились раньше всех оборотных (`BUG-PRINT-001`). Исправлено через модель физических листов и interleaved page sequence.
 2. ✅ Ячейки оборота зеркалились по столбцам и одновременно безусловно поворачивались на 180° (`BUG-PRINT-002`). Теперь transform зависит от long/short edge и не переворачивает текст.
-3. Кириллица в названии колоды попадает в `Content-Disposition` без RFC 5987 и роняет реальный Werkzeug WSGI при отдаче уже собранного PDF (`BUG-HTTP-003`).
-4. TeX внутри математических delimiters проходит без allowlist; компилятор не получает явный `-no-shell-escape` (`BUG-SEC-001/002`).
+3. ✅ Кириллица в названии колоды попадала в `Content-Disposition` без RFC 5987 и роняла реальный Werkzeug WSGI (`BUG-HTTP-003`). Исправлено через `send_file/download_name`.
+4. ✅ TeX внутри математических delimiters проходил без allowlist, а компилятор не получал явный `-no-shell-escape` (`BUG-SEC-001/002`). Оба слоя закрыты тестируемым контрактом.
 5. JSON обновляется неатомарно и без lock. Сбой посередине записи способен обнулить рабочий файл; повреждённый JSON затем молча трактуется как пустой (`BUG-DATA-002/004`).
 
 ## 2. Как проводилась проверка
@@ -45,7 +51,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 127 проходящих тестов и 24 строгих `xfail`-контракта для подтверждённых дефектов. Общий branch coverage составляет 99.57% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 147 проходящих тестов и 19 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 99.60% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -56,9 +62,9 @@
 | ~~BUG-PRINT-001~~ ✅ | `LatexRenderer` формировал все fronts, затем все backs. | Выполнено: `Sheet` отделяет физическую модель, PDF идёт `F1,B1,F2,B2…`; unit и реальный четырёхстраничный TeX test проходят. | Автоматизированная часть выполнена; physical matrix остаётся в этапе 1. |
 | ~~BUG-PRINT-002~~ ✅ | Оборот сочетал horizontal mirror с `rotatebox{180}`. | Выполнено: явные long-edge/short-edge permutations без безусловного поворота текста. | Unit-transform tests проходят; физическая проверка обоих режимов остаётся. |
 | ~~BUG-PRINT-003~~ ✅ | `9.3 × 6.3` были размером inner minipage, а не cut box. | Выполнено: content box вычисляется вычитанием frame inset, `fboxrule` фиксирован явно. | Векторная рамка реального PDF измеряется через `mutool` с допуском 0.1 мм. |
-| BUG-HTTP-003 | Русское имя PDF вызывает `UnicodeEncodeError` на реальном dev-сервере. | Использовать Werkzeug `send_file(..., download_name=...)` или ASCII fallback + `filename*=UTF-8''...`; нормализовать CR/LF/quotes. | Скачиваются имена на русском, emoji и кавычки; каждый header кодируется/отдаётся WSGI без ошибки. |
-| BUG-SEC-001 | Команды внутри `$...$` не экранируются. | Перейти от regex к ограниченному parser/allowlist математических команд; запретить `\input`, `\include`, `\write`, `\openin`, `\csname`, macro definitions и закрытие окружений. | Набор malicious fixtures не читает файлы, не меняет документ и даёт понятную validation error. |
-| BUG-SEC-002 | Нет явного `-no-shell-escape`. | Добавить `-no-shell-escape`, `-halt-on-error`, изолированный env/TEXMF; в deployment компилировать непривилегированным worker/container. | Команда компилятора проверена тестом; файловый и процессный sandbox подтверждён integration-тестом. |
+| ~~BUG-HTTP-003~~ ✅ | Русское имя PDF вызывало `UnicodeEncodeError` на реальном dev-сервере. | Выполнено через Werkzeug `send_file(..., download_name=...)`, который формирует ASCII fallback и RFC 5987 `filename*`. | Реальный Werkzeug/curl запрос вернул 200, PDF и Latin-1-safe headers. |
+| ~~BUG-SEC-001~~ ✅ | Команды внутри `$...$` не фильтровались. | Выполнено: allowlist учебной математики, balance validation, запрет опасных команд/символов до compiler call. | Malicious и malformed fixtures возвращают 422; compiler mock не вызывается. |
+| ~~BUG-SEC-002~~ ✅ | Не было явного `-no-shell-escape`. | Выполнено для pdfLaTeX и XeLaTeX: `-no-shell-escape -halt-on-error -file-line-error`. | Аргументы и реальные TeX builds проверяются тестами; отдельный OS/container sandbox ещё нужен для production. |
 | BUG-DATA-002 | Invalid JSON превращается в `[]`, скрывая аварию и открывая путь к перезаписи. | Различать missing/empty/corrupt; на corrupt прекращать запись, показывать recovery UI, сохранять `.broken-<timestamp>`. | Повреждение одного байта не уничтожает исходник и даёт диагностируемую ошибку. |
 | BUG-DATA-004 | `_write_json` пишет прямо в live-файл. | `NamedTemporaryFile` в том же каталоге → flush/fsync → `os.replace`; file lock на read-modify-write. | Fault-injection на каждом шаге сохраняет либо старую, либо полностью новую валидную версию. |
 
@@ -73,13 +79,13 @@
 | BUG-UI-001 | Drag-and-drop вызывает `renumberRows()` до построения permutation и всегда отправляет `[0,1,…]`. | Хранить stable card IDs; собрать old indices до mutation; optimistic UI откатывать без `location.reload`. Добавить browser E2E reorder + reload. |
 | BUG-IMP-001 | UI обещает `||`, parser делит по первому одиночному `|`. | Единый parser с exact delimiter `||`, escaping/quoting и preview результата до commit. |
 | BUG-IMP-002 | UI обещает `;`, `csv.reader` использует `,`. | `csv.Sniffer` с явным выбором delimiter; UTF-8/UTF-8-BOM; header toggle; preview и отчёт rejected rows. |
-| BUG-PDF-001 | Наличие partial PDF считается успехом даже при non-zero exit code. | Проверять return code, `%PDF`/EOF, `-halt-on-error`; лог объединять с stderr. |
+| ~~BUG-PDF-001~~ ✅ | Partial PDF считался успехом даже при non-zero exit code. | Выполнено: обязательный return code 0, наличие PDF, safe failure flags и fallback stdout/stderr log. |
 | BUG-LIMIT-001 | `max_cards=200` не используется. | Централизованный quota в use case для single/bulk/CSV/API; транзакционно отклонять превышение. |
 | BUG-CONF-001 | База зависит от process CWD. | Абсолютный `DATA_DIR` из env/Flask instance path; миграционная диагностика найденных `data/`. |
 | ~~BUG-CONF-002~~ ✅ / BUG-VAL-001 | Layout теперь проверяет positive/finite dimensions, frame inset и попадание сетки в printable A4. Прямой вызов use case с `cards_per_page=0` ещё требует отдельной защиты. | Config/renderer validation выполнена; добавить invariant в `CardDeck.padded`/use case. |
 | BUG-CONF-003 | `create_app()` не принимает config/dependencies. | `create_app(config=None, repo=None, renderer=None, compiler=None)`; env mapping; production/test profiles. |
 | BUG-HTTP-001 | Удаление карточки доступно через GET. | Только `DELETE`/POST + CSRF; ссылки заменить form/button. |
-| BUG-HTTP-002 | Ошибка компиляции возвращает 200. | 422 для invalid TeX, 503/504 для tool failure/timeout; request ID без полного internal log пользователю. |
+| ~~BUG-HTTP-002~~ ✅ | Ошибка компиляции возвращала 200. | Validation и compile failure теперь возвращают 422. Разделение tool failure на 503/504 и sanitization log остаются в этапе 2. |
 | BUG-WEB-002/003 | Число вместо string и `order=None` дают необработанные исключения. | Schema validation (dataclass/Pydantic/ручная) до use case; единый JSON error handler. |
 | BUG-SEC-003 | HTML-формы не имеют CSRF. | CSRF token, SameSite cookie, POST/DELETE only; contract-тест без token получает 400/403. |
 
