@@ -101,6 +101,17 @@ class DeckRepository(ABC):
             self.save_cards(deck_id, deck)
         return result
 
+    @abstractmethod
+    def create_deck_with_cards(
+        self,
+        name: str,
+        description: str,
+        parent_id: str | None,
+        cards: CardDeck,
+    ) -> Deck:
+        """Create a complete deck atomically."""
+        ...
+
 
 class DocumentRenderer(ABC):
 

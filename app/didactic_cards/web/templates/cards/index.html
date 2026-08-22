@@ -167,6 +167,8 @@
     <div id="generate-buttons" {% if not cards %}style="display:none"{% endif %}>
         <h2>Генерация</h2>
         <div class="buttons">
+            <a href="{{ url_for('cards.export_deck_as_json', deck_id=deck.id) }}" class="btn-secondary" download>Экспорт JSON</a>
+            <a href="{{ url_for('cards.export_deck_as_csv', deck_id=deck.id) }}" class="btn-secondary" download>Экспорт CSV</a>
             <form action="{{ url_for('cards.preview_latex', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn-secondary">👁 Предпросмотр LaTeX</button>

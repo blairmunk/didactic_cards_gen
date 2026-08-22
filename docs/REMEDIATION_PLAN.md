@@ -44,6 +44,8 @@
   - [x] Устранён stray HTML, добавлены favicon, focus styles и aria-label для icon actions.
   - [ ] Финально прогнать Chromium E2E после исправления offline resource assertion; расширить PDF overlay/accessibility review.
 - [ ] Этап 5: функциональное развитие.
+  - [x] Versioned JSON/CSV export и транзакционный import-копия с lineage.
+  - [ ] Printer profiles, split front/back output, расширенная layout-конфигурация и preflight.
 
 ## 1. Итог аудита
 
@@ -67,7 +69,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 242 проходящих теста, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.84% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 260 проходящих тестов, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.87% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -197,7 +199,7 @@
 1. Профили принтеров и calibration wizard с измеряемыми X/Y offsets.
 2. Выбор формата A4/Letter, ориентации, сетки, внешнего размера карточки, margins/gaps/bleed/safe area.
 3. Двусторонний PDF и два отдельных файла front/back для принтеров без duplex.
-4. Импорт/экспорт колоды в versioned JSON/CSV; backup/restore.
+4. [x] Импорт/экспорт колоды в versioned JSON schema 1 и UTF-8-BOM CSV; импорт создаёт транзакционную копию с lineage, validation/quota и без перезаписи существующих данных. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
 5. Шаблоны оформления: шрифт, выравнивание, размер, фон, изображения/QR после отдельной security-модели.
 6. Auto-fit и preflight: overflow, missing glyphs, unsupported formulas, printable-area warning.
 7. Поиск, теги, массовое редактирование, undo/trash вместо немедленного удаления.

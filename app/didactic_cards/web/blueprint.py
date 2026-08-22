@@ -19,6 +19,12 @@ from ..use_cases.deck_use_cases import (
     ListDecks, GetDeckInfo, CreateDeck, UpdateDeck,
     DeleteDeck, CloneDeck
 )
+from ..use_cases.deck_transfer import (
+    DeckTransferError,
+    export_deck_csv,
+    export_deck_json,
+    import_deck_json,
+)
 
 cards_bp = Blueprint(
     'cards', __name__,
@@ -194,6 +200,52 @@ def delete_deck(deck_id):
 def clone_deck(deck_id):
     CloneDeck(_repo()).execute(deck_id)
     return redirect(url_for('cards.decks_list'))
+
+
+@cards_bp.route('/deck/<deck_id>/export.json', methods=['GET'])
+def export_deck_as_json(deck_id):
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
+        return redirect(url_for('cards.decks_list'))
+    return send_file(
+        io.BytesIO(export_deck_json(_repo(), deck_id)),
+        mimetype='application/json',
+        as_attachment=True,
+        download_name=f'{deck.name}.didactic-cards.json',
+    )
+
+
+@cards_bp.route('/deck/<deck_id>/export.csv', methods=['GET'])
+def export_deck_as_csv(deck_id):
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
+        return redirect(url_for('cards.decks_list'))
+    return send_file(
+        io.BytesIO(export_deck_csv(_repo(), deck_id)),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=f'{deck.name}.csv',
+    )
+
+
+@cards_bp.route('/import_deck', methods=['POST'])
+def import_deck():
+    file = request.files.get('deck_file')
+    if not file or file.filename == '':
+        return render_template(
+            'cards/decks.html',
+            decks=ListDecks(_repo()).execute(),
+            error='Выберите JSON export-файл.',
+        ), 400
+    try:
+        deck = import_deck_json(_repo(), file.stream.read(), _max_cards())
+    except DeckTransferError as error:
+        return render_template(
+            'cards/decks.html',
+            decks=ListDecks(_repo()).execute(),
+            error=str(error),
+        ), 400
+    return redirect(url_for('cards.deck_view', deck_id=deck.id))
 
 
 # ─── Карточки внутри колоды ─────────────────────────────────────────

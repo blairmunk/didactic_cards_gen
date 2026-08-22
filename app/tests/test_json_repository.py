@@ -214,6 +214,18 @@ def test_clone_removes_card_file_when_metadata_write_fails(json_repo, monkeypatc
     assert set(json_repo.cards_dir.glob("*.json")) == before
 
 
+def test_atomic_deck_import_removes_cards_when_metadata_fails(json_repo, monkeypatch):
+    def fail_metadata(_deck):
+        raise OSError("metadata write failed")
+
+    monkeypatch.setattr(json_repo, "_save_deck_meta_unlocked", fail_metadata)
+    with pytest.raises(OSError, match="metadata write failed"):
+        json_repo.create_deck_with_cards(
+            "Imported", "", "source", CardDeck([Card(front="Q")])
+        )
+    assert list(json_repo.cards_dir.glob("*.json")) == []
+
+
 def test_default_mutation_contract_saves_only_changed_data(json_repo, monkeypatch):
     deck = json_repo.create_deck("Base contract")
     saves = []

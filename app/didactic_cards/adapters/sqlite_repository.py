@@ -398,6 +398,24 @@ class SqliteRepository(DeckRepository, CardRepository):
             self._replace_cards(connection, clone.id, cloned_cards)
             return clone
 
+    def create_deck_with_cards(
+        self,
+        name: str,
+        description: str,
+        parent_id: str | None,
+        cards: CardDeck,
+    ) -> Deck:
+        deck = Deck(
+            name=name,
+            description=description,
+            parent_id=parent_id,
+            card_ids=[card.id for card in cards.cards],
+        )
+        with self._transaction(write=True) as connection:
+            self._insert_deck(connection, deck)
+            self._replace_cards(connection, deck.id, cards)
+            return self._get_deck(connection, deck.id)
+
     def load_cards(self, deck_id: str) -> CardDeck:
         with self._transaction() as connection:
             return self._load_cards(connection, deck_id)

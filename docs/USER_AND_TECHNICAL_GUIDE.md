@@ -127,6 +127,15 @@ app/data/legacy-json-backup-v1/ # снимок источника перед п�
 
 Карточки во всех HTML/API URL адресуются стабильным UUID, а не текущим номером строки. Колода имеет монотонную `version`: UI отправляет прочитанную версию с add/edit/delete/reorder/reset, и устаревшая вкладка получает HTTP 409 вместо перезаписи более свежего состояния. Drag-and-drop отправляет упорядоченный список UUID; при сетевой/validation ошибке DOM возвращается в прежний порядок.
 
+### Экспорт и безопасный импорт колоды
+
+В редакторе доступны два download:
+
+- versioned JSON schema 1 содержит deck/card UUID, timestamps, тексты и lineage;
+- UTF-8-BOM CSV использует `;`, header `front;back` и стандартное quoting для delimiter/multiline.
+
+На странице списка колод JSON export можно импортировать обратно. Импорт никогда не перезаписывает существующую колоду: создаются новые UUID, `parent_id` новой колоды и карточек указывают на исходные UUID. Schema/type/quota/duplicate-ID validation выполняется до записи, а создание deck + cards проходит одной транзакцией; при ошибке не остаётся пустой или частично импортированной колоды.
+
 Если `cards.sqlite3` ещё нет, а `decks.json` существует, приложение сначала запускает полный read-only JSON integrity scan. Набор импортируется в одной SQLite-транзакции с сохранением UUID, порядка, timestamps и clone lineage. Единственное безопасно восстанавливаемое расхождение — устаревший денормализованный `card_ids`: порядок берётся из канонического card-файла, JSON не переписывается, а warning сохраняется в `repository_meta`. Любая structural/missing/orphan/duplicate ошибка блокирует импорт. Перед импортом исходники копируются в `legacy-json-backup-v1`; исходные JSON не удаляются. Метка в SQLite не позволяет повторно импортировать позднее изменённый JSON. База с более новой неизвестной версией схемы отклоняется без downgrade.
 
 Legacy JSON schema 1 и его инструменты atomic replace/lock/`.bak` сохранены для аудита и восстановления миграционного источника. Они больше не являются рабочим backend после успешного импорта.
@@ -189,7 +198,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 242 проходящих теста, 0 `xfail`, общий branch coverage 98.84%. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
+Текущее состояние основного набора: 260 проходящих тестов, 0 `xfail`, общий branch coverage 98.87%. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
 
 Скриншоты можно переснять на запущенном приложении:
 

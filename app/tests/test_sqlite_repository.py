@@ -78,6 +78,26 @@ def test_clone_lineage_delete_and_legacy_aliases(sqlite_repo):
     assert sqlite_repo.load_cards(clone.id).cards[0].front == 'Q'
 
 
+def test_create_deck_with_cards_is_one_transaction(sqlite_repo, monkeypatch):
+    source_card = Card(front='Imported')
+    created = sqlite_repo.create_deck_with_cards(
+        'Imported deck', 'Description', 'source-deck', CardDeck([source_card])
+    )
+    assert created.parent_id == 'source-deck'
+    assert created.card_ids == [source_card.id]
+
+    original_replace = sqlite_repo._replace_cards
+
+    def fail_replace(*_args):
+        raise RuntimeError('rollback import')
+
+    monkeypatch.setattr(sqlite_repo, '_replace_cards', fail_replace)
+    with pytest.raises(RuntimeError, match='rollback import'):
+        sqlite_repo.create_deck_with_cards('Failed', '', None, CardDeck())
+    monkeypatch.setattr(sqlite_repo, '_replace_cards', original_replace)
+    assert [deck.name for deck in sqlite_repo.list_decks()] == ['Imported deck']
+
+
 def test_unknown_deck_duplicate_and_cross_deck_cards_are_rejected(sqlite_repo):
     with pytest.raises(DeckNotFoundError):
         sqlite_repo.load_cards('missing')

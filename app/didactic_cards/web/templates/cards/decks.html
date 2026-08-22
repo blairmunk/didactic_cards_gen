@@ -10,6 +10,10 @@
 <body>
     <h1>📚 Мои колоды</h1>
 
+    {% if error %}
+    <div class="error-message">{{ error }}</div>
+    {% endif %}
+
     <!-- Создать колоду -->
     <h2>Создать новую колоду</h2>
     <div class="card-form">
@@ -26,6 +30,16 @@
                 </div>
             </div>
             <button type="submit" class="btn-primary">➕ Создать колоду</button>
+        </form>
+    </div>
+
+    <h2>Импортировать колоду</h2>
+    <div class="card-form">
+        <form method="post" action="{{ url_for('cards.import_deck') }}" enctype="multipart/form-data">
+            <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+            <label for="deck_file">Versioned JSON export:</label>
+            <input type="file" name="deck_file" id="deck_file" accept=".json,application/json" required>
+            <button type="submit" class="btn-primary">Импортировать безопасную копию</button>
         </form>
     </div>
 

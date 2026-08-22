@@ -8,6 +8,7 @@ import pytest
 
 from didactic_cards.adapters.json_repository import RepositoryCorruptionError
 from didactic_cards.adapters.latex_renderer import LatexRenderer
+from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import CompileResult
 
 
@@ -38,6 +39,45 @@ def test_deck_crud_pages(client, repo):
 
     client.post(f"/deck/{deck.id}/delete")
     assert repo.get_deck(deck.id) is None
+
+
+def test_deck_json_csv_export_and_import(client, repo, deck_id):
+    card = Card(front='Q; quoted', back='A')
+    repo.save_cards(deck_id, CardDeck([card]))
+
+    json_response = client.get(f'/deck/{deck_id}/export.json')
+    assert json_response.status_code == 200
+    assert json_response.mimetype == 'application/json'
+    assert 'filename*=' in json_response.headers['Content-Disposition']
+    csv_response = client.get(f'/deck/{deck_id}/export.csv')
+    assert csv_response.status_code == 200
+    assert csv_response.data.startswith(b'\xef\xbb\xbf')
+
+    imported = client.post(
+        '/import_deck',
+        data={
+            'deck_file': (io.BytesIO(json_response.data), 'deck.json'),
+        },
+        content_type='multipart/form-data',
+    )
+    assert imported.status_code == 302
+    imported_deck = repo.list_decks()[0]
+    assert imported_deck.id != deck_id
+    assert imported_deck.parent_id == deck_id
+    assert repo.load_cards(imported_deck.id).cards[0].parent_id == card.id
+
+
+def test_deck_import_and_export_validation_errors(client):
+    assert client.get('/deck/missing/export.json').status_code == 302
+    assert client.get('/deck/missing/export.csv').status_code == 302
+    assert client.post('/import_deck').status_code == 400
+    broken = client.post(
+        '/import_deck',
+        data={'deck_file': (io.BytesIO(b'{broken'), 'deck.json')},
+        content_type='multipart/form-data',
+    )
+    assert broken.status_code == 400
+    assert 'Некорректный JSON' in broken.text
 
 
 def test_card_html_workflow(client, repo, deck_id):

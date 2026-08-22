@@ -482,6 +482,28 @@ class JsonRepository(DeckRepository, CardRepository):
                 raise
             return new_deck
 
+    def create_deck_with_cards(
+        self,
+        name: str,
+        description: str,
+        parent_id: str | None,
+        cards: CardDeck,
+    ) -> Deck:
+        with self._transaction():
+            deck = Deck(
+                name=name,
+                description=description,
+                parent_id=parent_id,
+                card_ids=[card.id for card in cards.cards],
+            )
+            self._write_json(self._cards_path(deck.id), cards.to_list())
+            try:
+                self._save_deck_meta_unlocked(deck)
+            except Exception:
+                self._cards_path(deck.id).unlink(missing_ok=True)
+                raise
+            return deck
+
     # DeckRepository: cards
 
     def load_cards(self, deck_id: str) -> CardDeck:
