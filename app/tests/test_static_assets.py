@@ -84,3 +84,11 @@ def test_link_buttons_receive_the_same_base_styles_as_buttons():
     base_rule = stylesheet.split('button, .btn,', 1)[1].split('{', 1)[0]
     assert '.btn-secondary' in base_rule
     assert '.btn-danger' in base_rule
+
+
+def test_raster_golden_regeneration_script_and_fixtures_exist():
+    root = Path(__file__).parents[2]
+    script = root / 'scripts' / 'update_print_goldens.py'
+    assert script.exists()
+    assert (Path(__file__).parent / 'golden/duplex-1.pbm').stat().st_size > 60_000
+    assert (Path(__file__).parent / 'golden/duplex-2.pbm').stat().st_size > 60_000

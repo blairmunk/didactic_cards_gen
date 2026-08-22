@@ -234,7 +234,13 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 341 проходящий тест, 0 `xfail`, общий branch coverage 98.59%. В него входят schema 1→2 migration и unit/HTTP-контракты observability/production health, сохраняемых профилей, auto-fit, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, длинная сторона уменьшается до `footnotesize`, а чрезмерная оставляет адресный overflow-маркер. Отдельный Chromium E2E успешно проходит create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate и проверку offline resources на временной SQLite-базе.
+Текущее состояние основного набора: 343 проходящих теста, 0 `xfail`, общий branch coverage 98.59%. В него входят schema 1→2 migration и unit/HTTP-контракты observability/production health, сохраняемых профилей, auto-fit, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, длинная сторона уменьшается до `footnotesize`, а чрезмерная оставляет адресный overflow-маркер. Front/back страницы дополнительно сравниваются с монохромными raster golden fixtures 596×842 с допуском 0.2% пикселей. Отдельный Chromium E2E успешно проходит полный offline workflow на временной SQLite-базе.
+
+Golden fixtures обновляются осознанной отдельной командой после визуальной проверки изменения раскладки:
+
+```bash
+python scripts/update_print_goldens.py
+```
 
 Скриншоты можно переснять на запущенном приложении:
 

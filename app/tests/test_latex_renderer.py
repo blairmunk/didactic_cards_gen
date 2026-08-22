@@ -2,6 +2,7 @@ import pytest
 import re
 import shutil
 import subprocess
+from pathlib import Path
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.adapters.latex_renderer import (
     LatexRenderer,
@@ -9,6 +10,28 @@ from didactic_cards.adapters.latex_renderer import (
     escape_latex,
 )
 from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
+
+
+GOLDEN_DIR = Path(__file__).with_name('golden')
+
+
+def _read_pbm(path: Path) -> tuple[int, int, bytes]:
+    data = path.read_bytes()
+    match = re.match(rb'P4\s+(\d+)\s+(\d+)\s', data)
+    assert match, f'Invalid raw PBM fixture: {path}'
+    return int(match.group(1)), int(match.group(2)), data[match.end():]
+
+
+def _pixel_difference(first: Path, second: Path) -> float:
+    width, height, first_pixels = _read_pbm(first)
+    other_width, other_height, second_pixels = _read_pbm(second)
+    assert (width, height) == (other_width, other_height)
+    assert len(first_pixels) == len(second_pixels)
+    differing_bits = sum(
+        (left ^ right).bit_count()
+        for left, right in zip(first_pixels, second_pixels)
+    )
+    return differing_bits / (width * height)
 
 
 class TestEscapeLatex:
@@ -408,6 +431,43 @@ def test_real_latex_auto_fits_before_minimum_size_overflow():
     assert without_fit.success, without_fit.log
     assert 'DIDACTIC-CARDS-AUTOFIT' not in without_fit.log
     assert 'DIDACTIC-CARDS-OVERFLOW:1:front' in without_fit.log
+
+
+@pytest.mark.integration
+def test_duplex_raster_matches_golden_with_pixel_tolerance(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('mutool'):
+        pytest.skip('pdflatex/mutool are required for raster golden tests')
+
+    deck = CardDeck([
+        Card(front=f'ЛИЦО {number} ВЕРХ', back=f'ОБОРОТ {number} ВЕРХ')
+        for number in range(1, 5)
+    ])
+    renderer = LatexRenderer(
+        cards_per_row=2,
+        rows_per_page=2,
+        back_border=True,
+        registration_marks=True,
+    )
+    result = PdfLatexCompiler().compile(renderer.render(deck))
+    assert result.success, result.log
+    pdf_path = tmp_path / 'duplex.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    subprocess.run(
+        [
+            'mutool', 'draw', '-q', '-r', '72', '-F', 'pbm',
+            '-o', str(tmp_path / 'duplex-%d.pbm'), str(pdf_path), '1-2',
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    for page_number in (1, 2):
+        difference = _pixel_difference(
+            GOLDEN_DIR / f'duplex-{page_number}.pbm',
+            tmp_path / f'duplex-{page_number}.pbm',
+        )
+        assert difference <= 0.002
 
 
 @pytest.mark.integration

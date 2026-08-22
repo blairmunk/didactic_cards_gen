@@ -17,7 +17,8 @@
   - [x] Добавлены независимые offsets сторон (±10 мм) и опциональные registration marks.
   - [x] Реальный PDF geometry test измеряет векторную рамку через `mutool` с допуском 0.1 мм.
   - [x] Добавлен read-only preflight: TeX-измерение vertical overflow с card/side mapping, horizontal overflow и missing glyphs из log, printable-area и empty/partial-sheet warnings.
-  - [ ] Выполнить raster golden tests и физический прогон.
+  - [x] Добавлен двухстраничный PBM raster golden diff реального PDF с pixel tolerance 0.2% и явным regeneration script.
+  - [ ] Выполнить физический прогон на целевых принтерах.
 - [x] Этап 2: безопасная граница TeX/HTTP на уровне приложения.
   - [x] Математические команды ограничены allowlist; malicious/malformed fixtures отклоняются до компиляции.
   - [x] `pdflatex`/`xelatex` используют `-no-shell-escape -halt-on-error -file-line-error`.
@@ -80,7 +81,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 341 проходящий тест, 0 `xfail`, один отдельно успешно пройденный browser E2E; общий branch coverage составляет 98.59% при обязательном CI-пороге 98%. Chromium-сценарий проходит весь workflow и подтверждает только локальные resource URLs. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 343 проходящих теста, 0 `xfail`, один отдельно успешно пройденный browser E2E; общий branch coverage составляет 98.59% при обязательном CI-пороге 98%. Chromium-сценарий проходит весь workflow и подтверждает только локальные resource URLs. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF/raster-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -160,7 +161,7 @@
 5. Добавить independent horizontal/vertical calibration offsets для оборота, printer profile и тестовую страницу.
 6. Включить crop/registration marks; border — отдельная опция, не влияющая на размеры.
 7. Добавить overflow policy: reject/warn, auto-fit до минимального font size, либо controlled clipping.
-8. Проверять PDF MediaBox=A4 и реальные bounding boxes с PyMuPDF/pypdf; raster visual diff хранить как golden artifacts.
+8. [x] Проверять PDF MediaBox/реальные vector bounds и raster visual diff: geometry измеряется `mutool`, front/back PBM хранятся как golden artifacts и сравниваются с допуском 0.2%.
 
 Минимальная матрица тестов:
 
