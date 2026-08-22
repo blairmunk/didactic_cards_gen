@@ -167,21 +167,34 @@ class LatexRenderer(DocumentRenderer):
         self.cards_per_page = cards_per_row * rows_per_page
 
     def render(self, deck: CardDeck) -> str:
+        return self._render_sides(deck, ('front', 'back'))
+
+    def render_fronts(self, deck: CardDeck) -> str:
+        return self._render_sides(deck, ('front',))
+
+    def render_backs(self, deck: CardDeck) -> str:
+        return self._render_sides(deck, ('back',))
+
+    def _render_sides(self, deck: CardDeck, sides: tuple[str, ...]) -> str:
         sheets = build_sheets(
             deck.cards,
             rows=self.rows_per_page,
             columns=self.cards_per_row,
             duplex_mode=self.duplex_mode,
         )
+        pages: list[tuple[int, str, tuple[Card, ...]]] = []
+        for sheet_index, sheet in enumerate(sheets):
+            if 'front' in sides:
+                pages.append((sheet_index, 'front', sheet.front_slots))
+            if 'back' in sides:
+                pages.append((sheet_index, 'back', sheet.back_slots))
 
         latex = self._preamble()
-        for sheet_index, sheet in enumerate(sheets):
-            latex += f'\n% ===== Лист {sheet_index + 1}: передние стороны =====\n'
-            latex += self._render_page(sheet.front_slots, side='front')
-            latex += r'\newpage' + '\n'
-            latex += f'\n% ===== Лист {sheet_index + 1}: задние стороны =====\n'
-            latex += self._render_page(sheet.back_slots, side='back')
-            if sheet_index < len(sheets) - 1:
+        for page_index, (sheet_index, side, cards) in enumerate(pages):
+            side_label = 'передние стороны' if side == 'front' else 'задние стороны'
+            latex += f'\n% ===== Лист {sheet_index + 1}: {side_label} =====\n'
+            latex += self._render_page(cards, side=side)
+            if page_index < len(pages) - 1:
                 latex += r'\newpage' + '\n'
 
         latex += '\n\\end{document}'

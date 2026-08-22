@@ -264,6 +264,28 @@ class GenerateDocument:
         return self.compiler.compile(latex)
 
 
+class GenerateDocumentSide(GenerateDocument):
+    def __init__(
+        self,
+        repo: DeckRepository,
+        renderer: DocumentRenderer,
+        compiler: PdfCompiler,
+        cards_per_page: int,
+        side: str,
+    ):
+        super().__init__(repo, renderer, compiler, cards_per_page)
+        if side not in {'front', 'back'}:
+            raise ValueError('side must be front or back')
+        self.side = side
+
+    def execute(self, deck_id: str) -> CompileResult:
+        deck = self.repo.load_cards(deck_id)
+        padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
+        method_name = 'render_fronts' if self.side == 'front' else 'render_backs'
+        render_side = getattr(self.renderer, method_name)
+        return self.compiler.compile(render_side(padded_deck))
+
+
 class PreviewDocument:
     def __init__(self, repo: DeckRepository, renderer: DocumentRenderer,
                  cards_per_page: int):

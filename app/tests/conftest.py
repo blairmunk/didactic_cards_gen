@@ -24,9 +24,21 @@ class FakeCompiler(PdfCompiler):
 class FakeRenderer(DocumentRenderer):
     def __init__(self):
         self.decks: list[CardDeck] = []
+        self.sides: list[str] = []
 
     def render(self, deck: CardDeck) -> str:
         self.decks.append(deck)
+        self.sides.append("duplex")
+        return r"\documentclass{article}\begin{document}fake\end{document}"
+
+    def render_fronts(self, deck: CardDeck) -> str:
+        self.decks.append(deck)
+        self.sides.append("front")
+        return r"\documentclass{article}\begin{document}fake\end{document}"
+
+    def render_backs(self, deck: CardDeck) -> str:
+        self.decks.append(deck)
+        self.sides.append("back")
         return r"\documentclass{article}\begin{document}fake\end{document}"
 
 

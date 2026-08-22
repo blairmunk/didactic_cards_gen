@@ -8,6 +8,7 @@ from didactic_cards.use_cases.card_use_cases import (
     DeleteCard,
     EditCard,
     GenerateDocument,
+    GenerateDocumentSide,
     GetDeck,
     ImportCsv,
     PreviewDocument,
@@ -141,6 +142,31 @@ def test_generate_and_preview_pad_to_whole_sheet(repo, deck_id, app):
     assert result.success is True
     assert [len(seen) for seen in renderer.decks] == [8, 8]
     assert len(compiler.sources) == 1
+
+
+@pytest.mark.parametrize(('side', 'expected'), [('front', 'front'), ('back', 'back')])
+def test_generate_single_side_pads_and_uses_requested_renderer(
+    repo, deck_id, app, side, expected
+):
+    AddCard(repo).execute(deck_id, "Q", "A")
+    renderer = app.config["RENDERER"]
+    compiler = app.config["COMPILER"]
+
+    result = GenerateDocumentSide(
+        repo, renderer, compiler, 8, side
+    ).execute(deck_id)
+
+    assert result.success is True
+    assert len(renderer.decks[-1]) == 8
+    assert renderer.sides[-1] == expected
+    assert len(compiler.sources) == 1
+
+
+def test_generate_single_side_rejects_unknown_side(repo, app):
+    with pytest.raises(ValueError, match="front or back"):
+        GenerateDocumentSide(
+            repo, app.config["RENDERER"], app.config["COMPILER"], 8, "both"
+        )
 
 
 def test_generate_rejects_non_positive_page_capacity(repo, deck_id, app):

@@ -12,7 +12,7 @@ from ..domain.interfaces import ConcurrentModificationError
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
     EditCard, ReorderCards, ResetCards, GetDeck,
-    GenerateDocument, PreviewDocument, CardLimitExceeded,
+    GenerateDocument, GenerateDocumentSide, PreviewDocument, CardLimitExceeded,
     CsvValidationError, preview_csv_import,
 )
 from ..use_cases.deck_use_cases import (
@@ -381,7 +381,12 @@ def reset(deck_id):
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-def _generate_pdf_response(deck_id: str, *, attachment: bool):
+def _generate_pdf_response(
+    deck_id: str,
+    *,
+    attachment: bool,
+    side: str | None = None,
+):
     deck_info = GetDeckInfo(_repo()).execute(deck_id)
     card_deck = GetDeck(_repo()).execute(deck_id)
 
@@ -393,9 +398,15 @@ def _generate_pdf_response(deck_id: str, *, attachment: bool):
                                error='Добавьте хотя бы одну карточку!')
 
     try:
-        result = GenerateDocument(
-            _repo(), _renderer(), _compiler(), _cards_per_page()
-        ).execute(deck_id)
+        if side is None:
+            generator = GenerateDocument(
+                _repo(), _renderer(), _compiler(), _cards_per_page()
+            )
+        else:
+            generator = GenerateDocumentSide(
+                _repo(), _renderer(), _compiler(), _cards_per_page(), side
+            )
+        result = generator.execute(deck_id)
     except UnsafeLatexError as error:
         return render_template(
             'cards/error.html', deck=deck_info,
@@ -417,7 +428,8 @@ def _generate_pdf_response(deck_id: str, *, attachment: bool):
             full_log=result.log if current_app.debug else ''
         ), status
 
-    filename = f'{deck_info.name}.pdf' if deck_info else 'cards.pdf'
+    suffix = {'front': '-fronts', 'back': '-backs'}.get(side, '')
+    filename = f'{deck_info.name}{suffix}.pdf' if deck_info else f'cards{suffix}.pdf'
     return send_file(
         io.BytesIO(result.pdf_data),
         mimetype='application/pdf',
@@ -434,6 +446,16 @@ def generate(deck_id):
 @cards_bp.route('/deck/<deck_id>/preview_pdf', methods=['POST'])
 def preview_pdf(deck_id):
     return _generate_pdf_response(deck_id, attachment=False)
+
+
+@cards_bp.route('/deck/<deck_id>/generate/fronts', methods=['POST'])
+def generate_fronts(deck_id):
+    return _generate_pdf_response(deck_id, attachment=True, side='front')
+
+
+@cards_bp.route('/deck/<deck_id>/generate/backs', methods=['POST'])
+def generate_backs(deck_id):
+    return _generate_pdf_response(deck_id, attachment=True, side='back')
 
 
 @cards_bp.route('/deck/<deck_id>/preview_latex', methods=['POST'])

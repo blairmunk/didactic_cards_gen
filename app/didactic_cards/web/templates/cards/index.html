@@ -177,6 +177,14 @@
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn-primary">📄 Сгенерировать PDF</button>
             </form>
+            <form action="{{ url_for('cards.generate_fronts', deck_id=deck.id) }}" method="post" style="display:inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-secondary">PDF: только лица</button>
+            </form>
+            <form action="{{ url_for('cards.generate_backs', deck_id=deck.id) }}" method="post" style="display:inline">
+                <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn-secondary">PDF: только обороты</button>
+            </form>
             <form id="pdf-preview-form" action="{{ url_for('cards.preview_pdf', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn-secondary">🔎 PDF-превью</button>

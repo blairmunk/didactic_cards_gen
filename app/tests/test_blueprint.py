@@ -440,6 +440,34 @@ def test_pdf_content_disposition_is_latin1_safe(client, deck_id):
     assert "filename*=" in disposition
 
 
+@pytest.mark.parametrize(
+    ('endpoint', 'side', 'suffix'),
+    [
+        ('fronts', 'front', '-fronts.pdf'),
+        ('backs', 'back', '-backs.pdf'),
+    ],
+)
+def test_split_pdf_downloads_use_requested_side_and_filename(
+    client, app, deck_id, endpoint, side, suffix
+):
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
+
+    response = client.post(f"/deck/{deck_id}/generate/{endpoint}")
+
+    assert response.status_code == 200
+    assert response.mimetype == "application/pdf"
+    assert suffix in response.headers["Content-Disposition"]
+    assert app.config["RENDERER"].sides[-1] == side
+    assert len(app.config["RENDERER"].decks[-1]) == 8
+
+
+@pytest.mark.parametrize('endpoint', ['fronts', 'backs'])
+def test_split_pdf_rejects_empty_deck(client, deck_id, endpoint):
+    response = client.post(f"/deck/{deck_id}/generate/{endpoint}")
+    assert response.status_code == 200
+    assert "Добавьте хотя бы одну карточку" in response.text
+
+
 def test_security_headers_are_added(client):
     response = client.get('/')
     assert response.headers['X-Content-Type-Options'] == 'nosniff'

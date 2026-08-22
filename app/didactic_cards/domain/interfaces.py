@@ -119,6 +119,14 @@ class DocumentRenderer(ABC):
     def render(self, deck: CardDeck) -> str:
         ...
 
+    @abstractmethod
+    def render_fronts(self, deck: CardDeck) -> str:
+        ...
+
+    @abstractmethod
+    def render_backs(self, deck: CardDeck) -> str:
+        ...
+
 
 class PdfCompiler(ABC):
 

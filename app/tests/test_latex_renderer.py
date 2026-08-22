@@ -170,6 +170,24 @@ class TestLatexRenderer:
         assert 'Q3' in pages[2] and 'Q4' in pages[2]
         assert 'A4' in pages[3] and 'A3' in pages[3]
 
+    def test_front_only_output_contains_one_page_per_sheet(self):
+        renderer = LatexRenderer(cards_per_row=2, rows_per_page=1)
+        pages = renderer.render_fronts(self.make_deck(4)).split(r'\newpage')
+        assert len(pages) == 2
+        assert 'Q1' in pages[0] and 'Q2' in pages[0]
+        assert 'Q3' in pages[1] and 'Q4' in pages[1]
+        assert all('задние стороны' not in page for page in pages)
+        assert not any(f'A{number}' in ''.join(pages) for number in range(1, 5))
+
+    def test_back_only_output_preserves_duplex_sheet_permutation(self):
+        renderer = LatexRenderer(cards_per_row=2, rows_per_page=1)
+        pages = renderer.render_backs(self.make_deck(4)).split(r'\newpage')
+        assert len(pages) == 2
+        assert pages[0].index('A2') < pages[0].index('A1')
+        assert pages[1].index('A4') < pages[1].index('A3')
+        assert all('передние стороны' not in page for page in pages)
+        assert not any(f'Q{number}' in ''.join(pages) for number in range(1, 5))
+
     def test_long_edge_back_text_is_not_upside_down(self):
         source = LatexRenderer(cards_per_row=2, rows_per_page=1).render(self.make_deck(2))
         back_section = source.split('задние стороны', 1)[1]
@@ -314,6 +332,32 @@ def test_real_pdf_interleaves_two_physical_sheets(tmp_path):
     assert 'BACK-2' in pages[1] and 'BACK-1' in pages[1]
     assert 'FRONT-3' in pages[2] and 'FRONT-4' in pages[2]
     assert 'BACK-4' in pages[3] and 'BACK-3' in pages[3]
+
+
+@pytest.mark.integration
+def test_real_split_pdfs_have_one_page_per_physical_sheet(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdfinfo'):
+        pytest.skip('pdflatex/pdfinfo are required for the split PDF integration test')
+
+    deck = CardDeck([
+        Card(front=f'FRONT-{number}', back=f'BACK-{number}')
+        for number in range(1, 17)
+    ])
+    renderer = LatexRenderer(back_border=True)
+    compiler = PdfLatexCompiler()
+
+    for side, source in (
+        ('fronts', renderer.render_fronts(deck)),
+        ('backs', renderer.render_backs(deck)),
+    ):
+        result = compiler.compile(source)
+        assert result.success, result.log
+        pdf_path = tmp_path / f'{side}.pdf'
+        pdf_path.write_bytes(result.pdf_data)
+        info = subprocess.run(
+            ['pdfinfo', str(pdf_path)], capture_output=True, text=True, check=True
+        ).stdout
+        assert 'Pages:           2' in info
 
 
 @pytest.mark.integration
