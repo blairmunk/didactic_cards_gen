@@ -124,6 +124,7 @@ class LatexRenderer(DocumentRenderer):
         back_offset_x_mm: float = 0.0,
         back_offset_y_mm: float = 0.0,
         registration_marks: bool = False,
+        auto_fit: bool = True,
     ):
         if cards_per_row <= 0 or rows_per_page <= 0:
             raise ValueError('cards_per_row and rows_per_page must be positive')
@@ -131,6 +132,8 @@ class LatexRenderer(DocumentRenderer):
             raise ValueError('card dimensions must be positive')
         if fbox_sep_pt < 0 or fbox_rule_pt < 0:
             raise ValueError('frame spacing and rule must not be negative')
+        if not isinstance(auto_fit, bool):
+            raise ValueError('auto_fit must be boolean')
         offsets = (
             front_offset_x_mm,
             front_offset_y_mm,
@@ -164,6 +167,7 @@ class LatexRenderer(DocumentRenderer):
         self.front_offset = (front_offset_x_mm, front_offset_y_mm)
         self.back_offset = (back_offset_x_mm, back_offset_y_mm)
         self.registration_marks = registration_marks
+        self.auto_fit = auto_fit
         self.cards_per_page = cards_per_row * rows_per_page
 
     def render(self, deck: CardDeck) -> str:
@@ -229,6 +233,31 @@ class LatexRenderer(DocumentRenderer):
 
     def _preamble(self) -> str:
         back_frame = r'\fbox' if self.back_border else r'\cardblankframe'
+        if self.auto_fit:
+            fit_logic = r'''
+    \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
+        \setcardcontentbox{\small}{#3}%
+        \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
+            \setcardcontentbox{\footnotesize}{#3}%
+            \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
+                \setcardcontentbox{\scriptsize}{#3}%
+                \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
+                    \typeout{DIDACTIC-CARDS-OVERFLOW:#1:#2}%
+                \else
+                    \typeout{DIDACTIC-CARDS-AUTOFIT:#1:#2:scriptsize}%
+                \fi
+            \else
+                \typeout{DIDACTIC-CARDS-AUTOFIT:#1:#2:footnotesize}%
+            \fi
+        \else
+            \typeout{DIDACTIC-CARDS-AUTOFIT:#1:#2:small}%
+        \fi
+    \fi'''
+        else:
+            fit_logic = r'''
+    \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
+        \typeout{DIDACTIC-CARDS-OVERFLOW:#1:#2}%
+    \fi'''
         return rf'''\documentclass[a4paper,12pt]{{extarticle}}
 \usepackage{{amsmath}}
 \usepackage{{amsfonts}}
@@ -269,13 +298,13 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\frontcard}}[1]{{\cardbox{{\fbox}}{{#1}}}}
 \newcommand{{\backcard}}[1]{{\cardbox{{{back_frame}}}{{#1}}}}
 \newbox\cardcontentbox
-\newcommand{{\checkedcardcontent}}[3]{{%
+\newcommand{{\setcardcontentbox}}[2]{{%
     \setbox\cardcontentbox=\vbox{{%
-        \hsize=\cardcontentwidth\noindent #3\par
+        \hsize=\cardcontentwidth #1\noindent #2\par
     }}%
-    \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
-        \typeout{{DIDACTIC-CARDS-OVERFLOW:#1:#2}}%
-    \fi
+}}
+\newcommand{{\checkedcardcontent}}[3]{{%
+    \setcardcontentbox{{\normalsize}}{{#3}}%{fit_logic}
     \box\cardcontentbox
 }}
 \newcommand{{\registrationmarks}}{{%

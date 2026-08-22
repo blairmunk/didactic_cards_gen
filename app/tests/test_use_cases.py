@@ -246,6 +246,27 @@ def test_preflight_clean_full_sheet_and_layout_warning(repo, deck_id, app):
     ]
 
 
+def test_preflight_reports_auto_fit_as_addressable_warning(repo, deck_id, app):
+    card, _ = AddCard(repo).execute(deck_id, 'Long', 'Answer')
+
+    class AutoFitCompiler:
+        def compile(self, _source):
+            from didactic_cards.domain.interfaces import CompileResult
+            return CompileResult(
+                True, b'%PDF', 'DIDACTIC-CARDS-AUTOFIT:1:front:footnotesize'
+            )
+
+    report = PreflightDocument(
+        repo, app.config['RENDERER'], AutoFitCompiler(), 8
+    ).execute(deck_id)
+    issue = next(issue for issue in report.issues if issue.code == 'auto-fit')
+    assert report.ready is True
+    assert issue.severity == 'warning'
+    assert issue.card_id == card.id
+    assert issue.side == 'front'
+    assert 'footnotesize' in issue.message
+
+
 def test_generate_rejects_non_positive_page_capacity(repo, deck_id, app):
     AddCard(repo).execute(deck_id, "Q", "A")
     with pytest.raises(ValueError, match="cards_per_page"):

@@ -48,6 +48,7 @@ def create_app(
             back_offset_x_mm=profile.back_offset_x_mm,
             back_offset_y_mm=profile.back_offset_y_mm,
             registration_marks=profile.registration_marks,
+            auto_fit=layout.auto_fit,
         )
 
     app.config['REPO'] = repo

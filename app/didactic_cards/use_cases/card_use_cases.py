@@ -329,6 +329,9 @@ class PreflightDocument:
     OVERFLOW_MARKER = re.compile(
         r'DIDACTIC-CARDS-OVERFLOW:(\d+):(front|back)'
     )
+    AUTOFIT_MARKER = re.compile(
+        r'DIDACTIC-CARDS-AUTOFIT:(\d+):(front|back):([a-z]+)'
+    )
 
     def __init__(
         self,
@@ -405,6 +408,27 @@ class PreflightDocument:
                 code='vertical-overflow',
                 severity='error',
                 message=f'Карточка {number}: {side_label} сторона не помещается по высоте',
+                card_id=card.id,
+                card_number=number,
+                side=side,
+            ))
+
+        seen_autofit: set[tuple[int, str]] = set()
+        for match in self.AUTOFIT_MARKER.finditer(result.log):
+            number = int(match.group(1))
+            side = match.group(2)
+            size = match.group(3)
+            if number > len(deck.cards) or (number, side) in seen_autofit:
+                continue
+            seen_autofit.add((number, side))
+            card = deck.cards[number - 1]
+            side_label = 'лицевая' if side == 'front' else 'оборотная'
+            issues.append(PreflightIssue(
+                code='auto-fit',
+                severity='warning',
+                message=(
+                    f'Карточка {number}: {side_label} сторона уменьшена до {size}'
+                ),
                 card_id=card.id,
                 card_number=number,
                 side=side,

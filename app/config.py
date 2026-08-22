@@ -35,6 +35,7 @@ class CardLayoutConfig:
     back_offset_x_mm: float = 0.0
     back_offset_y_mm: float = 0.0
     registration_marks: bool = False
+    auto_fit: bool = True
 
     def __post_init__(self) -> None:
         if self.cards_per_row <= 0 or self.rows_per_page <= 0:
@@ -55,6 +56,8 @@ class CardLayoutConfig:
             raise ValueError('card dimensions must be positive')
         if self.fbox_sep_pt < 0 or self.fbox_rule_pt < 0:
             raise ValueError('frame spacing and rule must not be negative')
+        if not isinstance(self.auto_fit, bool):
+            raise ValueError('auto_fit must be boolean')
         offsets = (
             self.front_offset_x_mm,
             self.front_offset_y_mm,

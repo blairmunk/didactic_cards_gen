@@ -96,6 +96,7 @@ def test_app_debug_is_disabled_by_default(tmp_path, monkeypatch):
         {'back_offset_x_mm': 11},
         {'front_offset_y_mm': float('nan')},
         {'duplex_mode': 'diagonal'},
+        {'auto_fit': 1},
     ],
 )
 def test_layout_rejects_invalid_or_oversized_values(kwargs):

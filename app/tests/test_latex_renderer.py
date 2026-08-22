@@ -214,6 +214,7 @@ class TestLatexRenderer:
             {'fbox_rule_pt': -0.1},
             {'back_offset_x_mm': 11},
             {'front_offset_y_mm': float('nan')},
+            {'auto_fit': 1},
         ],
     )
     def test_invalid_layout_is_rejected(self, kwargs):
@@ -383,6 +384,30 @@ def test_real_latex_log_marks_vertical_card_overflow():
     )
     assert result.success, result.log
     assert 'DIDACTIC-CARDS-OVERFLOW:1:front' in result.log
+
+
+@pytest.mark.integration
+def test_real_latex_auto_fits_before_minimum_size_overflow():
+    if not shutil.which('pdflatex'):
+        pytest.skip('pdflatex is required for the auto-fit integration test')
+
+    deck = CardDeck([Card(front='Текст ' * 100, back='Ответ')])
+    compiler = PdfLatexCompiler()
+    fitted = compiler.compile(
+        LatexRenderer(cards_per_row=1, rows_per_page=1).render(deck)
+    )
+    without_fit = compiler.compile(
+        LatexRenderer(
+            cards_per_row=1, rows_per_page=1, auto_fit=False
+        ).render(deck)
+    )
+
+    assert fitted.success, fitted.log
+    assert 'DIDACTIC-CARDS-AUTOFIT:1:front:footnotesize' in fitted.log
+    assert 'DIDACTIC-CARDS-OVERFLOW:1:front' not in fitted.log
+    assert without_fit.success, without_fit.log
+    assert 'DIDACTIC-CARDS-AUTOFIT' not in without_fit.log
+    assert 'DIDACTIC-CARDS-OVERFLOW:1:front' in without_fit.log
 
 
 @pytest.mark.integration
