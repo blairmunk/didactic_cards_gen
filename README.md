@@ -47,7 +47,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 335 проходящих тестов без `xfail`, branch coverage 98.65%; отдельный Chromium E2E запускается marker-ом `browser`. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с обязательным порогом 98%.
+Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 337 проходящих тестов без `xfail`, branch coverage 98.65%; отдельный Chromium E2E успешно проходит полный offline workflow. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с обязательным порогом 98%.
 
 Проверить целостность хранилища без автоматического исправления:
 

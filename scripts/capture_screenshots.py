@@ -31,17 +31,30 @@ async def capture(base_url: str, deck_id: str, output_dir: Path) -> None:
         await page.goto(f"{base_url}/deck/{deck_id}", {"waitUntil": "domcontentloaded"})
         await page.screenshot({"path": str(output_dir / "deck-editor.png"), "fullPage": True})
 
+        first_card_id = await page.Jeval(
+            "#cards-tbody tr:first-child",
+            "element => element.dataset.cardId",
+        )
+
         await page.click("#btn-view-preview")
         await asyncio.sleep(1)
         preview = await page.querySelector("#view-preview")
         await preview.screenshot({"path": str(output_dir / "card-preview.png")})
 
         await page.goto(
-            f"{base_url}/deck/{deck_id}/edit_card/0",
+            f"{base_url}/deck/{deck_id}/edit_card/{first_card_id}",
             {"waitUntil": "domcontentloaded"},
         )
         await asyncio.sleep(1)
         await page.screenshot({"path": str(output_dir / "edit-card.png"), "fullPage": True})
+
+
+        await page.goto(
+            f"{base_url}/printer_profiles", {"waitUntil": "domcontentloaded"}
+        )
+        await page.screenshot({
+            "path": str(output_dir / "printer-profiles.png"), "fullPage": True
+        })
     finally:
         await browser.close()
 

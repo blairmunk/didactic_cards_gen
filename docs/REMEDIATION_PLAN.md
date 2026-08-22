@@ -42,7 +42,8 @@
   - [x] MathJax 3.2.2 и fonts vendored локально; добавлен status/fallback.
   - [x] Декоративный preview дополнен inline preview того же сгенерированного PDF.
   - [x] Устранён stray HTML, добавлены favicon, focus styles и aria-label для icon actions.
-  - [ ] Финально прогнать Chromium E2E после исправления offline resource assertion; расширить PDF overlay/accessibility review.
+  - [x] Chromium E2E после исправления offline resource assertion проходит полностью на временной SQLite-базе.
+  - [ ] Расширить PDF overlay и полный accessibility review.
 - [ ] Этап 5: функциональное развитие.
   - [x] Versioned JSON/CSV export и транзакционный import-копия с lineage.
   - [x] Раздельные front-only/back-only PDF сохраняют sheet mapping, duplex transform и offsets для ручной подачи.
@@ -78,7 +79,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 335 проходящих тестов, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.65% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 337 проходящих тестов, 0 `xfail`, один отдельно успешно пройденный browser E2E; общий branch coverage составляет 98.65% при обязательном CI-пороге 98%. Chromium-сценарий проходит весь workflow и подтверждает только локальные resource URLs. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -103,7 +104,7 @@
 | ~~BUG-DATA-003 / BUG-WEB-001~~ ✅ | Запись в несуществующую колоду создавала orphan JSON; API отвечал success. | Выполнено: repository под lock проверяет существование до записи; API возвращает 404, HTML безопасно перенаправляет. |
 | ~~BUG-DATA-005~~ ✅ | Deep-clone создавал новые UUID, но терял `parent_id` карточек. | Выполнено через `Card.clone()`; lineage contract стал обычным тестом. |
 | ~~BUG-ARCH-001~~ ✅ | Старый `JsonFileStorage` импортировал удалённый `StorageBackend`; весь старый test collection раньше падал. | Выполнено на этапе 0: неиспользуемые `JsonFileStorage` и `FlaskSessionRepository` удалены вместе с устаревшими тестами; активным остаётся один `JsonRepository`. |
-| ~~BUG-UI-001~~ ✅ | Drag-and-drop вызывал `renumberRows()` до построения permutation и отправлял identity order. | Выполнено: DOM и API используют card UUID, payload строится до renumber, failure восстанавливает прежний DOM без reload, stale version даёт 409. Browser E2E остаётся проверкой этапа 4. |
+| ~~BUG-UI-001~~ ✅ | Drag-and-drop вызывал `renumberRows()` до построения permutation и отправлял identity order. | Выполнено: DOM и API используют card UUID, payload строится до renumber, failure восстанавливает прежний DOM без reload, stale version даёт 409; browser E2E проходит. |
 | ~~BUG-IMP-001~~ ✅ | UI обещал `||`, parser делил по первому одиночному `|`. | Выполнено: exact `||`, `\||` и `\\`; parser/UI/docs и regression tests синхронизированы. |
 | ~~BUG-IMP-002~~ ✅ | UI обещал `;`, `csv.reader` использовал `,`. | Выполнено: auto/explicit comma-semicolon-tab, UTF-8/BOM, header toggle, read-only preview, rejected counts и atomic reject. |
 | ~~BUG-PDF-001~~ ✅ | Partial PDF считался успехом даже при non-zero exit code. | Выполнено: обязательный return code 0, наличие PDF, safe failure flags и fallback stdout/stderr log. |
@@ -134,7 +135,7 @@
 - ✅ Debug по умолчанию выключен и управляется строгой env-переменной; Gunicorn runtime/команда добавлены. Reverse proxy/TLS и deployment hardening зависят от окружения.
 - Secret берётся из `DIDACTIC_CARDS_SECRET_KEY`, без env генерируется случайный для локального запуска; production должен задавать стабильное значение.
 - UI: emoji-only actions без accessible names, слабая keyboard DnD, таблица не имеет mobile overflow, focus/disabled/loading states неполны.
-- Нет favicon (реальный browser audit получил 404), CSP и стандартных security headers.
+- ✅ Добавлены локальный favicon, CSP и стандартные security headers; offline browser E2E проходит без внешних resource URL.
 - Массовая случайная смена executable-битов у исходников загрязняет diff; нормализовать modes отдельным механическим коммитом после согласования.
 
 ## 4. Пошаговый план внедрения

@@ -68,3 +68,19 @@ def test_pdf_preview_uses_generated_pdf_in_a_blob_dialog():
     assert 'id="pdf-preview-frame"' in index
     assert 'URL.createObjectURL(await response.blob())' in script
     assert 'URL.revokeObjectURL(pdfPreviewUrl)' in script
+
+
+def test_screenshot_script_uses_stable_card_id_and_captures_profiles():
+    script = (
+        Path(__file__).parents[2] / 'scripts' / 'capture_screenshots.py'
+    ).read_text(encoding='utf-8')
+    assert 'element.dataset.cardId' in script
+    assert 'edit_card/0' not in script
+    assert 'printer-profiles.png' in script
+
+
+def test_link_buttons_receive_the_same_base_styles_as_buttons():
+    stylesheet = (WEB_ROOT / 'static/cards/style.css').read_text(encoding='utf-8')
+    base_rule = stylesheet.split('button, .btn,', 1)[1].split('{', 1)[0]
+    assert '.btn-secondary' in base_rule
+    assert '.btn-danger' in base_rule

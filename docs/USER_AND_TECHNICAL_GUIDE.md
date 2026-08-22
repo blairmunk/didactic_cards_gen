@@ -63,7 +63,7 @@ kpsewhich babel-russian.tex
 
 ![Список колод](images/decks.png)
 
-Служебный хвост `HTML`, который был виден на исходном audit-снимке, удалён из шаблона; обновлённый screenshot регенерируется после browser-приёмки этапа 4.
+Служебный хвост `HTML`, который был виден на исходном audit-снимке, удалён из шаблона; актуальный screenshot переснят после успешной browser-приёмки.
 
 ### Добавление карточек
 
@@ -144,6 +144,8 @@ MathJax 3.2.2 вместе с web fonts хранится локально в sta
 5. Если драйвер выдаёт листы в обратном порядке, включите обратный порядок страниц только для второго прохода. Не переставляйте страницы внутри PDF: их номера уже сопоставлены по физическим листам.
 
 Выбранный профиль применяется одинаково к LaTeX preview, полному/раздельным PDF и preflight. Для каждого HTTP-запроса создаётся отдельный renderer, поэтому одновременная печать с разными профилями не смешивает offsets. Дополнительные deployment-профили задаются в `AppConfig(printer_profiles=(PrinterProfile(...), ...))`. Страница «Профили принтеров и калибровка» сохраняет пользовательские измерения в SQLite: ключ — lowercase slug, имя ограничено 100 символами, offsets — диапазоном ±10 мм. Встроенные профили нельзя перезаписать или удалить.
+
+![Профили принтеров и калибровка](images/printer-profiles.png)
 
 ## 4. Хранение данных
 
@@ -231,7 +233,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 335 проходящих тестов, 0 `xfail`, общий branch coverage 98.65%. В него входят schema 1→2 migration и unit/HTTP-контракты observability/production health, сохраняемых профилей, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
+Текущее состояние основного набора: 337 проходящих тестов, 0 `xfail`, общий branch coverage 98.65%. В него входят schema 1→2 migration и unit/HTTP-контракты observability/production health, сохраняемых профилей, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E успешно проходит create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate и проверку offline resources на временной SQLite-базе.
 
 Скриншоты можно переснять на запущенном приложении:
 
@@ -242,7 +244,7 @@ python scripts/capture_screenshots.py \
   --output-dir docs/images
 ```
 
-Скрипт использует системный Chromium и не скачивает собственный браузер.
+Скрипт использует системный Chromium, адресует карточку стабильным UUID, дополнительно снимает страницу профилей и не скачивает собственный браузер. Актуальный набор снимков переснят 22.08.2026 после успешного E2E.
 
 ## 7. Диагностика
 
