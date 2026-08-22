@@ -15,6 +15,11 @@ class CardLayoutConfig:
     fbox_rule_pt: float = 0.4
     back_border: bool = False  # True = рамка на обороте (для отладки центровки)
     duplex_mode: DuplexMode = DuplexMode.LONG_EDGE
+    front_offset_x_mm: float = 0.0
+    front_offset_y_mm: float = 0.0
+    back_offset_x_mm: float = 0.0
+    back_offset_y_mm: float = 0.0
+    registration_marks: bool = False
 
     def __post_init__(self) -> None:
         if self.cards_per_row <= 0 or self.rows_per_page <= 0:
@@ -24,6 +29,10 @@ class CardLayoutConfig:
             self.card_height_cm,
             self.fbox_sep_pt,
             self.fbox_rule_pt,
+            self.front_offset_x_mm,
+            self.front_offset_y_mm,
+            self.back_offset_x_mm,
+            self.back_offset_y_mm,
         )
         if not all(math.isfinite(value) for value in numeric_values):
             raise ValueError('layout dimensions must be finite')
@@ -31,6 +40,14 @@ class CardLayoutConfig:
             raise ValueError('card dimensions must be positive')
         if self.fbox_sep_pt < 0 or self.fbox_rule_pt < 0:
             raise ValueError('frame spacing and rule must not be negative')
+        offsets = (
+            self.front_offset_x_mm,
+            self.front_offset_y_mm,
+            self.back_offset_x_mm,
+            self.back_offset_y_mm,
+        )
+        if any(abs(offset) > 10 for offset in offsets):
+            raise ValueError('calibration offsets must be within +/- 10 mm')
 
         frame_inset_cm = 2 * (self.fbox_sep_pt + self.fbox_rule_pt) * 2.54 / 72.27
         if self.card_width_cm <= frame_inset_cm or self.card_height_cm <= frame_inset_cm:

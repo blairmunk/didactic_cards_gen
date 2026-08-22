@@ -39,9 +39,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             poppler-utils \
+            mupdf-tools \
             texlive-lang-cyrillic \
             texlive-latex-base \
-            texlive-latex-extra
+            texlive-latex-extra \
+            texlive-pictures
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -r requirements-dev.txt
       - name: Run complete suite with branch coverage

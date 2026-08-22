@@ -55,6 +55,8 @@ def test_data_location_is_independent_of_current_working_directory(tmp_path, mon
         {'card_width_cm': 0.1, 'fbox_sep_pt': 8},
         {'card_width_cm': 20, 'cards_per_row': 2},
         {'card_height_cm': 10, 'rows_per_page': 3},
+        {'back_offset_x_mm': 11},
+        {'front_offset_y_mm': float('nan')},
         {'duplex_mode': 'diagonal'},
     ],
 )

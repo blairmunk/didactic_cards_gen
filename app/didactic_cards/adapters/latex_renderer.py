@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import re
 
 from ..domain.entities import Card, CardDeck
@@ -66,6 +67,11 @@ class LatexRenderer(DocumentRenderer):
         fbox_rule_pt: float = 0.4,
         back_border: bool = False,
         duplex_mode: DuplexMode | str = DuplexMode.LONG_EDGE,
+        front_offset_x_mm: float = 0.0,
+        front_offset_y_mm: float = 0.0,
+        back_offset_x_mm: float = 0.0,
+        back_offset_y_mm: float = 0.0,
+        registration_marks: bool = False,
     ):
         if cards_per_row <= 0 or rows_per_page <= 0:
             raise ValueError('cards_per_row and rows_per_page must be positive')
@@ -73,6 +79,16 @@ class LatexRenderer(DocumentRenderer):
             raise ValueError('card dimensions must be positive')
         if fbox_sep_pt < 0 or fbox_rule_pt < 0:
             raise ValueError('frame spacing and rule must not be negative')
+        offsets = (
+            front_offset_x_mm,
+            front_offset_y_mm,
+            back_offset_x_mm,
+            back_offset_y_mm,
+        )
+        if not all(math.isfinite(offset) for offset in offsets):
+            raise ValueError('calibration offsets must be finite')
+        if any(abs(offset) > 10 for offset in offsets):
+            raise ValueError('calibration offsets must be within +/- 10 mm')
 
         frame_inset_cm = 2 * (fbox_sep_pt + fbox_rule_pt) * PT_TO_CM
         if card_width_cm <= frame_inset_cm or card_height_cm <= frame_inset_cm:
@@ -93,6 +109,9 @@ class LatexRenderer(DocumentRenderer):
         self.fbox_rule = fbox_rule_pt
         self.back_border = back_border
         self.duplex_mode = DuplexMode(duplex_mode)
+        self.front_offset = (front_offset_x_mm, front_offset_y_mm)
+        self.back_offset = (back_offset_x_mm, back_offset_y_mm)
+        self.registration_marks = registration_marks
         self.cards_per_page = cards_per_row * rows_per_page
 
     def render(self, deck: CardDeck) -> str:
@@ -133,6 +152,7 @@ class LatexRenderer(DocumentRenderer):
 \usepackage{{enumitem}}
 \usepackage{{multicol}}
 \usepackage{{xcolor}}
+\usepackage{{tikz}}
 
 \geometry{{a4paper, margin=0.5cm}}
 
@@ -156,6 +176,18 @@ class LatexRenderer(DocumentRenderer):
 }}
 \newcommand{{\frontcard}}[1]{{\cardbox{{\fbox}}{{#1}}}}
 \newcommand{{\backcard}}[1]{{\cardbox{{{back_frame}}}{{#1}}}}
+\newcommand{{\registrationmarks}}{{%
+    \begin{{tikzpicture}}[remember picture,overlay,line width=0.2pt]
+    \draw ([yshift=-5mm]current page.north) ++(-3mm,0) -- ++(6mm,0);
+    \draw ([yshift=-5mm]current page.north) ++(0,-3mm) -- ++(0,6mm);
+    \draw ([yshift=5mm]current page.south) ++(-3mm,0) -- ++(6mm,0);
+    \draw ([yshift=5mm]current page.south) ++(0,-3mm) -- ++(0,6mm);
+    \draw ([xshift=5mm]current page.west) ++(-3mm,0) -- ++(6mm,0);
+    \draw ([xshift=5mm]current page.west) ++(0,-3mm) -- ++(0,6mm);
+    \draw ([xshift=-5mm]current page.east) ++(-3mm,0) -- ++(6mm,0);
+    \draw ([xshift=-5mm]current page.east) ++(0,-3mm) -- ++(0,6mm);
+    \end{{tikzpicture}}%
+}}
 
 \pagestyle{{empty}}
 \setlist[itemize]{{label={{}}, left=0.5em, itemsep=-2pt, topsep=0.5ex}}
@@ -166,7 +198,12 @@ class LatexRenderer(DocumentRenderer):
 
     def _render_page(self, cards: tuple[Card, ...], *, side: str) -> str:
         command = r'\frontcard' if side == 'front' else r'\backcard'
-        result = ''
+        offset_x, offset_y = self.front_offset if side == 'front' else self.back_offset
+        grid_width = self.cards_per_row * self.card_width
+        result = r'\registrationmarks' + '\n' if self.registration_marks else ''
+        result += f'\\vspace*{{{offset_y}mm}}%\n'
+        result += f'\\noindent\\hspace*{{{offset_x}mm}}%\n'
+        result += f'\\begin{{minipage}}[t]{{{grid_width}cm}}\n'
         for row in range(self.rows_per_page):
             for column in range(self.cards_per_row):
                 index = row * self.cards_per_row + column
@@ -176,4 +213,4 @@ class LatexRenderer(DocumentRenderer):
                     result += '%\n'
             if row < self.rows_per_page - 1:
                 result += '\n'
-        return result
+        return result + r'\end{minipage}' + '\n'

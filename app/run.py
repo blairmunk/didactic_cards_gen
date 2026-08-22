@@ -24,6 +24,11 @@ def create_app() -> Flask:
         fbox_rule_pt=layout.fbox_rule_pt,
         back_border=layout.back_border,
         duplex_mode=layout.duplex_mode,
+        front_offset_x_mm=layout.front_offset_x_mm,
+        front_offset_y_mm=layout.front_offset_y_mm,
+        back_offset_x_mm=layout.back_offset_x_mm,
+        back_offset_y_mm=layout.back_offset_y_mm,
+        registration_marks=layout.registration_marks,
     )
     app.config['COMPILER'] = PdfLatexCompiler(
         pdflatex_path=cfg.pdflatex_path,

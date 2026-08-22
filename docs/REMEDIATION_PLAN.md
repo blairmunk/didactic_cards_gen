@@ -14,8 +14,10 @@
   - [x] Убран безусловный поворот оборота на 180°.
   - [x] Настраиваемый размер стал внешним cut size; layout валидируется до компиляции.
   - [x] Добавлен реальный четырёхстраничный `pdflatex`/`pdftotext` integration test.
-  - [ ] Добавить calibration offsets, registration/crop marks и overflow preflight.
-  - [ ] Выполнить golden bounding-box/raster tests и физический прогон.
+  - [x] Добавлены независимые offsets сторон (±10 мм) и опциональные registration marks.
+  - [x] Реальный PDF geometry test измеряет векторную рамку через `mutool` с допуском 0.1 мм.
+  - [ ] Добавить overflow preflight.
+  - [ ] Выполнить raster golden tests и физический прогон.
 - [ ] Этап 2: безопасная граница TeX/HTTP.
 - [ ] Этап 3: транзакционное persistence.
 - [ ] Этап 4: импорт и web UX.
@@ -43,7 +45,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 120 проходящих тестов и 24 строгих `xfail`-контракта для подтверждённых дефектов. Общий branch coverage составляет 99.56% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 127 проходящих тестов и 24 строгих `xfail`-контракта для подтверждённых дефектов. Общий branch coverage составляет 99.57% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -53,7 +55,7 @@
 |---|---|---|---|
 | ~~BUG-PRINT-001~~ ✅ | `LatexRenderer` формировал все fronts, затем все backs. | Выполнено: `Sheet` отделяет физическую модель, PDF идёт `F1,B1,F2,B2…`; unit и реальный четырёхстраничный TeX test проходят. | Автоматизированная часть выполнена; physical matrix остаётся в этапе 1. |
 | ~~BUG-PRINT-002~~ ✅ | Оборот сочетал horizontal mirror с `rotatebox{180}`. | Выполнено: явные long-edge/short-edge permutations без безусловного поворота текста. | Unit-transform tests проходят; физическая проверка обоих режимов остаётся. |
-| ~~BUG-PRINT-003~~ ✅ | `9.3 × 6.3` были размером inner minipage, а не cut box. | Выполнено: content box вычисляется вычитанием frame inset, `fboxrule` фиксирован явно. | Числовой contract выполнен; golden PDF geometry test остаётся частью этапа 1. |
+| ~~BUG-PRINT-003~~ ✅ | `9.3 × 6.3` были размером inner minipage, а не cut box. | Выполнено: content box вычисляется вычитанием frame inset, `fboxrule` фиксирован явно. | Векторная рамка реального PDF измеряется через `mutool` с допуском 0.1 мм. |
 | BUG-HTTP-003 | Русское имя PDF вызывает `UnicodeEncodeError` на реальном dev-сервере. | Использовать Werkzeug `send_file(..., download_name=...)` или ASCII fallback + `filename*=UTF-8''...`; нормализовать CR/LF/quotes. | Скачиваются имена на русском, emoji и кавычки; каждый header кодируется/отдаётся WSGI без ошибки. |
 | BUG-SEC-001 | Команды внутри `$...$` не экранируются. | Перейти от regex к ограниченному parser/allowlist математических команд; запретить `\input`, `\include`, `\write`, `\openin`, `\csname`, macro definitions и закрытие окружений. | Набор malicious fixtures не читает файлы, не меняет документ и даёт понятную validation error. |
 | BUG-SEC-002 | Нет явного `-no-shell-escape`. | Добавить `-no-shell-escape`, `-halt-on-error`, изолированный env/TEXMF; в deployment компилировать непривилегированным worker/container. | Команда компилятора проверена тестом; файловый и процессный sandbox подтверждён integration-тестом. |

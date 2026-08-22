@@ -1,4 +1,5 @@
 import pytest
+import re
 import shutil
 import subprocess
 from didactic_cards.domain.entities import Card, CardDeck
@@ -189,11 +190,40 @@ class TestLatexRenderer:
             {'card_width_cm': 0.1, 'fbox_sep_pt': 8},
             {'card_width_cm': 0},
             {'fbox_rule_pt': -0.1},
+            {'back_offset_x_mm': 11},
+            {'front_offset_y_mm': float('nan')},
         ],
     )
     def test_invalid_layout_is_rejected(self, kwargs):
         with pytest.raises(ValueError):
             LatexRenderer(**kwargs)
+
+    def test_calibration_offsets_are_applied_per_side(self):
+        source = LatexRenderer(
+            cards_per_row=1,
+            rows_per_page=1,
+            front_offset_x_mm=1.25,
+            front_offset_y_mm=-0.5,
+            back_offset_x_mm=-2.0,
+            back_offset_y_mm=0.75,
+        ).render(self.make_deck(1))
+        front_source, back_source = source.split('задние стороны', 1)
+        assert r'\hspace*{1.25mm}' in front_source
+        assert r'\vspace*{-0.5mm}' in front_source
+        assert r'\hspace*{-2.0mm}' in back_source
+        assert r'\vspace*{0.75mm}' in back_source
+
+    def test_registration_marks_are_opt_in(self):
+        without_marks = LatexRenderer(cards_per_row=1, rows_per_page=1).render(
+            self.make_deck(1)
+        )
+        with_marks = LatexRenderer(
+            cards_per_row=1,
+            rows_per_page=1,
+            registration_marks=True,
+        ).render(self.make_deck(1))
+        assert without_marks.count(r'\registrationmarks') == 1  # macro definition only
+        assert with_marks.count(r'\registrationmarks') == 3  # definition + two pages
 
     @pytest.mark.xfail(
         strict=True,
@@ -257,3 +287,42 @@ def test_real_pdf_interleaves_two_physical_sheets(tmp_path):
     assert 'BACK-2' in pages[1] and 'BACK-1' in pages[1]
     assert 'FRONT-3' in pages[2] and 'FRONT-4' in pages[2]
     assert 'BACK-4' in pages[3] and 'BACK-3' in pages[3]
+
+
+@pytest.mark.integration
+def test_real_pdf_card_frame_matches_configured_cut_size(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('mutool'):
+        pytest.skip('pdflatex/mutool are required for the geometry integration test')
+
+    renderer = LatexRenderer(
+        card_width_cm=9.3,
+        card_height_cm=6.3,
+        cards_per_row=1,
+        rows_per_page=1,
+        back_border=True,
+        registration_marks=True,
+    )
+    result = PdfLatexCompiler().compile(
+        renderer.render(CardDeck([Card(front='FRAME-FRONT', back='FRAME-BACK')]))
+    )
+    assert result.success, result.log
+
+    pdf_path = tmp_path / 'geometry.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    svg_pattern = tmp_path / 'geometry-%d.svg'
+    subprocess.run(
+        ['mutool', 'draw', '-F', 'svg', '-o', str(svg_pattern), str(pdf_path), '1'],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    svg = (tmp_path / 'geometry-1.svg').read_text(encoding='utf-8')
+    horizontal_lengths = [float(value) for value in re.findall(r'd="M0 0H([0-9.]+)', svg)]
+    vertical_lengths = [float(value) for value in re.findall(r'd="M0 0V([0-9.]+)', svg)]
+    rule_widths = [float(value) for value in re.findall(r'stroke-width="([0-9.]+)', svg)]
+
+    assert horizontal_lengths and vertical_lengths and rule_widths
+    width_cm = max(horizontal_lengths) * 2.54 / 72
+    height_cm = (max(vertical_lengths) + max(rule_widths)) * 2.54 / 72
+    assert width_cm == pytest.approx(9.3, abs=0.01)
+    assert height_cm == pytest.approx(6.3, abs=0.01)
