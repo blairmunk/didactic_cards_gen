@@ -16,7 +16,7 @@
   - [x] Добавлен реальный четырёхстраничный `pdflatex`/`pdftotext` integration test.
   - [x] Добавлены независимые offsets сторон (±10 мм) и опциональные registration marks.
   - [x] Реальный PDF geometry test измеряет векторную рамку через `mutool` с допуском 0.1 мм.
-  - [x] Добавлен read-only preflight: TeX-измерение vertical overflow с card/side mapping, horizontal overflow и missing glyphs из log, printable-area и empty/partial-sheet warnings.
+  - [x] Добавлен read-only preflight: TeX-измерение vertical/horizontal overflow с card/side mapping, missing glyphs, printable-area и empty/partial-sheet warnings; служебные `Overfull hbox` сетки не создают ложных ошибок.
   - [x] Добавлен двухстраничный PBM raster golden diff реального PDF с pixel tolerance 0.2% и явным regeneration script.
   - [ ] Выполнить физический прогон на целевых принтерах.
 - [x] Этап 2: безопасная граница TeX/HTTP на уровне приложения.
@@ -51,6 +51,7 @@
   - [x] Компилируемый preflight проверяет overflow, missing glyphs, unsupported formulas и printable area до печати.
   - [x] Именованные config-профили принтера выбираются на print job и изолированы между запросами.
   - [x] Web calibration workflow сохраняет валидированные пользовательские профили в SQLite schema 2.
+  - [x] Страница профилей генерирует двухстраничный A4 calibration PDF с мишенями, контрольным отрезком 100 мм и инструкцией знаков X/Y для обоих duplex-режимов.
   - [x] TeX auto-fit уменьшает 12pt → small → footnotesize → scriptsize и оставляет адресные preflight markers.
   - [ ] Расширенная layout-конфигурация; controlled clipping намеренно не включён, остаточный overflow блокирует готовность preflight.
 - [x] Production runtime.
@@ -81,7 +82,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 343 проходящих теста, 0 `xfail`, один отдельно успешно пройденный browser E2E; общий branch coverage составляет 98.59% при обязательном CI-пороге 98%. Chromium-сценарий проходит весь workflow и подтверждает только локальные resource URLs. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF/raster-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 349 проходящих основных тестов, 0 `xfail`, один отдельно успешно пройденный browser E2E; общий branch coverage составляет 98.33% при обязательном CI-пороге 98%. Chromium-сценарий проверяет в том числе focus/scroll результата preflight и подтверждает только локальные resource URLs. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF/raster-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -124,7 +125,7 @@
 - ✅ `BUG-UI-002`: видимый хвост `HTML` после `</html>` удалён и покрыт проверкой всех templates.
 - ✅ `BUG-UI-003`: MathJax 3.2.2 + fonts vendored локально, CDN удалён из templates/CSP, есть status/fallback.
 - ✅ Добавлен inline preview реально скомпилированного PDF; визуальный front/back overlay остаётся дальнейшим улучшением.
-- ✅ Встроенный calibration-профиль включает видимые рамки и registration marks; измеряемый wizard и идентификаторы slot/page остаются в roadmap.
+- ✅ Устранена двусмысленность между профилем приложения и настройкой драйвера; добавлен скачиваемый двухстраничный A4 calibration PDF с пятью парами мишеней, линейкой 100 мм и формулами коррекции X/Y. Автоматическое распознавание скана остаётся в roadmap.
 - ✅ TeX auto-fit последовательно уменьшает шрифт до `scriptsize`; preflight показывает уменьшение warning-ом и точным измерением помечает остаточный vertical overflow как error. Controlled clipping намеренно не применяется, чтобы не скрывать потерю текста.
 - Single newline в исходном тексте не равен видимому переносу LaTeX; нужен определённый markdown/rich-text contract.
 - ✅ Routes адресуют карточки UUID; deck `version` защищает параллельные add/edit/delete/reorder/reset от lost update.
@@ -158,7 +159,7 @@
 2. Формировать page sequence по физическим листам, не по сторонам документа.
 3. Описать coordinate system: origin, row/column, top arrow, slot ID; для каждого flip mode иметь явную permutation matrix.
 4. Сделать внешний cut size первичным. Из него вычислять content width/height с учётом `2 × (padding + border)`.
-5. Добавить independent horizontal/vertical calibration offsets для оборота, printer profile и тестовую страницу.
+5. [x] Добавить independent horizontal/vertical calibration offsets для оборота, printer profile и двухстраничную тестовую страницу с измеряемыми мишенями.
 6. Включить crop/registration marks; border — отдельная опция, не влияющая на размеры.
 7. Добавить overflow policy: reject/warn, auto-fit до минимального font size, либо controlled clipping.
 8. [x] Проверять PDF MediaBox/реальные vector bounds и raster visual diff: geometry измеряется `mutool`, front/back PBM хранятся как golden artifacts и сравниваются с допуском 0.2%.
@@ -208,12 +209,12 @@
 
 Приоритетный roadmap:
 
-1. [x] Config-defined и сохраняемые SQLite-профили, выбор на print job и web calibration workflow с X/Y offsets. Фактические значения пользователь получает физическим измерением пробного листа.
+1. [x] Config-defined и сохраняемые SQLite-профили, выбор на print job, двухстраничный калибровочный PDF и web workflow с X/Y offsets. Фактические значения пользователь получает по пяти парам мишеней и контрольному отрезку 100 мм.
 2. Выбор формата A4/Letter, ориентации, сетки, внешнего размера карточки, margins/gaps/bleed/safe area.
 3. [x] Двусторонний PDF и два отдельных файла front/back для принтеров без duplex. Раздельные документы сохраняют одинаковую нумерацию физических листов, back permutation и калибровочные offsets; unit, HTTP и реальный `pdflatex` page-count test проходят.
 4. [x] Импорт/экспорт колоды в versioned JSON schema 1 и UTF-8-BOM CSV; импорт создаёт транзакционную копию с lineage, validation/quota и без перезаписи существующих данных. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
 5. Шаблоны оформления: шрифт, выравнивание, размер, фон, изображения/QR после отдельной security-модели.
-6. [x] Auto-fit и preflight: 12pt → small → footnotesize → scriptsize, остаточный overflow, missing glyphs, unsupported formulas и printable-area warning. Silent clipping отклонён как риск потери текста.
+6. [x] Auto-fit и preflight: 12pt → small → footnotesize → scriptsize, адресный vertical/horizontal overflow, missing glyphs, unsupported formulas и printable-area warning. Результат получает focus и прокручивается в видимую область; layout-only `Overfull hbox` игнорируется. Silent clipping отклонён как риск потери текста.
 7. Поиск, теги, массовое редактирование, undo/trash вместо немедленного удаления.
 8. PDF metadata, deterministic builds и сохранение print job с конфигурацией для повторной печати.
 

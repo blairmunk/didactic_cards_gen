@@ -619,6 +619,49 @@ def test_persistent_printer_profile_web_crud_and_print_job(tmp_path):
     assert profile_app.config['REPO'].list_printer_profiles() == []
 
 
+def test_calibration_sheet_download_uses_selected_profile(tmp_path):
+    class RecordingCompiler:
+        def __init__(self):
+            self.sources = []
+
+        def is_available(self):
+            return True
+
+        def compile(self, source):
+            self.sources.append(source)
+            return CompileResult(True, b'%PDF-calibration', '')
+
+    profile = PrinterProfile(
+        'office-printer', 'Office printer', duplex_mode='short-edge',
+        back_offset_x_mm=-1.25, back_offset_y_mm=0.5,
+    )
+    compiler = RecordingCompiler()
+    calibration_app = create_app(
+        config=AppConfig(
+            secret_key='calibration-test', csrf_enabled=False,
+            printer_profiles=(profile,),
+        ),
+        data_dir=tmp_path / 'calibration',
+        compiler=compiler,
+    )
+    calibration_app.config['TESTING'] = True
+
+    response = calibration_app.test_client().post(
+        '/printer_profiles/calibration-sheet',
+        data={'profile_id': profile.key},
+    )
+
+    assert response.status_code == 200
+    assert response.mimetype == 'application/pdf'
+    assert 'printer-calibration-office-printer.pdf' in response.headers[
+        'Content-Disposition'
+    ]
+    assert r'\calibrationtargets{-1.25}{0.5}{magenta,dashed}' in compiler.sources[0]
+    page = calibration_app.test_client().get('/printer_profiles')
+    assert 'не настройки' in page.text
+    assert 'Скачать калибровочный PDF' in page.text
+
+
 @pytest.mark.parametrize(
     'form',
     [

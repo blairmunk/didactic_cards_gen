@@ -180,7 +180,10 @@ def test_preflight_reports_card_and_compiler_issues(repo, deck_id, app):
                 True,
                 b'%PDF',
                 'DIDACTIC-CARDS-OVERFLOW:1:front\n'
-                'Overfull \\hbox\nMissing character:',
+                'DIDACTIC-CARDS-HBOX-BEGIN:1:front\n'
+                'Overfull \\hbox\n'
+                'DIDACTIC-CARDS-HBOX-END:1:front\n'
+                'Missing character:',
             )
 
     report = PreflightDocument(
@@ -196,6 +199,28 @@ def test_preflight_reports_card_and_compiler_issues(repo, deck_id, app):
     assert by_code['missing-glyph'].severity == 'error'
     assert report.to_dict()['error_count'] == 3
     assert report.to_dict()['warning_count'] == 1
+
+
+def test_preflight_ignores_layout_hbox_outside_card_measurement(repo, deck_id, app):
+    AddCard(repo).execute(deck_id, '2 + 2', '4')
+
+    class LayoutWarningCompiler:
+        def compile(self, _source):
+            from didactic_cards.domain.interfaces import CompileResult
+            return CompileResult(
+                True,
+                b'%PDF',
+                'DIDACTIC-CARDS-HBOX-BEGIN:1:front\n'
+                'DIDACTIC-CARDS-HBOX-END:1:front\n'
+                'Overfull \\hbox (2.61038pt too wide)',
+            )
+
+    report = PreflightDocument(
+        repo, app.config['RENDERER'], LayoutWarningCompiler(), 8
+    ).execute(deck_id)
+
+    assert report.ready is True
+    assert 'horizontal-overflow' not in {issue.code for issue in report.issues}
 
 
 def test_preflight_compile_failure_is_safe(repo, deck_id, app):

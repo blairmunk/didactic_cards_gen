@@ -179,6 +179,60 @@ class LatexRenderer(DocumentRenderer):
     def render_backs(self, deck: CardDeck) -> str:
         return self._render_sides(deck, ('back',))
 
+    def render_calibration_sheet(self) -> str:
+        """Build a two-page duplex target using this profile's offsets."""
+        front_x, front_y = self.front_offset
+        back_x, back_y = self.back_offset
+        mode = self.duplex_mode.value
+        return rf'''\documentclass[a4paper,12pt]{{article}}
+\usepackage[T2A]{{fontenc}}
+\usepackage[utf8]{{inputenc}}
+\usepackage[russian]{{babel}}
+\usepackage{{geometry}}
+\usepackage{{tikz}}
+\usepackage{{xcolor}}
+\geometry{{a4paper,margin=12mm}}
+\pagestyle{{empty}}
+\newcommand{{\calibrationtargets}}[4]{{%
+  \begin{{tikzpicture}}[remember picture,overlay,x=1mm,y=1mm]
+    \begin{{scope}}[shift={{(current page.south west)}},xshift=#1mm,yshift=-#2mm]
+      \foreach \x/\y in {{25/25,185/25,25/272,185/272,105/148.5}}{{
+        \draw[#3,line width=0.35pt] (\x-8,\y) -- (\x+8,\y);
+        \draw[#3,line width=0.35pt] (\x,\y-8) -- (\x,\y+8);
+        \draw[#3,line width=0.35pt] (\x,\y) circle (2);
+      }}
+      \draw[#3,line width=0.35pt] (55,18) -- (155,18);
+      \foreach \x in {{55,60,...,155}}{{
+        \draw[#3,line width=0.25pt] (\x,16.5) -- (\x,19.5);
+      }}
+      \node[#3,anchor=south] at (105,20) {{контрольная длина 100 мм}};
+      \node[#3,anchor=north] at (105,143) {{#4}};
+    \end{{scope}}
+  \end{{tikzpicture}}%
+}}
+\begin{{document}}
+\begin{{center}}
+  {{\Large\bfseries Калибровочный лист: лицевая сторона}}\\[2mm]
+  Режим переворота: \texttt{{{mode}}}. Масштаб печати: 100\% / Actual size.\\
+  Сплошные чёрные мишени должны совпасть с пунктирными мишенями оборота.
+\end{{center}}
+\vfill
+\noindent Сначала измерьте контрольный отрезок: он должен быть ровно 100 мм.
+Затем держите лист лицом к себе напротив света и измерьте у центральной мишени
+горизонтальный и вертикальный сдвиг пунктирного креста относительно сплошного.
+\calibrationtargets{{{front_x}}}{{{front_y}}}{{black}}{{ЛИЦО: сплошная линия}}
+\newpage
+\begin{{center}}
+  {{\Large\bfseries Калибровочный лист: оборотная сторона}}\\[2mm]
+  Профиль: \texttt{{{mode}}}; offsets X={back_x} мм, Y={back_y} мм.\\
+  Эта страница должна печататься оборотом того же физического листа.
+\end{{center}}
+\vfill
+\noindent Не используйте Fit, Shrink или поля драйвера. После печати сравните
+пунктирные пурпурные мишени с чёрными мишенями лица на просвет.
+\calibrationtargets{{{back_x}}}{{{back_y}}}{{magenta,dashed}}{{ОБОРОТ: пунктирная линия}}
+\end{{document}}'''
+
     def printable_area_warnings(self) -> tuple[str, ...]:
         grid_width = self.cards_per_row * self.card_width
         grid_height = self.rows_per_page * (
@@ -236,11 +290,11 @@ class LatexRenderer(DocumentRenderer):
         if self.auto_fit:
             fit_logic = r'''
     \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
-        \setcardcontentbox{\small}{#3}%
+        \setcardcontentbox{\small}{#3}{#1}{#2}%
         \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
-            \setcardcontentbox{\footnotesize}{#3}%
+            \setcardcontentbox{\footnotesize}{#3}{#1}{#2}%
             \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
-                \setcardcontentbox{\scriptsize}{#3}%
+                \setcardcontentbox{\scriptsize}{#3}{#1}{#2}%
                 \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
                     \typeout{DIDACTIC-CARDS-OVERFLOW:#1:#2}%
                 \else
@@ -298,13 +352,15 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\frontcard}}[1]{{\cardbox{{\fbox}}{{#1}}}}
 \newcommand{{\backcard}}[1]{{\cardbox{{{back_frame}}}{{#1}}}}
 \newbox\cardcontentbox
-\newcommand{{\setcardcontentbox}}[2]{{%
+\newcommand{{\setcardcontentbox}}[4]{{%
+    \typeout{{DIDACTIC-CARDS-HBOX-BEGIN:#3:#4}}%
     \setbox\cardcontentbox=\vbox{{%
         \hsize=\cardcontentwidth #1\noindent #2\par
     }}%
+    \typeout{{DIDACTIC-CARDS-HBOX-END:#3:#4}}%
 }}
 \newcommand{{\checkedcardcontent}}[3]{{%
-    \setcardcontentbox{{\normalsize}}{{#3}}%{fit_logic}
+    \setcardcontentbox{{\normalsize}}{{#3}}{{#1}}{{#2}}%{fit_logic}
     \box\cardcontentbox
 }}
 \newcommand{{\registrationmarks}}{{%

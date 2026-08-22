@@ -14,12 +14,42 @@
     {% if error %}<div class="error-message">{{ error }}</div>{% endif %}
 
     <div class="info-panel">
-        Сначала распечатайте один лист со встроенным калибровочным профилем при масштабе 100%,
-        измерьте сдвиг оборота относительно лица по X/Y и сохраните компенсацию ниже.
-        Повторите пробный лист до достижения требуемого допуска.
+        <strong>Встроенные профили</strong> ниже — это предустановки приложения, а не настройки
+        драйвера или самого принтера. Профиль задаёт способ переворота, рамки и компенсацию
+        положения печатной сетки. В окне печати всё равно нужно выбрать тот же duplex-режим
+        и масштаб 100% / Actual size без Fit или Shrink.
     </div>
 
-    <h2>Встроенные профили</h2>
+    <h2>Калибровочный лист</h2>
+    <p>
+        Скачайте двухстраничный PDF и напечатайте обе страницы на одном листе. На лице находятся
+        чёрные сплошные мишени, на обороте — пурпурные пунктирные. Сначала проверьте линейкой
+        контрольный отрезок 100 мм, затем держите лист лицом к себе на просвет и измерьте у
+        центральной мишени сдвиг пунктирного креста относительно сплошного.
+    </p>
+    <ol>
+        <li>Сдвиг вправо считается положительным X, влево — отрицательным.</li>
+        <li>Сдвиг вниз считается положительным Y, вверх — отрицательным.</li>
+        <li>Для <code>long-edge</code>: прибавьте измеренный X к «Оборот X», а измеренный Y вычтите из «Оборот Y».</li>
+        <li>Для <code>short-edge</code>: измеренный X вычтите из «Оборот X», а измеренный Y прибавьте к «Оборот Y».</li>
+        <li>Сохраните профиль, скачайте лист уже с этим профилем и повторите проверку.</li>
+    </ol>
+    <form method="post" action="{{ url_for('cards.calibration_sheet') }}" class="calibration-form">
+        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+        <label for="calibration-profile">Профиль для проверки</label>
+        <select id="calibration-profile" name="profile_id">
+            <option value="">Базовая конфигурация</option>
+            {% for profile in configured_profiles %}
+            <option value="{{ profile.key }}">{{ profile.name }}</option>
+            {% endfor %}
+            {% for profile in saved_profiles %}
+            <option value="{{ profile.key }}">{{ profile.name }}</option>
+            {% endfor %}
+        </select>
+        <button class="btn-primary" type="submit">Скачать калибровочный PDF</button>
+    </form>
+
+    <h2>Предустановленные профили приложения</h2>
     <ul>
         {% for profile in configured_profiles %}
         <li><strong>{{ profile.name }}</strong> — {{ profile.duplex_mode.value }}, offsets F({{ profile.front_offset_x_mm }}, {{ profile.front_offset_y_mm }}) мм / B({{ profile.back_offset_x_mm }}, {{ profile.back_offset_y_mm }}) мм</li>

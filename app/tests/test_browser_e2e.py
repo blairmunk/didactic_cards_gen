@@ -122,6 +122,28 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             'contentType': 'application/pdf',
             'prefix': '%PDF',
         }
+
+        await page.evaluate(
+            '''() => {
+                window.__preflightScrolls = 0;
+                Element.prototype.scrollIntoView = function() {
+                    window.__preflightScrolls += 1;
+                };
+            }'''
+        )
+        await page.evaluate("document.getElementById('preflight-button').click()")
+        await page.waitForFunction(
+            "document.getElementById('preflight-result').textContent.includes('Критических проблем')"
+        )
+        preflight_state = await page.evaluate(
+            '''() => ({
+                scrolls: window.__preflightScrolls,
+                focused: document.activeElement.id
+            })'''
+        )
+        assert preflight_state['scrolls'] >= 2
+        assert preflight_state['focused'] == 'preflight-result'
+
         resource_urls = await page.evaluate(
             "() => performance.getEntriesByType('resource').map(entry => entry.name)"
         )

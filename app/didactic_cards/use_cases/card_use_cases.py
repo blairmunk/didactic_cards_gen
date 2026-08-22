@@ -332,6 +332,9 @@ class PreflightDocument:
     AUTOFIT_MARKER = re.compile(
         r'DIDACTIC-CARDS-AUTOFIT:(\d+):(front|back):([a-z]+)'
     )
+    HBOX_MARKER = re.compile(
+        r'DIDACTIC-CARDS-HBOX-(BEGIN|END):(\d+):(front|back)'
+    )
 
     def __init__(
         self,
@@ -434,11 +437,33 @@ class PreflightDocument:
                 side=side,
             ))
 
-        if 'Overfull \\hbox' in result.log:
+        horizontal_overflows: set[tuple[int, str]] = set()
+        measured_side: tuple[int, str] | None = None
+        for line in result.log.splitlines():
+            marker = self.HBOX_MARKER.search(line)
+            if marker:
+                measured_side = (
+                    (int(marker.group(2)), marker.group(3))
+                    if marker.group(1) == 'BEGIN' else None
+                )
+            elif measured_side and 'Overfull \\hbox' in line:
+                horizontal_overflows.add(measured_side)
+
+        for number, side in sorted(horizontal_overflows):
+            if number > len(deck.cards):
+                continue
+            card = deck.cards[number - 1]
+            side_label = 'лицевая' if side == 'front' else 'оборотная'
             issues.append(PreflightIssue(
                 code='horizontal-overflow',
                 severity='error',
-                message='В документе найден текст, не помещающийся по ширине',
+                message=(
+                    f'Карточка {number}: {side_label} сторона '
+                    'не помещается по ширине'
+                ),
+                card_id=card.id,
+                card_number=number,
+                side=side,
             ))
         if 'Missing character:' in result.log:
             issues.append(PreflightIssue(

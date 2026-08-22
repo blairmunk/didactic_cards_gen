@@ -70,6 +70,14 @@ def test_pdf_preview_uses_generated_pdf_in_a_blob_dialog():
     assert 'URL.revokeObjectURL(pdfPreviewUrl)' in script
 
 
+def test_preflight_result_is_focused_and_scrolled_into_view():
+    index = (WEB_ROOT / 'templates/cards/index.html').read_text(encoding='utf-8')
+    script = (WEB_ROOT / 'static/cards/deck.js').read_text(encoding='utf-8')
+    assert 'id="preflight-result"' in index and 'tabindex="-1"' in index
+    assert 'preflightResult.focus({preventScroll: true})' in script
+    assert "preflightResult.scrollIntoView({behavior: 'smooth', block: 'start'})" in script
+
+
 def test_screenshot_script_uses_stable_card_id_and_captures_profiles():
     script = (
         Path(__file__).parents[2] / 'scripts' / 'capture_screenshots.py'

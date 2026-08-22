@@ -280,6 +280,29 @@ def printer_profiles():
     return _render_printer_profiles()
 
 
+@cards_bp.route('/printer_profiles/calibration-sheet', methods=['POST'])
+def calibration_sheet():
+    profile_id = request.form.get('profile_id', '')
+    renderer = _renderer(profile_id)
+    render_sheet = getattr(renderer, 'render_calibration_sheet', None)
+    if render_sheet is None:
+        abort(501, description='Калибровочный лист недоступен')
+    result = _compiler().compile(render_sheet())
+    if not result.success:
+        status_by_kind = {'timeout': 504, 'unavailable': 503, 'compile-error': 422}
+        return _render_printer_profiles(
+            'Не удалось сформировать калибровочный PDF.',
+            status_by_kind.get(result.error_kind, 500),
+        )
+    suffix = profile_id or 'base'
+    return send_file(
+        io.BytesIO(result.pdf_data),
+        mimetype='application/pdf',
+        as_attachment=True,
+        download_name=f'printer-calibration-{suffix}.pdf',
+    )
+
+
 @cards_bp.route('/printer_profiles/save', methods=['POST'])
 def save_printer_profile():
     save_profile = getattr(_repo(), 'save_printer_profile', None)

@@ -369,10 +369,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const preflightButton = document.getElementById('preflight-button');
     const preflightResult = document.getElementById('preflight-result');
     if (preflightButton && preflightResult) {
+        function showPreflightResult() {
+            preflightResult.focus({preventScroll: true});
+            preflightResult.scrollIntoView({behavior: 'smooth', block: 'start'});
+        }
+
         preflightButton.addEventListener('click', async function() {
             preflightButton.disabled = true;
             preflightResult.className = 'preflight-result';
             preflightResult.textContent = 'Компиляция и проверка…';
+            showPreflightResult();
             try {
                 const body = new FormData();
                 body.set('profile_id', printProfile ? printProfile.value : '');
@@ -418,6 +424,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 preflightResult.textContent = 'Ошибка сети при проверке документа';
             } finally {
                 preflightButton.disabled = false;
+                showPreflightResult();
             }
         });
     }

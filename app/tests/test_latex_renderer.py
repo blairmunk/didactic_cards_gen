@@ -15,6 +15,19 @@ from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 GOLDEN_DIR = Path(__file__).with_name('golden')
 
 
+def _card_measurement_log(log: str) -> str:
+    measured = []
+    active = False
+    for line in log.splitlines():
+        if 'DIDACTIC-CARDS-HBOX-BEGIN:' in line:
+            active = True
+        if active:
+            measured.append(line)
+        if 'DIDACTIC-CARDS-HBOX-END:' in line:
+            active = False
+    return '\n'.join(measured)
+
+
 def _read_pbm(path: Path) -> tuple[int, int, bytes]:
     data = path.read_bytes()
     match = re.match(rb'P4\s+(\d+)\s+(\d+)\s', data)
@@ -115,6 +128,20 @@ class TestLatexRenderer:
         result = renderer.render(padded_deck)
         assert r'\begin{document}' in result
         assert r'\end{document}' in result
+
+    def test_calibration_sheet_contains_two_sides_scale_and_offsets(self):
+        source = LatexRenderer(
+            duplex_mode='short-edge',
+            front_offset_x_mm=0.25,
+            back_offset_x_mm=-1.5,
+            back_offset_y_mm=0.75,
+        ).render_calibration_sheet()
+
+        assert source.count(r'\newpage') == 1
+        assert 'контрольная длина 100 мм' in source
+        assert r'\calibrationtargets{0.25}{0.0}{black}' in source
+        assert r'\calibrationtargets{-1.5}{0.75}{magenta,dashed}' in source
+        assert r'\texttt{short-edge}' in source
 
     def test_render_contains_card_content(self):
         renderer = LatexRenderer()
@@ -407,6 +434,47 @@ def test_real_latex_log_marks_vertical_card_overflow():
     )
     assert result.success, result.log
     assert 'DIDACTIC-CARDS-OVERFLOW:1:front' in result.log
+
+
+@pytest.mark.integration
+def test_real_latex_marks_only_card_scoped_horizontal_overflow():
+    if not shutil.which('pdflatex'):
+        pytest.skip('pdflatex is required for the overflow integration test')
+
+    compiler = PdfLatexCompiler()
+    short = compiler.compile(
+        LatexRenderer(cards_per_row=1, rows_per_page=1).render(
+            CardDeck([Card(front='2 + 2', back='4')])
+        )
+    )
+    long = compiler.compile(
+        LatexRenderer(cards_per_row=1, rows_per_page=1).render(
+            CardDeck([Card(front='X' * 500, back='4')])
+        )
+    )
+
+    assert short.success and long.success
+    assert 'Overfull \\hbox' not in _card_measurement_log(short.log)
+    assert 'Overfull \\hbox' in _card_measurement_log(long.log)
+
+
+@pytest.mark.integration
+def test_real_calibration_sheet_is_a_two_page_a4_pdf(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdfinfo'):
+        pytest.skip('pdflatex and pdfinfo are required for calibration PDF test')
+
+    result = PdfLatexCompiler().compile(
+        LatexRenderer(back_offset_x_mm=1.25).render_calibration_sheet()
+    )
+
+    assert result.success, result.log
+    pdf_path = tmp_path / 'calibration.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    info = subprocess.run(
+        ['pdfinfo', str(pdf_path)], capture_output=True, text=True, check=True
+    ).stdout
+    assert 'Pages:           2' in info
+    assert 'A4' in info
 
 
 @pytest.mark.integration
