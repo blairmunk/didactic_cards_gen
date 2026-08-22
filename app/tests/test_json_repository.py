@@ -113,6 +113,8 @@ def test_corruption_is_reported_instead_of_silently_erased(json_repo):
 
 def test_unknown_deck_cannot_create_orphan_cards(json_repo):
     with pytest.raises(KeyError):
+        json_repo.load_cards("missing")
+    with pytest.raises(KeyError):
         json_repo.save_cards("missing", CardDeck([Card(front="orphan")]))
     assert not json_repo._cards_path("missing").exists()
 

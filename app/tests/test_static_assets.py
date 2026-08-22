@@ -6,10 +6,6 @@ import pytest
 WEB_ROOT = Path(__file__).parents[1] / 'didactic_cards' / 'web'
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='BUG-UI-001: drag code overwrites original indices before sending the reorder permutation',
-)
 def test_drag_drop_builds_order_before_renumbering_rows():
     source = (WEB_ROOT / 'static' / 'cards' / 'deck.js').read_text(encoding='utf-8')
     drop_handler = source.split("row.addEventListener('drop'", 1)[1]

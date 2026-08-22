@@ -10,6 +10,15 @@ from .entities import Card, Deck, CardDeck
 MutationResult = TypeVar('MutationResult')
 
 
+class ConcurrentModificationError(RuntimeError):
+    def __init__(self, expected: int, actual: int):
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f'Deck was modified concurrently (expected version {expected}, actual {actual})'
+        )
+
+
 @dataclass
 class CompileResult:
     success: bool
@@ -73,12 +82,19 @@ class DeckRepository(ABC):
         self,
         deck_id: str,
         mutation: Callable[[CardDeck], tuple[MutationResult, bool]],
+        *,
+        expected_version: int | None = None,
     ) -> MutationResult:
         """Apply one read-modify-write operation.
 
         Adapters with transactional facilities should override this method.
         The default keeps compatibility with simple in-memory test doubles.
         """
+        deck_info = self.get_deck(deck_id)
+        if deck_info is None:
+            raise KeyError(deck_id)
+        if expected_version is not None and deck_info.version != expected_version:
+            raise ConcurrentModificationError(expected_version, deck_info.version)
         deck = self.load_cards(deck_id)
         result, changed = mutation(deck)
         if changed:

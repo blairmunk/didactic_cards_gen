@@ -52,17 +52,21 @@ def test_card_html_workflow(client, repo, deck_id):
     assert repo.load_cards(deck_id).cards[0].front == "Question"
 
     client.post(f"/deck/{deck_id}/add_cards_bulk", data={"bulk": "Q2 | A2"})
-    edit_page = client.get(f"/deck/{deck_id}/edit_card/1")
+    second_id = repo.load_cards(deck_id).cards[1].id
+    edit_page = client.get(f"/deck/{deck_id}/edit_card/{second_id}")
     assert edit_page.status_code == 200
     assert "Q2" in edit_page.text
 
     client.post(
-        f"/deck/{deck_id}/edit_card/1",
+        f"/deck/{deck_id}/edit_card/{second_id}",
         data={"front": "Q2+", "back": "A2+"},
     )
     assert repo.load_cards(deck_id).cards[1].front == "Q2+"
 
-    response = client.post(f"/deck/{deck_id}/delete_card/0", follow_redirects=True)
+    first_id = repo.load_cards(deck_id).cards[0].id
+    response = client.post(
+        f"/deck/{deck_id}/delete_card/{first_id}", follow_redirects=True
+    )
     assert "Question" not in response.text
 
     client.post(f"/deck/{deck_id}/reset")
@@ -104,17 +108,24 @@ def test_api_card_workflow(client, deck_id):
     )
     assert added.status_code == 200
     assert added.json["cards_count"] == 1
+    first_id = added.json["card"]["id"]
 
-    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "B", "back": "2"})
-    reordered = client.post(f"/api/deck/{deck_id}/reorder", json={"order": [1, 0]})
+    second = client.post(
+        f"/api/deck/{deck_id}/add_card", json={"front": "B", "back": "2"}
+    )
+    second_id = second.json["card"]["id"]
+    reordered = client.post(
+        f"/api/deck/{deck_id}/reorder", json={"order": [second_id, first_id]}
+    )
     assert reordered.status_code == 200
 
     edited = client.put(
-        f"/api/deck/{deck_id}/edit_card/0", json={"front": "B+", "back": "2+"}
+        f"/api/deck/{deck_id}/edit_card/{second_id}",
+        json={"front": "B+", "back": "2+"},
     )
     assert edited.json["card"]["front"] == "B+"
 
-    deleted = client.delete(f"/api/deck/{deck_id}/delete_card/1")
+    deleted = client.delete(f"/api/deck/{deck_id}/delete_card/{first_id}")
     assert deleted.status_code == 200
     assert deleted.json["cards_count"] == 1
 
@@ -124,8 +135,8 @@ def test_api_card_workflow(client, deck_id):
     [
         ("post", "/api/deck/{deck}/add_card", {}, 415),
         ("post", "/api/deck/{deck}/add_card", {"json": {"front": "", "back": ""}}, 400),
-        ("delete", "/api/deck/{deck}/delete_card/99", {}, 404),
-        ("put", "/api/deck/{deck}/edit_card/99", {"json": {"front": "X"}}, 404),
+        ("delete", "/api/deck/{deck}/delete_card/missing", {}, 404),
+        ("put", "/api/deck/{deck}/edit_card/missing", {"json": {"front": "X"}}, 404),
         ("post", "/api/deck/{deck}/reorder", {"json": {"order": [99]}}, 400),
     ],
 )
@@ -167,7 +178,7 @@ def test_missing_and_invalid_html_resources_redirect(client, deck_id):
     assert client.get("/deck/missing").status_code == 302
     assert client.get("/deck/missing/edit").status_code == 302
     assert client.get("/deck/missing/edit_card/0").status_code == 302
-    assert client.get(f"/deck/{deck_id}/edit_card/99").status_code == 302
+    assert client.get(f"/deck/{deck_id}/edit_card/missing").status_code == 302
 
 
 def test_api_empty_json_contracts(client, deck_id):
@@ -196,7 +207,7 @@ def test_html_unknown_deck_mutation_redirects(client):
 def test_repository_corruption_has_safe_html_and_api_errors(client, repo, monkeypatch):
     error = RepositoryCorruptionError(repo.decks_file, "test failure")
 
-    def fail(*_args):
+    def fail(*_args, **_kwargs):
         raise error
 
     monkeypatch.setattr(repo, "list_decks", fail)
@@ -214,15 +225,15 @@ def test_repository_corruption_has_safe_html_and_api_errors(client, repo, monkey
 
 
 def test_delete_card_requires_non_get_method(client, deck_id):
-    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"})
-    response = client.get(f"/deck/{deck_id}/delete_card/0")
+    added = client.post(
+        f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": "A"}
+    )
+    response = client.get(
+        f"/deck/{deck_id}/delete_card/{added.json['card']['id']}"
+    )
     assert response.status_code == 405
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-WEB-002: non-string JSON values cause an unhandled AttributeError",
-)
 def test_api_rejects_non_string_card_fields(client, deck_id):
     response = client.post(
         f"/api/deck/{deck_id}/add_card", json={"front": 123, "back": None}
@@ -230,12 +241,59 @@ def test_api_rejects_non_string_card_fields(client, deck_id):
     assert response.status_code == 400
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-WEB-003: malformed reorder types can raise TypeError instead of a validation response",
-)
 def test_api_rejects_non_list_reorder_payload(client, deck_id):
     response = client.post(f"/api/deck/{deck_id}/reorder", json={"order": None})
+    assert response.status_code == 400
+
+
+def test_api_rejects_non_object_delete_and_non_string_edit(client, deck_id):
+    assert client.delete(
+        f"/api/deck/{deck_id}/delete_card/missing", json=[]
+    ).status_code == 400
+    assert client.put(
+        f"/api/deck/{deck_id}/edit_card/missing",
+        json={"front": "Q", "back": 7},
+    ).status_code == 400
+
+
+def test_api_rejects_uuid_reorder_with_wrong_members(client, deck_id):
+    response = client.post(
+        f"/api/deck/{deck_id}/reorder", json={"order": ["missing"]}
+    )
+    assert response.status_code == 400
+
+
+def test_stale_deck_version_is_rejected(client, repo, deck_id):
+    initial_version = repo.get_deck(deck_id).version
+    first = client.post(
+        f"/api/deck/{deck_id}/add_card",
+        json={"front": "first", "version": initial_version},
+    )
+    assert first.status_code == 200
+    assert first.json["deck_version"] > initial_version
+
+    stale = client.post(
+        f"/api/deck/{deck_id}/add_card",
+        json={"front": "stale", "version": initial_version},
+    )
+    assert stale.status_code == 409
+    assert stale.json["current_version"] == first.json["deck_version"]
+    assert [card.front for card in repo.load_cards(deck_id).cards] == ["first"]
+
+    html_conflict = client.post(
+        f"/deck/{deck_id}/add_cards_bulk",
+        data={"bulk": "second || answer", "version": initial_version},
+    )
+    assert html_conflict.status_code == 409
+    assert "Колода уже изменена" in html_conflict.text
+
+
+@pytest.mark.parametrize("version", [True, 1.5, {}, "bad", 0, -1])
+def test_api_rejects_invalid_deck_version(client, deck_id, version):
+    response = client.post(
+        f"/api/deck/{deck_id}/add_card",
+        json={"front": "Q", "version": version},
+    )
     assert response.status_code == 400
 
 

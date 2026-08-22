@@ -7,6 +7,7 @@ from flask import (Blueprint, render_template, request, redirect,
 
 from ..adapters.latex_renderer import UnsafeLatexError
 from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
+from ..domain.interfaces import ConcurrentModificationError
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
@@ -44,6 +45,19 @@ def _cards_per_page():
 
 def _max_cards():
     return current_app.config.get('MAX_CARDS')
+
+
+def _optional_version(value) -> int | None:
+    if value is None or value == '':
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        abort(400, description='Некорректная версия колоды')
+    if isinstance(value, str) and not value.isdigit():
+        abort(400, description='Некорректная версия колоды')
+    version = int(value)
+    if version <= 0:
+        abort(400, description='Некорректная версия колоды')
+    return version
 
 
 def _csrf_token() -> str:
@@ -110,6 +124,19 @@ def handle_repository_corruption(error):
         ],
         full_log=str(error) if current_app.debug else '',
     ), 500
+
+
+@cards_bp.app_errorhandler(ConcurrentModificationError)
+def handle_concurrent_modification(error):
+    message = 'Колода уже изменена в другой вкладке. Обновите страницу.'
+    if request.path.startswith('/api/'):
+        return jsonify({
+            'error': message,
+            'current_version': error.actual,
+        }), 409
+    return render_template(
+        'cards/error.html', deck=None, errors=[message], full_log=''
+    ), 409
 
 
 def _render_deck_error(deck_id: str, message: str, status: int = 409):
@@ -190,7 +217,9 @@ def add_card(deck_id):
     back = request.form.get('back', '').strip()
     if front or back:
         try:
-            AddCard(_repo(), _max_cards()).execute(deck_id, front, back)
+            AddCard(_repo(), _max_cards()).execute(
+                deck_id, front, back, _optional_version(request.form.get('version'))
+            )
         except CardLimitExceeded as error:
             return _render_deck_error(deck_id, str(error))
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
@@ -200,7 +229,9 @@ def add_card(deck_id):
 def add_cards_bulk(deck_id):
     bulk = request.form.get('bulk', '')
     try:
-        AddCardsBulk(_repo(), _max_cards()).execute(deck_id, bulk)
+        AddCardsBulk(_repo(), _max_cards()).execute(
+            deck_id, bulk, _optional_version(request.form.get('version'))
+        )
     except CardLimitExceeded as error:
         return _render_deck_error(deck_id, str(error))
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
@@ -213,7 +244,9 @@ def import_csv(deck_id):
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
     try:
         file_bytes = file.stream.read()
-        ImportCsv(_repo(), _max_cards()).execute(deck_id, file_bytes)
+        ImportCsv(_repo(), _max_cards()).execute(
+            deck_id, file_bytes, _optional_version(request.form.get('version'))
+        )
     except CardLimitExceeded as error:
         return _render_deck_error(deck_id, str(error))
     except UnicodeDecodeError:
@@ -228,26 +261,32 @@ def import_csv(deck_id):
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-@cards_bp.route('/deck/<deck_id>/delete_card/<int:index>', methods=['POST'])
-def delete_card(deck_id, index):
-    DeleteCard(_repo()).execute(deck_id, index)
+@cards_bp.route('/deck/<deck_id>/delete_card/<card_id>', methods=['POST'])
+def delete_card(deck_id, card_id):
+    DeleteCard(_repo()).execute(
+        deck_id, card_id, _optional_version(request.form.get('version'))
+    )
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
-@cards_bp.route('/deck/<deck_id>/edit_card/<int:index>', methods=['GET', 'POST'])
-def edit_card(deck_id, index):
+@cards_bp.route('/deck/<deck_id>/edit_card/<card_id>', methods=['GET', 'POST'])
+def edit_card(deck_id, card_id):
     deck_info = GetDeckInfo(_repo()).execute(deck_id)
     if not deck_info:
         return redirect(url_for('cards.decks_list'))
 
     card_deck = GetDeck(_repo()).execute(deck_id)
-    if index < 0 or index >= len(card_deck):
+    index = card_deck.index_of(card_id)
+    if index is None:
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
     if request.method == 'POST':
         front = request.form.get('front', '')
         back = request.form.get('back', '')
-        EditCard(_repo()).execute(deck_id, index, front, back)
+        EditCard(_repo()).execute(
+            deck_id, card_id, front, back,
+            _optional_version(request.form.get('version')),
+        )
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
     card = card_deck.cards[index].to_dict()
@@ -257,7 +296,9 @@ def edit_card(deck_id, index):
 
 @cards_bp.route('/deck/<deck_id>/reset', methods=['POST'])
 def reset(deck_id):
-    ResetCards(_repo()).execute(deck_id)
+    ResetCards(_repo()).execute(
+        deck_id, _optional_version(request.form.get('version'))
+    )
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
@@ -334,16 +375,22 @@ def preview_latex(deck_id):
 @cards_bp.route('/api/deck/<deck_id>/add_card', methods=['POST'])
 def api_add_card(deck_id):
     data = request.get_json()
-    if not data:
+    if not isinstance(data, dict) or not data:
         return jsonify({'error': 'Нет данных'}), 400
 
-    front = data.get('front', '').strip()
-    back = data.get('back', '').strip()
+    front_value = data.get('front', '')
+    back_value = data.get('back', '')
+    if not isinstance(front_value, str) or not isinstance(back_value, str):
+        return jsonify({'error': 'Поля карточки должны быть строками'}), 400
+    front = front_value.strip()
+    back = back_value.strip()
     if not front and not back:
         return jsonify({'error': 'Заполните хотя бы одно поле'}), 400
 
     try:
-        card, index = AddCard(_repo(), _max_cards()).execute(deck_id, front, back)
+        card, index = AddCard(_repo(), _max_cards()).execute(
+            deck_id, front, back, _optional_version(data.get('version'))
+        )
     except CardLimitExceeded as error:
         return jsonify({'error': str(error)}), 409
     card_deck = GetDeck(_repo()).execute(deck_id)
@@ -352,38 +399,67 @@ def api_add_card(deck_id):
         'ok': True,
         'card': card.to_dict(),
         'index': index,
-        'cards_count': len(card_deck)
+        'cards_count': len(card_deck),
+        'deck_version': GetDeckInfo(_repo()).execute(deck_id).version,
     })
 
 
-@cards_bp.route('/api/deck/<deck_id>/delete_card/<int:index>', methods=['DELETE'])
-def api_delete_card(deck_id, index):
-    result = DeleteCard(_repo()).execute(deck_id, index)
+@cards_bp.route('/api/deck/<deck_id>/delete_card/<card_id>', methods=['DELETE'])
+def api_delete_card(deck_id, card_id):
+    data = request.get_json(silent=True)
+    if data is not None and not isinstance(data, dict):
+        return jsonify({'error': 'Некорректные данные'}), 400
+    result = DeleteCard(_repo()).execute(
+        deck_id, card_id, _optional_version((data or {}).get('version'))
+    )
     if not result:
         return jsonify({'error': 'Неверный индекс'}), 404
     card_deck = GetDeck(_repo()).execute(deck_id)
-    return jsonify({'ok': True, 'cards_count': len(card_deck)})
+    return jsonify({
+        'ok': True,
+        'cards_count': len(card_deck),
+        'deck_version': GetDeckInfo(_repo()).execute(deck_id).version,
+    })
 
 
 @cards_bp.route('/api/deck/<deck_id>/reorder', methods=['POST'])
 def api_reorder(deck_id):
     data = request.get_json()
-    if not data or 'order' not in data:
+    if not isinstance(data, dict) or 'order' not in data:
         return jsonify({'error': 'Нет данных'}), 400
-    result = ReorderCards(_repo()).execute(deck_id, data['order'])
+    order = data['order']
+    if not isinstance(order, list) or any(
+        not isinstance(card_id, str) for card_id in order
+    ):
+        return jsonify({'error': 'Некорректный порядок'}), 400
+    result = ReorderCards(_repo()).execute(
+        deck_id, order, _optional_version(data.get('version'))
+    )
     if not result:
         return jsonify({'error': 'Некорректный порядок'}), 400
-    return jsonify({'ok': True})
+    return jsonify({
+        'ok': True,
+        'deck_version': GetDeckInfo(_repo()).execute(deck_id).version,
+    })
 
 
-@cards_bp.route('/api/deck/<deck_id>/edit_card/<int:index>', methods=['PUT'])
-def api_edit_card(deck_id, index):
+@cards_bp.route('/api/deck/<deck_id>/edit_card/<card_id>', methods=['PUT'])
+def api_edit_card(deck_id, card_id):
     data = request.get_json()
-    if not data:
+    if not isinstance(data, dict) or not data:
         return jsonify({'error': 'Нет данных'}), 400
+    front = data.get('front', '')
+    back = data.get('back', '')
+    if not isinstance(front, str) or not isinstance(back, str):
+        return jsonify({'error': 'Поля карточки должны быть строками'}), 400
     result = EditCard(_repo()).execute(
-        deck_id, index, data.get('front', ''), data.get('back', ''))
+        deck_id, card_id, front, back, _optional_version(data.get('version')))
     if not result:
         return jsonify({'error': 'Неверный индекс'}), 404
     card_deck = GetDeck(_repo()).execute(deck_id)
-    return jsonify({'ok': True, 'card': card_deck.cards[index].to_dict()})
+    index = card_deck.index_of(card_id)
+    return jsonify({
+        'ok': True,
+        'card': card_deck.cards[index].to_dict(),
+        'deck_version': GetDeckInfo(_repo()).execute(deck_id).version,
+    })

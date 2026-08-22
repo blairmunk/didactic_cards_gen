@@ -293,6 +293,7 @@ class JsonRepository(DeckRepository, CardRepository):
         self._write_json(self._cards_path(deck_id), card_deck.to_list())
         deck.card_ids = [card.id for card in card_deck.cards]
         deck.updated_at = datetime.now(timezone.utc)
+        deck.version += 1
         self._save_deck_meta_unlocked(deck)
 
     # Integrity and recovery
@@ -445,6 +446,7 @@ class JsonRepository(DeckRepository, CardRepository):
             deck.name = name
             deck.description = description
             deck.updated_at = datetime.now(timezone.utc)
+            deck.version += 1
             self._save_deck_meta_unlocked(deck)
             return deck
 
@@ -494,8 +496,17 @@ class JsonRepository(DeckRepository, CardRepository):
         self,
         deck_id: str,
         mutation: Callable[[CardDeck], tuple[MutationResult, bool]],
+        *,
+        expected_version: int | None = None,
     ) -> MutationResult:
         with self._transaction():
+            from ..domain.interfaces import ConcurrentModificationError
+
+            deck = self._get_deck_unlocked(deck_id)
+            if deck is None:
+                raise DeckNotFoundError(deck_id)
+            if expected_version is not None and deck.version != expected_version:
+                raise ConcurrentModificationError(expected_version, deck.version)
             card_deck = self._load_cards_unlocked(deck_id)
             result, changed = mutation(card_deck)
             if changed:

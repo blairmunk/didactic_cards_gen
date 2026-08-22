@@ -22,12 +22,12 @@ def test_card_crud_and_reorder(repo, deck_id):
     second, second_index = AddCard(repo).execute(deck_id, "B", "2")
     assert (first.front, first_index, second.front, second_index) == ("A", 0, "B", 1)
 
-    assert EditCard(repo).execute(deck_id, 0, "A+", "1+") is True
-    assert ReorderCards(repo).execute(deck_id, [1, 0]) is True
+    assert EditCard(repo).execute(deck_id, first.id, "A+", "1+") is True
+    assert ReorderCards(repo).execute(deck_id, [second.id, first.id]) is True
     assert [card.front for card in GetDeck(repo).execute(deck_id).cards] == ["B", "A+"]
 
-    assert DeleteCard(repo).execute(deck_id, 99) is False
-    assert DeleteCard(repo).execute(deck_id, 0) is True
+    assert DeleteCard(repo).execute(deck_id, "missing") is False
+    assert DeleteCard(repo).execute(deck_id, second.id) is True
     assert [card.front for card in repo.load_cards(deck_id).cards] == ["A+"]
 
     ResetCards(repo).execute(deck_id)

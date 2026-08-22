@@ -7,7 +7,11 @@ from pathlib import Path
 from typing import Callable, Iterator, Optional, TypeVar
 
 from ..domain.entities import Card, CardDeck, Deck
-from ..domain.interfaces import CardRepository, DeckRepository
+from ..domain.interfaces import (
+    CardRepository,
+    ConcurrentModificationError,
+    DeckRepository,
+)
 from .json_repository import DeckNotFoundError, JsonRepository
 
 
@@ -187,6 +191,7 @@ class SqliteRepository(DeckRepository, CardRepository):
             card_ids=card_ids,
             created_at=datetime.fromisoformat(row['created_at']),
             updated_at=datetime.fromisoformat(row['updated_at']),
+            version=row['version'],
         )
 
     @staticmethod
@@ -241,8 +246,8 @@ class SqliteRepository(DeckRepository, CardRepository):
         connection.execute(
             '''
             INSERT INTO decks(
-                id, parent_id, name, description, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+                id, parent_id, name, description, created_at, updated_at, version
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 deck.id,
@@ -251,6 +256,7 @@ class SqliteRepository(DeckRepository, CardRepository):
                 deck.description,
                 deck.created_at.isoformat(),
                 deck.updated_at.isoformat(),
+                deck.version,
             ),
         )
 
@@ -404,8 +410,15 @@ class SqliteRepository(DeckRepository, CardRepository):
         self,
         deck_id: str,
         mutation: Callable[[CardDeck], tuple[MutationResult, bool]],
+        *,
+        expected_version: int | None = None,
     ) -> MutationResult:
         with self._transaction(write=True) as connection:
+            deck = self._get_deck(connection, deck_id)
+            if deck is None:
+                raise DeckNotFoundError(deck_id)
+            if expected_version is not None and deck.version != expected_version:
+                raise ConcurrentModificationError(expected_version, deck.version)
             card_deck = self._load_cards(connection, deck_id)
             result, changed = mutation(card_deck)
             if changed:

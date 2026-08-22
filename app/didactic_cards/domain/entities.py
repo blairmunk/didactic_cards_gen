@@ -67,6 +67,7 @@ class Deck:
     id: str = field(default_factory=_new_id)
     parent_id: Optional[str] = None
     card_ids: list[str] = field(default_factory=list)
+    version: int = 1
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)
 
@@ -119,6 +120,7 @@ class Deck:
             'name': self.name,
             'description': self.description,
             'card_ids': list(self.card_ids),
+            'version': self.version,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }
@@ -131,6 +133,7 @@ class Deck:
             name=data.get('name', 'Новая колода'),
             description=data.get('description', ''),
             card_ids=data.get('card_ids', []),
+            version=data.get('version', 1),
             created_at=datetime.fromisoformat(data['created_at']) if 'created_at' in data else _now(),
             updated_at=datetime.fromisoformat(data['updated_at']) if 'updated_at' in data else _now(),
         )
@@ -157,16 +160,38 @@ class CardDeck:
             return True
         return False
 
+    def index_of(self, card_id: str) -> int | None:
+        return next(
+            (index for index, card in enumerate(self.cards) if card.id == card_id),
+            None,
+        )
+
+    def delete_by_id(self, card_id: str) -> bool:
+        index = self.index_of(card_id)
+        return self.delete(index) if index is not None else False
+
     def edit(self, index: int, front: str, back: str) -> bool:
         if 0 <= index < len(self.cards):
             self.cards[index].update(front, back)
             return True
         return False
 
+    def edit_by_id(self, card_id: str, front: str, back: str) -> bool:
+        index = self.index_of(card_id)
+        return self.edit(index, front, back) if index is not None else False
+
     def reorder(self, new_order: list[int]) -> bool:
         if sorted(new_order) != list(range(len(self.cards))):
             return False
         self.cards = [self.cards[i] for i in new_order]
+        return True
+
+    def reorder_by_ids(self, new_order: list[str]) -> bool:
+        current_ids = [card.id for card in self.cards]
+        if len(new_order) != len(current_ids) or set(new_order) != set(current_ids):
+            return False
+        cards_by_id = {card.id: card for card in self.cards}
+        self.cards = [cards_by_id[card_id] for card_id in new_order]
         return True
 
     def clear(self) -> None:

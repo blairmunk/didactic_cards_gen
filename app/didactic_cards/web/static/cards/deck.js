@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
 
     const DECK_ID = document.body.dataset.deckId;
+    let deckVersion = parseInt(document.body.dataset.deckVersion, 10);
     const CARDS_PER_PAGE = parseInt(document.body.dataset.cardsPerPage) || 8;
     const API = {
         addCard:    '/api/deck/' + DECK_ID + '/add_card',
@@ -50,27 +51,26 @@ document.addEventListener('DOMContentLoaded', function() {
             count > 0 ? '' : 'none';
     }
 
+    function updateDeckVersion(version) {
+        if (!Number.isInteger(version)) return;
+        deckVersion = version;
+        document.body.dataset.deckVersion = version;
+        document.querySelectorAll('input[name="version"]').forEach(function(input) {
+            input.value = version;
+        });
+    }
+
     function renumberRows() {
         const rows = document.querySelectorAll('#cards-tbody tr');
         rows.forEach((row, i) => {
-            row.dataset.index = i;
             row.querySelector('.row-number').textContent = i + 1;
-            const editLink = row.querySelector('a[href*="edit_card"]');
-            if (editLink) editLink.href = API.editPage + i;
-            const delBtn = row.querySelector('.delete-btn');
-            if (delBtn) delBtn.dataset.index = i;
         });
     }
 
     function renumberPreviews() {
         const cards = document.querySelectorAll('#preview-grid .preview-card');
         cards.forEach((card, i) => {
-            card.dataset.index = i;
             card.querySelector('.card-number').textContent = '#' + (i + 1);
-            const editLink = card.querySelector('a[href*="edit_card"]');
-            if (editLink) editLink.href = API.editPage + i;
-            const delBtn = card.querySelector('.delete-btn');
-            if (delBtn) delBtn.dataset.index = i;
         });
     }
 
@@ -82,8 +82,8 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ── Удаление/добавление в превью ──
 
-    function removeCardFromPreview(index) {
-        const card = document.querySelector('#preview-grid .preview-card[data-index="' + index + '"]');
+    function removeCardFromPreview(cardId) {
+        const card = document.querySelector('#preview-grid .preview-card[data-card-id="' + cardId + '"]');
         if (card) card.remove();
         renumberPreviews();
     }
@@ -101,12 +101,12 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const div = document.createElement('div');
         div.className = 'preview-card';
-        div.dataset.index = index;
+        div.dataset.cardId = cardData.id;
         div.innerHTML =
             '<span class="card-number">#' + (index + 1) + '</span>' +
             '<span class="card-actions">' +
-            '    <a href="' + API.editPage + index + '" title="Редактировать">✏️</a>' +
-            '    <a href="#" class="delete-btn" data-index="' + index + '" title="Удалить">🗑️</a>' +
+            '    <a href="' + API.editPage + cardData.id + '" title="Редактировать">✏️</a>' +
+            '    <a href="#" class="delete-btn" data-card-id="' + cardData.id + '" title="Удалить">🗑️</a>' +
             '</span>' +
             '<div class="preview-card-inner">' +
             '    <div class="preview-side preview-front">' +
@@ -147,7 +147,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const resp = await fetch(API.addCard, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ front: front, back: back })
+                    body: JSON.stringify({ front: front, back: back, version: deckVersion })
                 });
                 const data = await resp.json();
 
@@ -159,6 +159,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 addCardRow(data.index, data.card);
                 addCardToPreview(data.index, data.card);
                 updateCounters(data.cards_count);
+                updateDeckVersion(data.deck_version);
                 showSuccess('Карточка добавлена!');
 
                 frontEl.value = '';
@@ -186,15 +187,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
         const tr = document.createElement('tr');
         tr.draggable = true;
-        tr.dataset.index = index;
+        tr.dataset.cardId = card.id;
         tr.innerHTML =
             '<td class="drag-handle" title="Перетащите для сортировки">⠿</td>' +
             '<td class="row-number">' + (index + 1) + '</td>' +
             '<td class="card-text">' + escapeHtml(card.front) + '</td>' +
             '<td class="card-text">' + escapeHtml(card.back) + '</td>' +
             '<td class="actions">' +
-            '    <a href="' + API.editPage + index + '" title="Редактировать">✏️</a>' +
-            '    <a href="#" class="delete-btn" data-index="' + index + '" title="Удалить">🗑️</a>' +
+            '    <a href="' + API.editPage + card.id + '" title="Редактировать">✏️</a>' +
+            '    <a href="#" class="delete-btn" data-card-id="' + card.id + '" title="Удалить">🗑️</a>' +
             '</td>';
         tbody.appendChild(tr);
         attachRowDragEvents(tr);
@@ -207,12 +208,16 @@ document.addEventListener('DOMContentLoaded', function() {
         if (!btn) return;
         btn.addEventListener('click', async function(e) {
             e.preventDefault();
-            const idx = parseInt(btn.dataset.index);
-            if (!confirm('Удалить карточку №' + (idx + 1) + '?')) return;
+            const cardId = btn.dataset.cardId;
+            const row = document.querySelector('#cards-tbody tr[data-card-id="' + cardId + '"]');
+            const number = row ? row.querySelector('.row-number').textContent : '';
+            if (!confirm('Удалить карточку №' + number + '?')) return;
 
             try {
-                const resp = await fetch(API.deleteCard + idx, {
-                    method: 'DELETE'
+                const resp = await fetch(API.deleteCard + cardId, {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ version: deckVersion })
                 });
                 const data = await resp.json();
 
@@ -221,12 +226,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     return;
                 }
 
-                const row = document.querySelector('#cards-tbody tr[data-index="' + idx + '"]');
                 if (row) row.remove();
                 renumberRows();
 
-                removeCardFromPreview(idx);
+                removeCardFromPreview(cardId);
                 updateCounters(data.cards_count);
+                updateDeckVersion(data.deck_version);
                 showSuccess('Карточка удалена');
 
             } catch (err) {
@@ -247,7 +252,7 @@ document.addEventListener('DOMContentLoaded', function() {
             dragSrcRow = row;
             row.classList.add('dragging');
             e.dataTransfer.effectAllowed = 'move';
-            e.dataTransfer.setData('text/plain', row.dataset.index);
+            e.dataTransfer.setData('text/plain', row.dataset.cardId);
         });
 
         row.addEventListener('dragend', function() {
@@ -277,6 +282,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
             const tbody = document.getElementById('cards-tbody');
             const rows = Array.from(tbody.querySelectorAll('tr'));
+            const previousRows = rows.slice();
             const fromIdx = rows.indexOf(dragSrcRow);
             const toIdx = rows.indexOf(row);
 
@@ -286,31 +292,38 @@ document.addEventListener('DOMContentLoaded', function() {
                 tbody.insertBefore(dragSrcRow, row);
             }
 
-            renumberRows();
-
             const newRows = Array.from(tbody.querySelectorAll('tr'));
-            const order = newRows.map(function(r) { return parseInt(r.dataset.index); });
+            const order = newRows.map(function(r) { return r.dataset.cardId; });
+
+            function restorePreviousOrder() {
+                previousRows.forEach(function(previousRow) {
+                    tbody.appendChild(previousRow);
+                });
+                renumberRows();
+                rebuildPreviewOrder();
+            }
 
             try {
                 const resp = await fetch(API.reorder, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ order: order })
+                    body: JSON.stringify({ order: order, version: deckVersion })
                 });
                 const data = await resp.json();
 
                 if (resp.ok) {
-                    newRows.forEach(function(r, i) { r.dataset.index = i; });
                     renumberRows();
                     rebuildPreviewOrder();
+                    updateDeckVersion(data.deck_version);
                     showSuccess('Порядок сохранён');
                 } else {
                     alert(data.error || 'Ошибка сортировки');
-                    location.reload();
+                    restorePreviousOrder();
+                    if (resp.status === 409) updateDeckVersion(data.current_version);
                 }
             } catch (err) {
                 console.error(err);
-                location.reload();
+                restorePreviousOrder();
             }
         });
     }
@@ -324,11 +337,10 @@ document.addEventListener('DOMContentLoaded', function() {
         const rows = Array.from(tbody.querySelectorAll('tr'));
         const previews = Array.from(grid.querySelectorAll('.preview-card'));
         const previewMap = {};
-        previews.forEach(function(p) { previewMap[p.dataset.index] = p; });
+        previews.forEach(function(p) { previewMap[p.dataset.cardId] = p; });
 
         rows.forEach(function(row) {
-            const oldIdx = row.dataset.index;
-            const preview = previewMap[oldIdx];
+            const preview = previewMap[row.dataset.cardId];
             if (preview) grid.appendChild(preview);
         });
 

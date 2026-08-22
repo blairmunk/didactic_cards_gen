@@ -15,6 +15,7 @@ from didactic_cards.adapters.sqlite_repository import (
     UnsupportedSqliteSchemaError,
 )
 from didactic_cards.domain.entities import Card, CardDeck
+from didactic_cards.domain.interfaces import ConcurrentModificationError
 from didactic_cards.use_cases.card_use_cases import AddCard
 
 
@@ -113,6 +114,19 @@ def test_noop_mutation_does_not_write(sqlite_repo):
     result = sqlite_repo.mutate_cards(deck.id, lambda cards: ('same', False))
     assert result == 'same'
     assert sqlite_repo.get_deck(deck.id).updated_at == before
+
+
+def test_optimistic_version_prevents_stale_mutation(sqlite_repo):
+    deck = sqlite_repo.create_deck('Versioned')
+    AddCard(sqlite_repo).execute(deck.id, 'first', '', deck.version)
+    current = sqlite_repo.get_deck(deck.id)
+    assert current.version > deck.version
+    with pytest.raises(ConcurrentModificationError) as raised:
+        AddCard(sqlite_repo).execute(deck.id, 'stale', '', deck.version)
+    assert raised.value.actual == current.version
+    assert [card.front for card in sqlite_repo.load_cards(deck.id).cards] == ['first']
+    with pytest.raises(DeckNotFoundError):
+        AddCard(sqlite_repo).execute('missing', 'Q', '')
 
 
 def test_threaded_mutations_do_not_lose_updates(sqlite_repo):

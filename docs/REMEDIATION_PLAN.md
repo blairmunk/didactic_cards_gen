@@ -26,7 +26,7 @@
   - [x] Validation/compile errors больше не маскируются HTTP 200.
   - [x] Добавлены CSRF, quotas, safe external logs и security headers.
   - [ ] Для production deployment изолировать TeX отдельным непривилегированным worker/container.
-- [ ] Этап 3: транзакционное persistence.
+- [x] Этап 3: транзакционное persistence.
   - [x] Путь базы абсолютный, поддерживает `DIDACTIC_CARDS_DATA_DIR` и не зависит от CWD.
   - [x] Запись JSON использует temp + fsync + atomic replace и сохраняет последнюю `.bak`.
   - [x] Read–modify–write сериализован между потоками и процессами; use cases используют единый mutation-контракт.
@@ -34,7 +34,7 @@
   - [x] Устранены stale `card_ids`, orphan writes и потеря ancestry при clone.
   - [x] Добавлены schema version 1, read-only startup integrity report и управляемое CLI-восстановление backup с сохранением `.broken-*`.
   - [x] Активное хранилище мигрировано в SQLite schema 1 с FK, WAL, транзакциями и одноразовым backup/import legacy JSON.
-  - [ ] Перевести карточные операции с индексов на UUID + optimistic version.
+  - [x] Карточные HTML/API операции переведены с индексов на UUID; deck version даёт HTTP 409 при stale mutation.
 - [ ] Этап 4: импорт и web UX.
 - [ ] Этап 5: функциональное развитие.
 
@@ -60,7 +60,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 210 проходящих тестов и 8 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 98.76% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 225 проходящих тестов и 5 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 98.66% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -85,7 +85,7 @@
 | ~~BUG-DATA-003 / BUG-WEB-001~~ ✅ | Запись в несуществующую колоду создавала orphan JSON; API отвечал success. | Выполнено: repository под lock проверяет существование до записи; API возвращает 404, HTML безопасно перенаправляет. |
 | ~~BUG-DATA-005~~ ✅ | Deep-clone создавал новые UUID, но терял `parent_id` карточек. | Выполнено через `Card.clone()`; lineage contract стал обычным тестом. |
 | ~~BUG-ARCH-001~~ ✅ | Старый `JsonFileStorage` импортировал удалённый `StorageBackend`; весь старый test collection раньше падал. | Выполнено на этапе 0: неиспользуемые `JsonFileStorage` и `FlaskSessionRepository` удалены вместе с устаревшими тестами; активным остаётся один `JsonRepository`. |
-| BUG-UI-001 | Drag-and-drop вызывает `renumberRows()` до построения permutation и всегда отправляет `[0,1,…]`. | Хранить stable card IDs; собрать old indices до mutation; optimistic UI откатывать без `location.reload`. Добавить browser E2E reorder + reload. |
+| ~~BUG-UI-001~~ ✅ | Drag-and-drop вызывал `renumberRows()` до построения permutation и отправлял identity order. | Выполнено: DOM и API используют card UUID, payload строится до renumber, failure восстанавливает прежний DOM без reload, stale version даёт 409. Browser E2E остаётся проверкой этапа 4. |
 | BUG-IMP-001 | UI обещает `||`, parser делит по первому одиночному `|`. | Единый parser с exact delimiter `||`, escaping/quoting и preview результата до commit. |
 | BUG-IMP-002 | UI обещает `;`, `csv.reader` использует `,`. | `csv.Sniffer` с явным выбором delimiter; UTF-8/UTF-8-BOM; header toggle; preview и отчёт rejected rows. |
 | ~~BUG-PDF-001~~ ✅ | Partial PDF считался успехом даже при non-zero exit code. | Выполнено: обязательный return code 0, наличие PDF, safe failure flags и fallback stdout/stderr log. |
@@ -95,7 +95,7 @@
 | ~~BUG-CONF-003~~ ✅ | `create_app()` не принимал config/dependencies. | Выполнено: фабрика принимает config, data_dir, repository, renderer и compiler; профиль production остаётся этапом deployment. |
 | ~~BUG-HTTP-001~~ ✅ | Удаление карточки было доступно через GET. | Выполнено: HTML fallback принимает только POST + CSRF, AJAX использует DELETE JSON API. |
 | ~~BUG-HTTP-002~~ ✅ | Ошибка компиляции возвращала 200. | Validation и compile failure теперь возвращают 422. Разделение tool failure на 503/504 и sanitization log остаются в этапе 2. |
-| BUG-WEB-002/003 | Число вместо string и `order=None` дают необработанные исключения. | Schema validation (dataclass/Pydantic/ручная) до use case; единый JSON error handler. |
+| ~~BUG-WEB-002/003~~ ✅ | Число вместо string и `order=None` давали необработанные исключения. | Выполнено: JSON shape/type/version validation возвращает 400; UUID membership и stale version дают 400/409. |
 | ~~BUG-SEC-003~~ ✅ | HTML-формы не имели CSRF. | Выполнено: per-session token, constant-time comparison, 400 без token; JSON API отделён по Content-Type/method contract. |
 
 ### P2 — надёжность, эксплуатация и качество UX
@@ -106,7 +106,7 @@
 - `back_border=False` скрывает совмещение. Нужен режим calibration/debug с крестами, crop marks и идентификаторами slot/page.
 - Длинный текст не получает overflow warning, auto-fit или clip policy; возможен выход за границы соседней карточки.
 - Single newline в исходном тексте не равен видимому переносу LaTeX; нужен определённый markdown/rich-text contract.
-- Routes адресуют карточки индексом. При параллельной сортировке/редактировании индекс указывает уже на другой объект; перейти на UUID.
+- ✅ Routes адресуют карточки UUID; deck `version` защищает параллельные add/edit/delete/reorder/reset от lost update.
 - Времена сохраняются UTC, но UI форматирует без зоны и без явной конвертации в локальную.
 - Полный LaTeX log показывается пользователю и может раскрыть пути/служебные детали.
 - `MAX_CONTENT_LENGTH=2 MiB` и `max_cards=200` реализованы; отдельные ограничения длины стороны/имени ещё нужны.
@@ -168,7 +168,7 @@
 2. [x] Проверять точное равенство `card_ids` и целостность при каждой транзакции.
 3. [x] Добавить startup integrity scan: missing/orphan/duplicate IDs, invalid timestamps, recovery report без автоматической потери данных.
 4. [x] Перейти на SQLite: `decks`, `cards`, `deck_cards(position)`, foreign keys, transactions, schema version и одноразовая миграция JSON с backup. Реальная рабочая база сверена 4/4 колоды и 8/8 карточек; legacy `card-id-mismatch` перенесён как warning без изменения источника.
-5. [ ] Все UI/API операции адресовать card UUID + optimistic version, а не индексом.
+5. [x] Все UI/API карточные операции адресовать card UUID + optimistic deck version, а не индексом.
 
 Выход: concurrent add/edit/reorder stress test без lost updates; kill/fault injection не портит последнюю подтверждённую версию; старые JSON мигрируются один раз с backup.
 

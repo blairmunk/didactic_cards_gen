@@ -22,13 +22,18 @@ class AddCard:
         self.repo = repo
         self.max_cards = max_cards
 
-    def execute(self, deck_id: str, front: str, back: str) -> tuple[Card, int]:
+    def execute(
+        self, deck_id: str, front: str, back: str,
+        expected_version: int | None = None,
+    ) -> tuple[Card, int]:
         def add(deck: CardDeck):
             _ensure_capacity(deck, 1, self.max_cards)
             card = Card(front=front, back=back)
             return (card, deck.add(card)), True
 
-        return self.repo.mutate_cards(deck_id, add)
+        return self.repo.mutate_cards(
+            deck_id, add, expected_version=expected_version
+        )
 
 
 class AddCardsBulk:
@@ -36,7 +41,9 @@ class AddCardsBulk:
         self.repo = repo
         self.max_cards = max_cards
 
-    def execute(self, deck_id: str, bulk_text: str) -> int:
+    def execute(
+        self, deck_id: str, bulk_text: str, expected_version: int | None = None
+    ) -> int:
         new_cards = []
         for line in bulk_text.strip().splitlines():
             line = line.strip()
@@ -54,7 +61,9 @@ class AddCardsBulk:
                 deck.add(card)
             return len(new_cards), bool(new_cards)
 
-        return self.repo.mutate_cards(deck_id, add_all)
+        return self.repo.mutate_cards(
+            deck_id, add_all, expected_version=expected_version
+        )
 
 
 class ImportCsv:
@@ -62,7 +71,10 @@ class ImportCsv:
         self.repo = repo
         self.max_cards = max_cards
 
-    def execute(self, deck_id: str, file_bytes: bytes) -> int:
+    def execute(
+        self, deck_id: str, file_bytes: bytes,
+        expected_version: int | None = None,
+    ) -> int:
         text = file_bytes.decode('utf-8-sig')
         reader = csv.reader(io.StringIO(text))
         new_cards = []
@@ -79,56 +91,74 @@ class ImportCsv:
                 deck.add(card)
             return len(new_cards), bool(new_cards)
 
-        return self.repo.mutate_cards(deck_id, add_all)
+        return self.repo.mutate_cards(
+            deck_id, add_all, expected_version=expected_version
+        )
 
 
 class DeleteCard:
     def __init__(self, repo: DeckRepository):
         self.repo = repo
 
-    def execute(self, deck_id: str, index: int) -> bool:
+    def execute(
+        self, deck_id: str, card_id: str, expected_version: int | None = None
+    ) -> bool:
         def delete(deck: CardDeck):
-            result = deck.delete(index)
+            result = deck.delete_by_id(card_id)
             return result, result
 
-        return self.repo.mutate_cards(deck_id, delete)
+        return self.repo.mutate_cards(
+            deck_id, delete, expected_version=expected_version
+        )
 
 
 class EditCard:
     def __init__(self, repo: DeckRepository):
         self.repo = repo
 
-    def execute(self, deck_id: str, index: int, front: str, back: str) -> bool:
+    def execute(
+        self, deck_id: str, card_id: str, front: str, back: str,
+        expected_version: int | None = None,
+    ) -> bool:
         def edit(deck: CardDeck):
-            result = deck.edit(index, front, back)
+            result = deck.edit_by_id(card_id, front, back)
             return result, result
 
-        return self.repo.mutate_cards(deck_id, edit)
+        return self.repo.mutate_cards(
+            deck_id, edit, expected_version=expected_version
+        )
 
 
 class ReorderCards:
     def __init__(self, repo: DeckRepository):
         self.repo = repo
 
-    def execute(self, deck_id: str, new_order: list[int]) -> bool:
+    def execute(
+        self, deck_id: str, new_order: list[str],
+        expected_version: int | None = None,
+    ) -> bool:
         def reorder(deck: CardDeck):
-            result = deck.reorder(new_order)
+            result = deck.reorder_by_ids(new_order)
             return result, result
 
-        return self.repo.mutate_cards(deck_id, reorder)
+        return self.repo.mutate_cards(
+            deck_id, reorder, expected_version=expected_version
+        )
 
 
 class ResetCards:
     def __init__(self, repo: DeckRepository):
         self.repo = repo
 
-    def execute(self, deck_id: str) -> None:
+    def execute(self, deck_id: str, expected_version: int | None = None) -> None:
         def reset(deck: CardDeck):
             changed = bool(deck.cards)
             deck.clear()
             return None, changed
 
-        self.repo.mutate_cards(deck_id, reset)
+        self.repo.mutate_cards(
+            deck_id, reset, expected_version=expected_version
+        )
 
 
 class GetDeck:

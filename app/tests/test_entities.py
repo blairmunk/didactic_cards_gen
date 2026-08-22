@@ -140,6 +140,24 @@ class TestCardDeck:
         cd = CardDeck(cards=[Card(), Card()])
         assert cd.reorder([0, 0]) is False
 
+    def test_uuid_edit_delete_and_reorder(self):
+        first, second = Card(front='A'), Card(front='B')
+        cd = CardDeck([first, second])
+        assert cd.index_of(second.id) == 1
+        assert cd.edit_by_id(first.id, 'A+', '') is True
+        assert cd.reorder_by_ids([second.id, first.id]) is True
+        assert [card.id for card in cd.cards] == [second.id, first.id]
+        assert cd.delete_by_id(second.id) is True
+        assert cd.index_of('missing') is None
+        assert cd.edit_by_id('missing', '', '') is False
+        assert cd.delete_by_id('missing') is False
+
+    def test_uuid_reorder_rejects_missing_or_duplicate_ids(self):
+        first, second = Card(), Card()
+        cd = CardDeck([first, second])
+        assert cd.reorder_by_ids([first.id]) is False
+        assert cd.reorder_by_ids([first.id, first.id]) is False
+
     def test_padded(self):
         cd = CardDeck(cards=[Card(front='Q1')])
         padded = cd.padded(4)

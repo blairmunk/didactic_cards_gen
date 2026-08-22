@@ -123,6 +123,8 @@ app/data/legacy-json-backup-v1/ # снимок источника перед п�
 
 Активное хранилище — SQLite schema 1: `decks`, `cards`, упорядоченная связь `deck_cards(position)` и служебная `repository_meta`. Foreign keys включаются для каждого соединения, journal работает в WAL, а изменения колоды и карточек выполняются одной `BEGIN IMMEDIATE` транзакцией. Поэтому конкурентные процессы не теряют добавления, а исключение внутри mutation откатывает всю операцию.
 
+Карточки во всех HTML/API URL адресуются стабильным UUID, а не текущим номером строки. Колода имеет монотонную `version`: UI отправляет прочитанную версию с add/edit/delete/reorder/reset, и устаревшая вкладка получает HTTP 409 вместо перезаписи более свежего состояния. Drag-and-drop отправляет упорядоченный список UUID; при сетевой/validation ошибке DOM возвращается в прежний порядок.
+
 Если `cards.sqlite3` ещё нет, а `decks.json` существует, приложение сначала запускает полный read-only JSON integrity scan. Набор импортируется в одной SQLite-транзакции с сохранением UUID, порядка, timestamps и clone lineage. Единственное безопасно восстанавливаемое расхождение — устаревший денормализованный `card_ids`: порядок берётся из канонического card-файла, JSON не переписывается, а warning сохраняется в `repository_meta`. Любая structural/missing/orphan/duplicate ошибка блокирует импорт. Перед импортом исходники копируются в `legacy-json-backup-v1`; исходные JSON не удаляются. Метка в SQLite не позволяет повторно импортировать позднее изменённый JSON. База с более новой неизвестной версией схемы отклоняется без downgrade.
 
 Legacy JSON schema 1 и его инструменты atomic replace/lock/`.bak` сохранены для аудита и восстановления миграционного источника. Они больше не являются рабочим backend после успешного импорта.
@@ -185,7 +187,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 `xfail(strict=True)` — не пропущенные тесты, а исполнимые спецификации известных дефектов. После исправления соответствующий тест неожиданно пройдёт (`XPASS`) и заставит удалить метку, сохранив сценарий как обычную регрессию.
 
-Текущее состояние набора: 210 проходящих тестов, 8 строгих `xfail`, общий branch coverage 98.76%. В persistence-набор входят SQLite rollback/FK/WAL/migration contracts, JSON fault injection/recovery/schema checks, а также межпоточные и настоящие межпроцессные stress tests для обоих adapters.
+Текущее состояние набора: 225 проходящих тестов, 5 строгих `xfail`, общий branch coverage 98.66%. В persistence-набор входят SQLite rollback/FK/WAL/migration/version contracts, JSON fault injection/recovery/schema checks, UUID route/reorder tests, а также межпоточные и настоящие межпроцессные stress tests для обоих adapters.
 
 Скриншоты можно переснять на запущенном приложении:
 
