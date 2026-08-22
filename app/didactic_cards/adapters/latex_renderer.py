@@ -1,7 +1,13 @@
-from ..domain.interfaces import DocumentRenderer
-from ..domain.entities import CardDeck
+from __future__ import annotations
 
 import re
+
+from ..domain.entities import Card, CardDeck
+from ..domain.interfaces import DocumentRenderer
+from ..domain.printing import DuplexMode, build_sheets
+
+
+PT_TO_CM = 2.54 / 72.27
 
 
 def escape_latex(text: str) -> str:
@@ -38,9 +44,7 @@ def _escape_text(text: str) -> str:
     for char, replacement in chars.items():
         text = text.replace(char, replacement)
 
-    text = text.replace('\x00BACKSLASH\x00', r'\textbackslash{}')
-
-    return text
+    return text.replace('\x00BACKSLASH\x00', r'\textbackslash{}')
 
 
 def _card_content(text: str) -> str:
@@ -50,56 +54,70 @@ def _card_content(text: str) -> str:
 
 
 class LatexRenderer(DocumentRenderer):
-    """Генерирует LaTeX-документ из колоды карточек."""
+    """Генерирует interleaved front/back LaTeX-страницы физических листов."""
 
-    def __init__(self, card_width_cm=9.3, card_height_cm=6.3,
-                 cards_per_row=2, rows_per_page=4, fbox_sep_pt=8,
-                 back_border=False):
+    def __init__(
+        self,
+        card_width_cm: float = 9.3,
+        card_height_cm: float = 6.3,
+        cards_per_row: int = 2,
+        rows_per_page: int = 4,
+        fbox_sep_pt: float = 8,
+        fbox_rule_pt: float = 0.4,
+        back_border: bool = False,
+        duplex_mode: DuplexMode | str = DuplexMode.LONG_EDGE,
+    ):
+        if cards_per_row <= 0 or rows_per_page <= 0:
+            raise ValueError('cards_per_row and rows_per_page must be positive')
+        if card_width_cm <= 0 or card_height_cm <= 0:
+            raise ValueError('card dimensions must be positive')
+        if fbox_sep_pt < 0 or fbox_rule_pt < 0:
+            raise ValueError('frame spacing and rule must not be negative')
+
+        frame_inset_cm = 2 * (fbox_sep_pt + fbox_rule_pt) * PT_TO_CM
+        if card_width_cm <= frame_inset_cm or card_height_cm <= frame_inset_cm:
+            raise ValueError('card dimensions are too small for frame spacing')
+        if cards_per_row * card_width_cm > 20.0:
+            raise ValueError('card grid does not fit A4 printable width')
+        row_advance_cm = card_height_cm + 2 * PT_TO_CM
+        if rows_per_page * row_advance_cm > 28.7:
+            raise ValueError('card grid does not fit A4 printable height')
+
         self.card_width = card_width_cm
         self.card_height = card_height_cm
+        self.card_content_width = card_width_cm - frame_inset_cm
+        self.card_content_height = card_height_cm - frame_inset_cm
         self.cards_per_row = cards_per_row
         self.rows_per_page = rows_per_page
         self.fbox_sep = fbox_sep_pt
+        self.fbox_rule = fbox_rule_pt
         self.back_border = back_border
+        self.duplex_mode = DuplexMode(duplex_mode)
         self.cards_per_page = cards_per_row * rows_per_page
 
     def render(self, deck: CardDeck) -> str:
-        cards = deck.cards
-        num_cards = len(cards)
-        num_pages = (num_cards + self.cards_per_page - 1) // self.cards_per_page
+        sheets = build_sheets(
+            deck.cards,
+            rows=self.rows_per_page,
+            columns=self.cards_per_row,
+            duplex_mode=self.duplex_mode,
+        )
 
         latex = self._preamble()
-        latex += self._front_pages(cards, num_cards, num_pages)
-        latex += self._back_pages(cards, num_cards, num_pages)
-        latex += "\n\\end{document}"
+        for sheet_index, sheet in enumerate(sheets):
+            latex += f'\n% ===== Лист {sheet_index + 1}: передние стороны =====\n'
+            latex += self._render_page(sheet.front_slots, side='front')
+            latex += r'\newpage' + '\n'
+            latex += f'\n% ===== Лист {sheet_index + 1}: задние стороны =====\n'
+            latex += self._render_page(sheet.back_slots, side='back')
+            if sheet_index < len(sheets) - 1:
+                latex += r'\newpage' + '\n'
+
+        latex += '\n\\end{document}'
         return latex
 
     def _preamble(self) -> str:
-        if self.back_border:
-            backcard_def = (
-                r"\newcommand{\backcard}[1]{%"  "\n"
-                r"    \fbox{%"  "\n"
-                r"        \begin{minipage}[t][\cardheight][t]{\cardwidth}"  "\n"
-                r"        \vspace{0pt}%"  "\n"
-                r"        #1"  "\n"
-                r"        \end{minipage}%"  "\n"
-                r"    }%"  "\n"
-                r"    \vspace{2pt}%"  "\n"
-                r"}"
-            )
-        else:
-            backcard_def = (
-                r"\newcommand{\backcard}[1]{%"  "\n"
-                r"    \fcolorbox{white}{white}{%"  "\n"
-                r"        \begin{minipage}[t][\cardheight][t]{\cardwidth}"  "\n"
-                r"        \vspace{0pt}%"  "\n"
-                r"        #1"  "\n"
-                r"        \end{minipage}%"  "\n"
-                r"    }%"  "\n"
-                r"    \vspace{2pt}%"  "\n"
-                r"}"
-            )
-
+        back_frame = r'\fbox' if self.back_border else r'\cardblankframe'
         return rf'''\documentclass[a4paper,12pt]{{extarticle}}
 \usepackage{{amsmath}}
 \usepackage{{amsfonts}}
@@ -120,67 +138,42 @@ class LatexRenderer(DocumentRenderer):
 
 \newcommand{{\cardwidth}}{{{self.card_width}cm}}
 \newcommand{{\cardheight}}{{{self.card_height}cm}}
+\newcommand{{\cardcontentwidth}}{{{self.card_content_width:.6f}cm}}
+\newcommand{{\cardcontentheight}}{{{self.card_content_height:.6f}cm}}
 
 \setlength{{\fboxsep}}{{{self.fbox_sep}pt}}
+\setlength{{\fboxrule}}{{{self.fbox_rule}pt}}
 
-\newcommand{{\frontcard}}[1]{{%
-    \fbox{{%
-        \begin{{minipage}}[t][\cardheight][t]{{\cardwidth}}
+\newcommand{{\cardblankframe}}[1]{{\fcolorbox{{white}}{{white}}{{#1}}}}
+\newcommand{{\cardbox}}[2]{{%
+    #1{{%
+        \begin{{minipage}}[t][\cardcontentheight][t]{{\cardcontentwidth}}
         \vspace{{0pt}}%
-        #1
+        #2
         \end{{minipage}}%
     }}%
     \vspace{{2pt}}%
 }}
-
-{backcard_def}
+\newcommand{{\frontcard}}[1]{{\cardbox{{\fbox}}{{#1}}}}
+\newcommand{{\backcard}}[1]{{\cardbox{{{back_frame}}}{{#1}}}}
 
 \pagestyle{{empty}}
-
 \setlist[itemize]{{label={{}}, left=0.5em, itemsep=-2pt, topsep=0.5ex}}
 \setlength{{\parindent}}{{0pt}}
 
 \begin{{document}}
 '''
 
-    def _front_pages(self, cards, num_cards, num_pages) -> str:
-        latex = "\n% ===== Передние стороны карточек (задания) =====\n"
-
-        for page in range(num_pages):
-            latex += "\n"
-            for row in range(self.rows_per_page):
-                for col in range(self.cards_per_row):
-                    idx = page * self.cards_per_page + row * self.cards_per_row + col
-                    content = _card_content(cards[idx].front) if idx < num_cards else r'\mbox{}'
-                    latex += r"\frontcard{" + content + "}\n"
-                    if col < self.cards_per_row - 1:
-                        latex += "%\n"
-                if row < self.rows_per_page - 1:
-                    latex += "\n"
-
-            if page < num_pages - 1:
-                latex += r"\newpage" + "\n"
-
-        return latex
-
-    def _back_pages(self, cards, num_cards, num_pages) -> str:
-        latex = "\n% ===== Задние стороны карточек (решения) =====\n"
-        latex += r"\newpage" + "\n"
-
-        for page in range(num_pages):
-            latex += "\n"
-            for row in range(self.rows_per_page):
-                for col in range(self.cards_per_row):
-                    mirror_col = self.cards_per_row - 1 - col
-                    idx = page * self.cards_per_page + row * self.cards_per_row + mirror_col
-                    content = _card_content(cards[idx].back) if idx < num_cards else r'\mbox{}'
-                    latex += r"\rotatebox{180}{\backcard{" + content + "}}\n"
-                    if col < self.cards_per_row - 1:
-                        latex += "%\n"
-                if row < self.rows_per_page - 1:
-                    latex += "\n"
-
-            if page < num_pages - 1:
-                latex += r"\newpage" + "\n"
-
-        return latex
+    def _render_page(self, cards: tuple[Card, ...], *, side: str) -> str:
+        command = r'\frontcard' if side == 'front' else r'\backcard'
+        result = ''
+        for row in range(self.rows_per_page):
+            for column in range(self.cards_per_row):
+                index = row * self.cards_per_row + column
+                text = getattr(cards[index], side)
+                result += command + '{' + _card_content(text) + '}\n'
+                if column < self.cards_per_row - 1:
+                    result += '%\n'
+            if row < self.rows_per_page - 1:
+                result += '\n'
+        return result

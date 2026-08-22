@@ -110,7 +110,7 @@ class TestLatexRenderer:
 
     def test_render_custom_layout(self):
         renderer = LatexRenderer(
-            card_width_cm=7.0,
+            card_width_cm=6.0,
             card_height_cm=5.0,
             cards_per_row=3,
             rows_per_page=3,
@@ -119,20 +119,16 @@ class TestLatexRenderer:
         deck = self.make_deck(1)
         padded_deck = CardDeck(cards=deck.padded(9))
         result = renderer.render(padded_deck)
-        assert '7.0cm' in result
+        assert '6.0cm' in result
         assert '5.0cm' in result
         assert '5pt' in result
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason='BUG-PRINT-003: configured dimensions describe the inner minipage, not the cut card',
-    )
     def test_configured_dimensions_equal_physical_card_dimensions(self):
         renderer = LatexRenderer(card_width_cm=9.3, card_height_cm=6.3, fbox_sep_pt=8)
         pt_cm = 2.54 / 72.27
         rule_pt = 0.4
-        physical_width = renderer.card_width + 2 * (renderer.fbox_sep + rule_pt) * pt_cm
-        physical_height = renderer.card_height + 2 * (renderer.fbox_sep + rule_pt) * pt_cm
+        physical_width = renderer.card_content_width + 2 * (renderer.fbox_sep + rule_pt) * pt_cm
+        physical_height = renderer.card_content_height + 2 * (renderer.fbox_sep + rule_pt) * pt_cm
         assert physical_width == pytest.approx(9.3)
         assert physical_height == pytest.approx(6.3)
 
@@ -151,19 +147,15 @@ class TestLatexRenderer:
         deck = self.make_deck(1)
         padded_deck = CardDeck(cards=deck.padded(8))
         result = renderer.render(padded_deck)
-        assert 'Передние стороны' in result
-        assert 'Задние стороны' in result
+        assert 'передние стороны' in result
+        assert 'задние стороны' in result
 
     def test_back_columns_are_mirrored_for_long_edge_duplex(self):
         renderer = LatexRenderer(cards_per_row=2, rows_per_page=1)
         source = renderer.render(self.make_deck(2))
-        back_section = source.split('Задние стороны', 1)[1]
+        back_section = source.split('задние стороны', 1)[1]
         assert back_section.index('A2') < back_section.index('A1')
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason='BUG-PRINT-001: all fronts are emitted before all backs, mixing sheets in duplex mode',
-    )
     def test_duplex_pages_are_interleaved_per_physical_sheet(self):
         renderer = LatexRenderer(cards_per_row=2, rows_per_page=1)
         source = renderer.render(self.make_deck(4))
@@ -173,14 +165,35 @@ class TestLatexRenderer:
         assert 'Q3' in pages[2] and 'Q4' in pages[2]
         assert 'A4' in pages[3] and 'A3' in pages[3]
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason='BUG-PRINT-002: back content is always rotated 180° although long-edge layout only mirrors columns',
-    )
     def test_long_edge_back_text_is_not_upside_down(self):
         source = LatexRenderer(cards_per_row=2, rows_per_page=1).render(self.make_deck(2))
-        back_section = source.split('Задние стороны', 1)[1]
+        back_section = source.split('задние стороны', 1)[1]
         assert r'\rotatebox{180}' not in back_section
+
+    def test_short_edge_back_rows_are_reversed(self):
+        source = LatexRenderer(
+            cards_per_row=2,
+            rows_per_page=2,
+            duplex_mode='short-edge',
+        ).render(self.make_deck(4))
+        back_section = source.split('задние стороны', 1)[1]
+        assert back_section.index('A3') < back_section.index('A1')
+
+    @pytest.mark.parametrize(
+        'kwargs',
+        [
+            {'cards_per_row': 0},
+            {'rows_per_page': 0},
+            {'card_width_cm': 20, 'cards_per_row': 2},
+            {'card_height_cm': 10, 'rows_per_page': 3},
+            {'card_width_cm': 0.1, 'fbox_sep_pt': 8},
+            {'card_width_cm': 0},
+            {'fbox_rule_pt': -0.1},
+        ],
+    )
+    def test_invalid_layout_is_rejected(self, kwargs):
+        with pytest.raises(ValueError):
+            LatexRenderer(**kwargs)
 
     @pytest.mark.xfail(
         strict=True,
@@ -210,3 +223,37 @@ def test_real_pdflatex_build_has_two_pages_for_one_sheet(tmp_path):
         ['pdfinfo', str(pdf_path)], capture_output=True, text=True, check=True
     ).stdout
     assert 'Pages:           2' in info
+
+
+@pytest.mark.integration
+def test_real_pdf_interleaves_two_physical_sheets(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdftotext'):
+        pytest.skip('pdflatex/pdftotext are required for the duplex integration test')
+
+    deck = CardDeck([
+        Card(front=f'FRONT-{number}', back=f'BACK-{number}')
+        for number in range(1, 5)
+    ])
+    renderer = LatexRenderer(cards_per_row=2, rows_per_page=1, back_border=True)
+    result = PdfLatexCompiler().compile(renderer.render(deck))
+    assert result.success, result.log
+
+    pdf_path = tmp_path / 'two-sheets.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    pages = []
+    for page_number in range(1, 5):
+        page_text = subprocess.run(
+            [
+                'pdftotext', '-f', str(page_number), '-l', str(page_number),
+                str(pdf_path), '-'
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        pages.append(page_text)
+
+    assert 'FRONT-1' in pages[0] and 'FRONT-2' in pages[0]
+    assert 'BACK-2' in pages[1] and 'BACK-1' in pages[1]
+    assert 'FRONT-3' in pages[2] and 'FRONT-4' in pages[2]
+    assert 'BACK-4' in pages[3] and 'BACK-3' in pages[3]

@@ -21,7 +21,9 @@ def create_app() -> Flask:
         cards_per_row=layout.cards_per_row,
         rows_per_page=layout.rows_per_page,
         fbox_sep_pt=layout.fbox_sep_pt,
+        fbox_rule_pt=layout.fbox_rule_pt,
         back_border=layout.back_border,
+        duplex_mode=layout.duplex_mode,
     )
     app.config['COMPILER'] = PdfLatexCompiler(
         pdflatex_path=cfg.pdflatex_path,

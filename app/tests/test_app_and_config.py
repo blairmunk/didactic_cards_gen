@@ -11,9 +11,8 @@ from run import create_app
 def test_default_layout_fits_inside_a4_printable_area():
     layout = CardLayoutConfig()
     pt_cm = 2.54 / 72.27
-    rule_pt = 0.4
-    outer_width = layout.card_width_cm + 2 * (layout.fbox_sep_pt + rule_pt) * pt_cm
-    outer_height = layout.card_height_cm + 2 * (layout.fbox_sep_pt + rule_pt) * pt_cm + 2 * pt_cm
+    outer_width = layout.card_width_cm
+    outer_height = layout.card_height_cm + 2 * pt_cm
 
     assert layout.cards_per_row * outer_width <= 20.0
     assert layout.rows_per_page * outer_height <= 28.7
@@ -45,13 +44,23 @@ def test_data_location_is_independent_of_current_working_directory(tmp_path, mon
     assert first_path == second_path
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='BUG-CONF-002: invalid/oversized layouts are accepted without fail-fast validation',
+@pytest.mark.parametrize(
+    'kwargs',
+    [
+        {'cards_per_row': 0},
+        {'rows_per_page': 0},
+        {'card_width_cm': float('inf')},
+        {'card_height_cm': 0},
+        {'fbox_sep_pt': -1},
+        {'card_width_cm': 0.1, 'fbox_sep_pt': 8},
+        {'card_width_cm': 20, 'cards_per_row': 2},
+        {'card_height_cm': 10, 'rows_per_page': 3},
+        {'duplex_mode': 'diagonal'},
+    ],
 )
-def test_layout_rejects_values_that_cannot_fit_a4():
+def test_layout_rejects_invalid_or_oversized_values(kwargs):
     with pytest.raises(ValueError):
-        CardLayoutConfig(card_width_cm=20, cards_per_row=2)
+        CardLayoutConfig(**kwargs)
 
 
 @pytest.mark.xfail(

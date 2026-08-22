@@ -9,6 +9,13 @@
 - [x] Этап 0: нормализованы executable-биты исходников, данных и документации.
 - [x] Этап 0: добавлена CI-матрица Python 3.11–3.13 и отдельный TeX/coverage job.
 - [ ] Этап 1: модель физического листа и корректная duplex-раскладка.
+  - [x] Введены `Sheet`, `DuplexMode` и независимые long-edge/short-edge transforms.
+  - [x] Страницы чередуются по физическим листам: `F1,B1,F2,B2…`.
+  - [x] Убран безусловный поворот оборота на 180°.
+  - [x] Настраиваемый размер стал внешним cut size; layout валидируется до компиляции.
+  - [x] Добавлен реальный четырёхстраничный `pdflatex`/`pdftotext` integration test.
+  - [ ] Добавить calibration offsets, registration/crop marks и overflow preflight.
+  - [ ] Выполнить golden bounding-box/raster tests и физический прогон.
 - [ ] Этап 2: безопасная граница TeX/HTTP.
 - [ ] Этап 3: транзакционное persistence.
 - [ ] Этап 4: импорт и web UX.
@@ -18,10 +25,10 @@
 
 Вердикт: приложение имеет понятную слоистую основу и работоспособный CRUD, но пока не выполняет главное обещание — гарантированное совмещение лицевой и оборотной стороны при произвольной двусторонней печати. До устранения P0-блокеров PDF нельзя выдавать как готовый печатный результат.
 
-Самые опасные проблемы:
+Самые опасные проблемы исходного baseline (выполненные отмечены):
 
-1. Для двух и более листов все лицевые страницы выводятся раньше всех оборотных. Duplex-принтер совмещает `front-1` с `front-2`, а не с `back-1` (`BUG-PRINT-001`).
-2. Ячейки оборота зеркалятся по столбцам и одновременно безусловно поворачиваются на 180°. Для portrait/long-edge текст в результате перевёрнут (`BUG-PRINT-002`).
+1. ✅ Для двух и более листов все лицевые страницы выводились раньше всех оборотных (`BUG-PRINT-001`). Исправлено через модель физических листов и interleaved page sequence.
+2. ✅ Ячейки оборота зеркалились по столбцам и одновременно безусловно поворачивались на 180° (`BUG-PRINT-002`). Теперь transform зависит от long/short edge и не переворачивает текст.
 3. Кириллица в названии колоды попадает в `Content-Disposition` без RFC 5987 и роняет реальный Werkzeug WSGI при отдаче уже собранного PDF (`BUG-HTTP-003`).
 4. TeX внутри математических delimiters проходит без allowlist; компилятор не получает явный `-no-shell-escape` (`BUG-SEC-001/002`).
 5. JSON обновляется неатомарно и без lock. Сбой посередине записи способен обнулить рабочий файл; повреждённый JSON затем молча трактуется как пустой (`BUG-DATA-002/004`).
@@ -36,7 +43,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 91 проходящий тест и 28 строгих `xfail`-контрактов для подтверждённых дефектов. После удаления dead adapters общий branch coverage составляет 99.51% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 120 проходящих тестов и 24 строгих `xfail`-контракта для подтверждённых дефектов. Общий branch coverage составляет 99.56% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -44,9 +51,9 @@
 
 | ID | Дефект и доказательство | Исправление | Критерий приёмки |
 |---|---|---|---|
-| BUG-PRINT-001 | `LatexRenderer` формирует все fronts, затем все backs. `test_duplex_pages_are_interleaved_per_physical_sheet` — strict xfail. | Генерировать пары страниц физического листа: `F1,B1,F2,B2…`; отделить построение sheet model от LaTeX. | Для 1–33 карточек каждый ID на обороте находится на странице сразу после своей лицевой страницы и в том же физическом слоте после выбранного flip transform. |
-| BUG-PRINT-002 | Оборот: horizontal mirror плюс `rotatebox{180}`. Реальная page-2 на скриншоте перевёрнута. | Ввести явный `duplex_mode`: long-edge/short-edge/manual; хранить slot transform отдельно от orientation; убрать безусловный rotate. | Эталонная сетка с координатами и стрелкой «верх» совпадает после физического переворота обоими поддерживаемыми способами. |
-| BUG-PRINT-003 | `9.3 × 6.3` — размер inner minipage, а cut box около `9.89 × 6.89`. | Переопределить config как внешний cut size; вычислять content box вычитанием padding/border. | Измеренный MediaBox/rect в PDF отличается от настройки не более чем на 0.1 мм. |
+| ~~BUG-PRINT-001~~ ✅ | `LatexRenderer` формировал все fronts, затем все backs. | Выполнено: `Sheet` отделяет физическую модель, PDF идёт `F1,B1,F2,B2…`; unit и реальный четырёхстраничный TeX test проходят. | Автоматизированная часть выполнена; physical matrix остаётся в этапе 1. |
+| ~~BUG-PRINT-002~~ ✅ | Оборот сочетал horizontal mirror с `rotatebox{180}`. | Выполнено: явные long-edge/short-edge permutations без безусловного поворота текста. | Unit-transform tests проходят; физическая проверка обоих режимов остаётся. |
+| ~~BUG-PRINT-003~~ ✅ | `9.3 × 6.3` были размером inner minipage, а не cut box. | Выполнено: content box вычисляется вычитанием frame inset, `fboxrule` фиксирован явно. | Числовой contract выполнен; golden PDF geometry test остаётся частью этапа 1. |
 | BUG-HTTP-003 | Русское имя PDF вызывает `UnicodeEncodeError` на реальном dev-сервере. | Использовать Werkzeug `send_file(..., download_name=...)` или ASCII fallback + `filename*=UTF-8''...`; нормализовать CR/LF/quotes. | Скачиваются имена на русском, emoji и кавычки; каждый header кодируется/отдаётся WSGI без ошибки. |
 | BUG-SEC-001 | Команды внутри `$...$` не экранируются. | Перейти от regex к ограниченному parser/allowlist математических команд; запретить `\input`, `\include`, `\write`, `\openin`, `\csname`, macro definitions и закрытие окружений. | Набор malicious fixtures не читает файлы, не меняет документ и даёт понятную validation error. |
 | BUG-SEC-002 | Нет явного `-no-shell-escape`. | Добавить `-no-shell-escape`, `-halt-on-error`, изолированный env/TEXMF; в deployment компилировать непривилегированным worker/container. | Команда компилятора проверена тестом; файловый и процессный sandbox подтверждён integration-тестом. |
@@ -67,7 +74,7 @@
 | BUG-PDF-001 | Наличие partial PDF считается успехом даже при non-zero exit code. | Проверять return code, `%PDF`/EOF, `-halt-on-error`; лог объединять с stderr. |
 | BUG-LIMIT-001 | `max_cards=200` не используется. | Централизованный quota в use case для single/bulk/CSV/API; транзакционно отклонять превышение. |
 | BUG-CONF-001 | База зависит от process CWD. | Абсолютный `DATA_DIR` из env/Flask instance path; миграционная диагностика найденных `data/`. |
-| BUG-CONF-002 / BUG-VAL-001 | Нулевые capacity и не помещающиеся на A4 размеры принимаются. | Валидировать positive ints, finite dimensions, printable bounds и minimum safe area при старте. |
+| ~~BUG-CONF-002~~ ✅ / BUG-VAL-001 | Layout теперь проверяет positive/finite dimensions, frame inset и попадание сетки в printable A4. Прямой вызов use case с `cards_per_page=0` ещё требует отдельной защиты. | Config/renderer validation выполнена; добавить invariant в `CardDeck.padded`/use case. |
 | BUG-CONF-003 | `create_app()` не принимает config/dependencies. | `create_app(config=None, repo=None, renderer=None, compiler=None)`; env mapping; production/test profiles. |
 | BUG-HTTP-001 | Удаление карточки доступно через GET. | Только `DELETE`/POST + CSRF; ссылки заменить form/button. |
 | BUG-HTTP-002 | Ошибка компиляции возвращает 200. | 422 для invalid TeX, 503/504 для tool failure/timeout; request ID без полного internal log пользователю. |

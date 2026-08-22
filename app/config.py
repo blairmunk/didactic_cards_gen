@@ -1,4 +1,7 @@
 from dataclasses import dataclass, field
+import math
+
+from didactic_cards.domain.printing import DuplexMode
 
 
 @dataclass
@@ -9,7 +12,36 @@ class CardLayoutConfig:
     cards_per_row: int = 2
     rows_per_page: int = 4
     fbox_sep_pt: int = 8
+    fbox_rule_pt: float = 0.4
     back_border: bool = False  # True = рамка на обороте (для отладки центровки)
+    duplex_mode: DuplexMode = DuplexMode.LONG_EDGE
+
+    def __post_init__(self) -> None:
+        if self.cards_per_row <= 0 or self.rows_per_page <= 0:
+            raise ValueError('cards_per_row and rows_per_page must be positive')
+        numeric_values = (
+            self.card_width_cm,
+            self.card_height_cm,
+            self.fbox_sep_pt,
+            self.fbox_rule_pt,
+        )
+        if not all(math.isfinite(value) for value in numeric_values):
+            raise ValueError('layout dimensions must be finite')
+        if self.card_width_cm <= 0 or self.card_height_cm <= 0:
+            raise ValueError('card dimensions must be positive')
+        if self.fbox_sep_pt < 0 or self.fbox_rule_pt < 0:
+            raise ValueError('frame spacing and rule must not be negative')
+
+        frame_inset_cm = 2 * (self.fbox_sep_pt + self.fbox_rule_pt) * 2.54 / 72.27
+        if self.card_width_cm <= frame_inset_cm or self.card_height_cm <= frame_inset_cm:
+            raise ValueError('card dimensions are too small for frame spacing')
+        if self.cards_per_row * self.card_width_cm > 20.0:
+            raise ValueError('card grid does not fit A4 printable width')
+        row_advance_cm = self.card_height_cm + 2 * 2.54 / 72.27
+        if self.rows_per_page * row_advance_cm > 28.7:
+            raise ValueError('card grid does not fit A4 printable height')
+
+        self.duplex_mode = DuplexMode(self.duplex_mode)
 
     @property
     def cards_per_page(self):
