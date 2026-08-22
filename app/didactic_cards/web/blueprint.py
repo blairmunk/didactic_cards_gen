@@ -6,7 +6,7 @@ from flask import (Blueprint, render_template, request, redirect,
                    url_for, jsonify, current_app, send_file, session, abort)
 
 from ..adapters.latex_renderer import UnsafeLatexError
-from ..adapters.json_repository import DeckNotFoundError, RepositoryCorruptionError
+from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
@@ -97,7 +97,7 @@ def handle_missing_deck(_error):
     return redirect(url_for('cards.decks_list'))
 
 
-@cards_bp.app_errorhandler(RepositoryCorruptionError)
+@cards_bp.app_errorhandler(RepositoryStorageError)
 def handle_repository_corruption(error):
     if request.path.startswith('/api/'):
         return jsonify({'error': 'Хранилище данных повреждено'}), 500

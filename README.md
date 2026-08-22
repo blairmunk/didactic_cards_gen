@@ -37,7 +37,15 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Подтверждённые дефекты зафиксированы строгими `xfail`-тестами, а их актуальный статус отмечается непосредственно в [плане ревизии](docs/REMEDIATION_PLAN.md). Текущая база — 181 проходящий тест, 8 строгих `xfail`, branch coverage 99.02%. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с порогом branch coverage 98%.
+Подтверждённые дефекты зафиксированы строгими `xfail`-тестами, а их актуальный статус отмечается непосредственно в [плане ревизии](docs/REMEDIATION_PLAN.md). Текущая база — 198 проходящих тестов, 8 строгих `xfail`, branch coverage 99.10%. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с порогом branch coverage 98%.
+
+Проверить целостность хранилища без автоматического исправления:
+
+```bash
+python scripts/check_storage.py
+```
+
+Команда печатает JSON-отчёт и возвращает код `1`, если найдены missing/orphan/duplicate ID, неверные timestamps, рассинхронизация метаданных, повреждение файлов или неподдерживаемая версия схемы. Порядок контролируемого восстановления описан в руководстве.
 
 ## Структура
 
@@ -50,7 +58,7 @@ app/
     use_cases/               # операции над колодами и документом
     adapters/                # JSON, LaTeX, pdflatex/xelatex
     web/                     # routes, шаблоны, CSS и JavaScript
-  data/                      # JSON-данные, lock и локальные backup-файлы
+  data/                      # versioned JSON, lock, backup и recovery-файлы
   tests/                     # unit, web, integration и xfail-контракты
 docs/
   USER_AND_TECHNICAL_GUIDE.md

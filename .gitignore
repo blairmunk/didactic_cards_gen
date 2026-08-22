@@ -197,5 +197,8 @@ cython_debug/
 
 # Runtime persistence artifacts (the JSON data itself may be tracked intentionally)
 app/data/.repository.lock
+app/data/repository.json
 app/data/**/*.bak
 app/data/*.bak
+app/data/**/*.broken-*
+app/data/*.broken-*

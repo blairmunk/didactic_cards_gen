@@ -2,12 +2,25 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import get_context
 
 import pytest
 
-from didactic_cards.adapters.json_repository import JsonRepository
+from didactic_cards.adapters.json_repository import (
+    JsonRepository,
+    SCHEMA_VERSION,
+    UnsupportedSchemaError,
+)
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import DeckRepository
+
+
+def _add_cards_in_process(data_dir, deck_id, start, count):
+    from didactic_cards.use_cases.card_use_cases import AddCard
+
+    repository = JsonRepository(data_dir)
+    for index in range(start, start + count):
+        AddCard(repository).execute(deck_id, f"P{index}", f"A{index}")
 
 
 @pytest.fixture
@@ -18,6 +31,10 @@ def json_repo(tmp_path):
 def test_repository_initializes_storage(json_repo):
     assert json_repo.decks_file.read_text(encoding="utf-8") == "[]"
     assert json_repo.cards_dir.is_dir()
+    assert json.loads(json_repo.manifest_file.read_text(encoding="utf-8")) == {
+        "schema_version": SCHEMA_VERSION
+    }
+    assert json_repo.integrity_report.healthy
 
 
 def test_deck_and_card_persistence_round_trip(json_repo):
@@ -233,3 +250,218 @@ def test_concurrent_card_mutations_do_not_lose_updates(json_repo):
     cards = json_repo.load_cards(deck.id).cards
     assert len(cards) == 40
     assert {card.front for card in cards} == {f"Q{index}" for index in range(40)}
+
+
+def test_process_concurrent_mutations_are_serialized(json_repo):
+    deck = json_repo.create_deck("Processes")
+    context = get_context("fork")
+    processes = [
+        context.Process(
+            target=_add_cards_in_process,
+            args=(json_repo.data_dir, deck.id, worker * 10, 10),
+        )
+        for worker in range(4)
+    ]
+    for process in processes:
+        process.start()
+    for process in processes:
+        process.join(timeout=10)
+        assert process.exitcode == 0
+
+    cards = json_repo.load_cards(deck.id).cards
+    assert len(cards) == 40
+    assert {card.front for card in cards} == {f"P{index}" for index in range(40)}
+
+
+def test_legacy_storage_gets_manifest_and_one_time_backups(tmp_path):
+    data_dir = tmp_path / "legacy"
+    cards_dir = data_dir / "cards"
+    cards_dir.mkdir(parents=True)
+    decks = data_dir / "decks.json"
+    card_file = cards_dir / "legacy.json"
+    decks.write_text("[]", encoding="utf-8")
+    card_file.write_text("[]", encoding="utf-8")
+
+    repository = JsonRepository(data_dir)
+    assert repository.manifest_file.exists()
+    assert decks.with_suffix(".json.pre-schema-v1.bak").read_text() == "[]"
+    assert card_file.with_suffix(".json.pre-schema-v1.bak").read_text() == "[]"
+
+    before = decks.with_suffix(".json.pre-schema-v1.bak").stat().st_mtime_ns
+    JsonRepository(data_dir)
+    assert decks.with_suffix(".json.pre-schema-v1.bak").stat().st_mtime_ns == before
+
+
+def test_integrity_scan_reports_without_repairing(json_repo):
+    first = json_repo.create_deck("First")
+    second = json_repo.create_deck("Second")
+    card = Card(front="Q")
+    json_repo.save_cards(first.id, CardDeck([card]))
+
+    metadata = json.loads(json_repo.decks_file.read_text(encoding="utf-8"))
+    for item in metadata:
+        if item["id"] == first.id:
+            item["card_ids"] = ["stale", "stale"]
+    metadata.append(dict(metadata[0]))
+    metadata.append({"id": "../unsafe"})
+    json_repo.decks_file.write_text(json.dumps(metadata), encoding="utf-8")
+    json_repo._cards_path(first.id).write_text(
+        json.dumps([card.to_dict(), card.to_dict()]), encoding="utf-8"
+    )
+    json_repo._cards_path(second.id).unlink()
+    (json_repo.cards_dir / "orphan.json").write_text("[]", encoding="utf-8")
+
+    before = json_repo.decks_file.read_bytes()
+    report = json_repo.scan_integrity()
+    codes = {issue.code for issue in report.issues}
+    assert {
+        "duplicate-deck-id",
+        "invalid-deck-id",
+        "duplicate-card-id",
+        "card-id-mismatch",
+        "missing-cards-file",
+        "orphan-cards-file",
+    } <= codes
+    assert not report.healthy
+    assert report.to_dict()["schema_version"] == SCHEMA_VERSION
+    assert json_repo.decks_file.read_bytes() == before
+
+
+def test_integrity_scan_reports_cross_deck_ids_and_invalid_cards(json_repo):
+    first = json_repo.create_deck("First")
+    second = json_repo.create_deck("Second")
+    card = Card(front="shared")
+    payload = json.dumps([card.to_dict()])
+    json_repo._cards_path(first.id).write_text(payload, encoding="utf-8")
+    json_repo._cards_path(second.id).write_text(payload, encoding="utf-8")
+    report = json_repo.scan_integrity()
+    assert "cross-deck-card-id" in {issue.code for issue in report.issues}
+
+    json_repo._cards_path(second.id).write_text("{}", encoding="utf-8")
+    report = json_repo.scan_integrity()
+    assert "invalid-cards" in {issue.code for issue in report.issues}
+
+
+def test_unsupported_schema_blocks_operations_and_is_reported(json_repo):
+    json_repo.manifest_file.write_text(
+        json.dumps({"schema_version": SCHEMA_VERSION + 1}), encoding="utf-8"
+    )
+    report = json_repo.scan_integrity()
+    assert not report.healthy
+    assert report.issues[0].code == "schema"
+    with pytest.raises(UnsupportedSchemaError):
+        json_repo.list_decks()
+
+
+@pytest.mark.parametrize("manifest", [[], {}, {"schema_version": "one"}])
+def test_invalid_schema_manifest_is_reported(json_repo, manifest):
+    json_repo.manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+    report = json_repo.scan_integrity()
+    assert not report.healthy
+    assert report.issues[0].code == "schema"
+
+
+def test_integrity_scan_reports_corrupt_deck_index(json_repo):
+    json_repo.decks_file.write_text("{broken", encoding="utf-8")
+    report = json_repo.scan_integrity()
+    assert [issue.code for issue in report.issues] == ["decks-json"]
+
+
+def test_integrity_scan_reports_invalid_deck_timestamp(json_repo):
+    json_repo.decks_file.write_text(
+        json.dumps([{"id": "valid-id", "updated_at": "invalid"}]),
+        encoding="utf-8",
+    )
+    assert "invalid-deck" in {
+        issue.code for issue in json_repo.scan_integrity().issues
+    }
+
+
+def test_recovery_restores_backup_and_preserves_broken_file(json_repo):
+    deck = json_repo.create_deck("Recovery")
+    json_repo.save_cards(deck.id, CardDeck([Card(front="new")]))
+    cards_path = json_repo._cards_path(deck.id)
+    cards_path.write_text("{broken", encoding="utf-8")
+
+    broken_path = json_repo.recover_from_backup(cards_path.relative_to(json_repo.data_dir))
+    assert broken_path.exists()
+    assert broken_path.read_text(encoding="utf-8") == "{broken"
+    assert json.loads(cards_path.read_text(encoding="utf-8")) == []
+
+    json_repo.load_cards(deck.id)
+    assert json_repo.scan_integrity().healthy
+
+
+def test_recovery_rejects_unsafe_target_and_missing_backup(json_repo):
+    with pytest.raises(ValueError, match="repository JSON"):
+        json_repo.recover_from_backup("../outside.json")
+    with pytest.raises(FileNotFoundError, match="Backup does not exist"):
+        json_repo.recover_from_backup("cards/missing.json")
+
+
+def test_recovery_can_restore_missing_target_and_manifest(json_repo):
+    missing = json_repo.cards_dir / "missing.json"
+    missing.with_suffix(".json.bak").write_text("[]", encoding="utf-8")
+    assert json_repo.recover_from_backup(missing) == missing
+    assert json.loads(missing.read_text(encoding="utf-8")) == []
+
+    json_repo._write_json(
+        json_repo.manifest_file, {"schema_version": SCHEMA_VERSION}
+    )
+    json_repo.manifest_file.write_text("{broken", encoding="utf-8")
+    broken = json_repo.recover_from_backup("repository.json")
+    assert broken.exists()
+    assert json.loads(json_repo.manifest_file.read_text()) == {
+        "schema_version": SCHEMA_VERSION
+    }
+
+
+def test_recovery_validates_backup_shape(json_repo):
+    deck = json_repo.create_deck("Backup shape")
+    cards_path = json_repo._cards_path(deck.id)
+    cards_path.with_suffix(".json.bak").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="expected a list"):
+        json_repo.recover_from_backup(cards_path)
+
+    json_repo.manifest_file.with_suffix(".json.bak").write_text(
+        "[]", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="schema manifest"):
+        json_repo.recover_from_backup(json_repo.manifest_file)
+
+
+def test_failed_recovery_restores_broken_live_file(json_repo, monkeypatch):
+    deck = json_repo.create_deck("Failed recovery")
+    cards_path = json_repo._cards_path(deck.id)
+    json_repo.save_cards(deck.id, CardDeck([Card(front="Q")]))
+    cards_path.write_text("{broken", encoding="utf-8")
+
+    def fail_write(*_args):
+        raise OSError("recovery write failed")
+
+    monkeypatch.setattr(json_repo, "_write_json", fail_write)
+    with pytest.raises(OSError, match="recovery write failed"):
+        json_repo.recover_from_backup(cards_path)
+    assert cards_path.read_text(encoding="utf-8") == "{broken"
+
+
+def test_one_time_copy_cleans_temporary_file_on_replace_failure(
+    json_repo, tmp_path, monkeypatch
+):
+    source = tmp_path / "source.json"
+    destination = tmp_path / "destination.bak"
+    source.write_text("[]", encoding="utf-8")
+
+    def fail_replace(*_args):
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(
+        "didactic_cards.adapters.json_repository.os.replace", fail_replace
+    )
+    with pytest.raises(OSError, match="replace failed"):
+        json_repo._copy_once(source, destination)
+    assert list(tmp_path.glob(".destination.bak.*.tmp")) == []
+
+    destination.write_text("keep", encoding="utf-8")
+    json_repo._copy_once(source, destination)
+    assert destination.read_text(encoding="utf-8") == "keep"

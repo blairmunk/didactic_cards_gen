@@ -27,6 +27,7 @@ def create_app(
 
     layout = cfg.layout
     app.config['REPO'] = repo
+    app.config['INTEGRITY_REPORT'] = getattr(repo, 'integrity_report', None)
     app.config['RENDERER'] = renderer if renderer is not None else LatexRenderer(
         card_width_cm=layout.card_width_cm,
         card_height_cm=layout.card_height_cm,

@@ -7,6 +7,7 @@ import shutil
 import tempfile
 import threading
 from contextlib import contextmanager
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator, Optional, TypeVar
@@ -19,9 +20,14 @@ from ..domain.interfaces import CardRepository, DeckRepository
 
 MutationResult = TypeVar('MutationResult')
 _SAFE_ID = re.compile(r'^[A-Za-z0-9_-]+$')
+SCHEMA_VERSION = 1
 
 
-class RepositoryCorruptionError(ValueError):
+class RepositoryStorageError(ValueError):
+    """Base class for errors that make repository writes unsafe."""
+
+
+class RepositoryCorruptionError(RepositoryStorageError):
     """Raised when persisted JSON exists but cannot be safely decoded."""
 
     def __init__(self, path: Path, detail: str):
@@ -33,8 +39,39 @@ class RepositoryCorruptionError(ValueError):
         )
 
 
+class UnsupportedSchemaError(RepositoryStorageError):
+    """Raised when storage was created by an unsupported application version."""
+
+
 class DeckNotFoundError(KeyError):
     """Raised when a card operation targets a deck that does not exist."""
+
+
+@dataclass(frozen=True)
+class IntegrityIssue:
+    code: str
+    path: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class IntegrityReport:
+    schema_version: int | None
+    issues: tuple[IntegrityIssue, ...]
+
+    @property
+    def healthy(self) -> bool:
+        return not self.issues
+
+    def to_dict(self) -> dict:
+        return {
+            'schema_version': self.schema_version,
+            'healthy': self.healthy,
+            'issues': [issue.to_dict() for issue in self.issues],
+        }
 
 
 class JsonRepository(DeckRepository, CardRepository):
@@ -48,26 +85,38 @@ class JsonRepository(DeckRepository, CardRepository):
         self.decks_file = self.data_dir / 'decks.json'
         self.cards_dir = self.data_dir / 'cards'
         self.lock_file = self.data_dir / '.repository.lock'
+        self.manifest_file = self.data_dir / 'repository.json'
         with self._registry_guard:
             self._thread_lock = self._thread_locks.setdefault(
                 self.lock_file, threading.RLock()
             )
         self._ensure_dirs()
+        self.integrity_report = self.scan_integrity()
 
     def _ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.cards_dir.mkdir(parents=True, exist_ok=True)
-        with self._transaction():
+        with self._transaction(validate_schema=False):
+            legacy_storage = self.decks_file.exists() and not self.manifest_file.exists()
             if not self.decks_file.exists():
                 self._write_json(self.decks_file, [])
+            if legacy_storage:
+                self._backup_legacy_json_unlocked()
+            if not self.manifest_file.exists():
+                self._write_json(
+                    self.manifest_file,
+                    {'schema_version': SCHEMA_VERSION},
+                )
 
     @contextmanager
-    def _transaction(self) -> Iterator[None]:
+    def _transaction(self, *, validate_schema: bool = True) -> Iterator[None]:
         """Serialize repository operations across threads and processes."""
         with self._thread_lock:
             with self.lock_file.open('a+b') as lock_handle:
                 fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
                 try:
+                    if validate_schema:
+                        self._read_schema_unlocked()
                     yield
                 finally:
                     fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
@@ -131,6 +180,66 @@ class JsonRepository(DeckRepository, CardRepository):
                 if candidate is not None:
                     candidate.unlink(missing_ok=True)
 
+    def _copy_once(self, source: Path, destination: Path) -> None:
+        if destination.exists():
+            return
+        temporary_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode='wb',
+                dir=destination.parent,
+                prefix=f'.{destination.name}.',
+                suffix='.tmp',
+                delete=False,
+            ) as backup:
+                temporary_path = Path(backup.name)
+                with source.open('rb') as current:
+                    shutil.copyfileobj(current, backup)
+                backup.flush()
+                os.fsync(backup.fileno())
+            os.replace(temporary_path, destination)
+            temporary_path = None
+        finally:
+            if temporary_path is not None:
+                temporary_path.unlink(missing_ok=True)
+
+    def _backup_legacy_json_unlocked(self) -> None:
+        for source in (self.decks_file, *sorted(self.cards_dir.glob('*.json'))):
+            self._copy_once(
+                source,
+                source.with_suffix(source.suffix + '.pre-schema-v1.bak'),
+            )
+
+    def _read_schema_unlocked(self) -> int:
+        manifest = self._read_json(self.manifest_file)
+        if not isinstance(manifest, dict):
+            raise RepositoryCorruptionError(
+                self.manifest_file, 'expected a schema manifest object'
+            )
+        version = manifest.get('schema_version')
+        if not isinstance(version, int):
+            raise RepositoryCorruptionError(
+                self.manifest_file, 'schema_version must be an integer'
+            )
+        if version != SCHEMA_VERSION:
+            raise UnsupportedSchemaError(
+                f'Unsupported repository schema {version}; expected {SCHEMA_VERSION}'
+            )
+        return version
+
+    def _allowed_recovery_target(self, path: str | Path) -> Path:
+        candidate = Path(path)
+        if not candidate.is_absolute():
+            candidate = self.data_dir / candidate
+        candidate = candidate.resolve()
+        allowed = candidate in {self.decks_file, self.manifest_file}
+        allowed = allowed or (
+            candidate.parent == self.cards_dir and candidate.suffix == '.json'
+        )
+        if not allowed:
+            raise ValueError('Recovery target must be a repository JSON file')
+        return candidate
+
     def _cards_path(self, deck_id: str) -> Path:
         if not isinstance(deck_id, str) or not _SAFE_ID.fullmatch(deck_id):
             raise ValueError('Invalid deck id')
@@ -185,6 +294,118 @@ class JsonRepository(DeckRepository, CardRepository):
         deck.card_ids = [card.id for card in card_deck.cards]
         deck.updated_at = datetime.now(timezone.utc)
         self._save_deck_meta_unlocked(deck)
+
+    # Integrity and recovery
+
+    def scan_integrity(self) -> IntegrityReport:
+        """Inspect all repository files without repairing or deleting data."""
+        issues: list[IntegrityIssue] = []
+        schema_version: int | None = None
+
+        def report(code: str, path: Path, message: str) -> None:
+            display_path = str(path.relative_to(self.data_dir))
+            issues.append(IntegrityIssue(code, display_path, message))
+
+        with self._transaction(validate_schema=False):
+            try:
+                schema_version = self._read_schema_unlocked()
+            except RepositoryStorageError as error:
+                report('schema', self.manifest_file, str(error))
+
+            try:
+                deck_items = self._read_decks_unlocked()
+            except RepositoryStorageError as error:
+                report('decks-json', self.decks_file, str(error))
+                return IntegrityReport(schema_version, tuple(issues))
+
+            decks: list[Deck] = []
+            deck_ids: set[str] = set()
+            for item in deck_items:
+                deck_id = item.get('id')
+                if not isinstance(deck_id, str) or not _SAFE_ID.fullmatch(deck_id):
+                    report('invalid-deck-id', self.decks_file, repr(deck_id))
+                    continue
+                if deck_id in deck_ids:
+                    report('duplicate-deck-id', self.decks_file, deck_id)
+                    continue
+                deck_ids.add(deck_id)
+                try:
+                    decks.append(Deck.from_dict(item))
+                except (KeyError, TypeError, ValueError) as error:
+                    report('invalid-deck', self.decks_file, f'{deck_id}: {error}')
+
+            global_card_ids: dict[str, str] = {}
+            for deck in decks:
+                cards_path = self._cards_path(deck.id)
+                if not cards_path.exists():
+                    report('missing-cards-file', cards_path, deck.id)
+                    continue
+                try:
+                    card_items = self._read_json(cards_path)
+                    if not isinstance(card_items, list) or any(
+                        not isinstance(item, dict) for item in card_items
+                    ):
+                        raise RepositoryCorruptionError(
+                            cards_path, 'expected a list of objects'
+                        )
+                    cards = CardDeck.from_list(card_items).cards
+                except (RepositoryStorageError, KeyError, TypeError, ValueError) as error:
+                    report('invalid-cards', cards_path, str(error))
+                    continue
+
+                card_ids = [card.id for card in cards]
+                if len(card_ids) != len(set(card_ids)):
+                    report('duplicate-card-id', cards_path, deck.id)
+                if deck.card_ids != card_ids:
+                    report('card-id-mismatch', cards_path, deck.id)
+                for card_id in card_ids:
+                    previous_deck = global_card_ids.setdefault(card_id, deck.id)
+                    if previous_deck != deck.id:
+                        report(
+                            'cross-deck-card-id',
+                            cards_path,
+                            f'{card_id} also occurs in {previous_deck}',
+                        )
+
+            for cards_path in sorted(self.cards_dir.glob('*.json')):
+                if cards_path.stem not in deck_ids:
+                    report('orphan-cards-file', cards_path, cards_path.stem)
+
+        return IntegrityReport(schema_version, tuple(issues))
+
+    def recover_from_backup(self, path: str | Path) -> Path:
+        """Restore exactly one repository JSON file and preserve the broken file."""
+        target = self._allowed_recovery_target(path)
+        backup = target.with_suffix(target.suffix + '.bak')
+        broken_path: Path | None = None
+        with self._transaction(validate_schema=False):
+            if not backup.exists():
+                raise FileNotFoundError(f'Backup does not exist: {backup}')
+            recovered_data = self._read_json(backup)
+            if target == self.manifest_file:
+                if not isinstance(recovered_data, dict):
+                    raise RepositoryCorruptionError(
+                        backup, 'expected a schema manifest object'
+                    )
+            elif not isinstance(recovered_data, list):
+                raise RepositoryCorruptionError(backup, 'expected a list')
+
+            if target.exists():
+                stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')
+                broken_path = target.with_name(f'{target.name}.broken-{stamp}')
+                os.replace(target, broken_path)
+            try:
+                self._write_json(target, recovered_data)
+                if target == self.manifest_file:
+                    self._read_schema_unlocked()
+            except Exception:
+                target.unlink(missing_ok=True)
+                if broken_path is not None:
+                    os.replace(broken_path, target)
+                raise
+
+        self.integrity_report = self.scan_integrity()
+        return broken_path or target
 
     # DeckRepository: decks
 

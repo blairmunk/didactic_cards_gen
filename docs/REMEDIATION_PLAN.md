@@ -32,7 +32,7 @@
   - [x] Read–modify–write сериализован между потоками и процессами; use cases используют единый mutation-контракт.
   - [x] Corrupt/missing/invalid JSON останавливает запись и даёт безопасную HTTP-ошибку.
   - [x] Устранены stale `card_ids`, orphan writes и потеря ancestry при clone.
-  - [ ] Добавить schema version, startup integrity report и управляемое восстановление backup.
+  - [x] Добавлены schema version 1, read-only startup integrity report и управляемое CLI-восстановление backup с сохранением `.broken-*`.
   - [ ] Мигрировать JSON в SQLite с FK, WAL, транзакциями и одноразовым backup/import.
   - [ ] Перевести карточные операции с индексов на UUID + optimistic version.
 - [ ] Этап 4: импорт и web UX.
@@ -60,7 +60,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 181 проходящий тест и 8 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 99.02% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 198 проходящих тестов и 8 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 99.10% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -74,7 +74,7 @@
 | ~~BUG-HTTP-003~~ ✅ | Русское имя PDF вызывало `UnicodeEncodeError` на реальном dev-сервере. | Выполнено через Werkzeug `send_file(..., download_name=...)`, который формирует ASCII fallback и RFC 5987 `filename*`. | Реальный Werkzeug/curl запрос вернул 200, PDF и Latin-1-safe headers. |
 | ~~BUG-SEC-001~~ ✅ | Команды внутри `$...$` не фильтровались. | Выполнено: allowlist учебной математики, balance validation, запрет опасных команд/символов до compiler call. | Malicious и malformed fixtures возвращают 422; compiler mock не вызывается. |
 | ~~BUG-SEC-002~~ ✅ | Не было явного `-no-shell-escape`. | Выполнено для pdfLaTeX и XeLaTeX: `-no-shell-escape -halt-on-error -file-line-error`. | Аргументы и реальные TeX builds проверяются тестами; отдельный OS/container sandbox ещё нужен для production. |
-| ~~BUG-DATA-002~~ ✅ | Invalid JSON превращался в `[]`, скрывая аварию и открывая путь к перезаписи. | Выполнено: missing/corrupt/schema errors останавливают операцию, HTTP не раскрывает путь; рядом хранится последняя `.bak`. Управляемый recovery UI остаётся отдельным пунктом этапа 3. | Byte/schema/missing fault tests подтверждают отказ без перезаписи. |
+| ~~BUG-DATA-002~~ ✅ | Invalid JSON превращался в `[]`, скрывая аварию и открывая путь к перезаписи. | Выполнено: missing/corrupt/schema errors останавливают операцию, HTTP не раскрывает путь; CLI восстанавливает выбранный файл из `.bak`, сохраняя `.broken-*`. | Byte/schema/missing/recovery fault tests подтверждают отказ без потери повреждённого оригинала. |
 | ~~BUG-DATA-004~~ ✅ | `_write_json` писал прямо в live-файл. | Выполнено: `NamedTemporaryFile` в том же каталоге → flush/fsync → backup → `os.replace`; lock охватывает полный read-modify-write. | Fault injection сохраняет прежний live JSON; concurrent stress не теряет добавления. |
 
 ### P1 — нарушение данных, API и ключевых пользовательских сценариев
@@ -164,9 +164,9 @@
 
 ### Этап 3. Сделать persistence транзакционным
 
-1. [ ] Исправить текущий JSON: [x] absolute path, [x] atomic replace, [x] lock, [x] backup, [x] безопасный отказ при corruption; [ ] управляемое recovery и schema version.
+1. [x] Исправить текущий JSON: absolute path, atomic replace, lock, backup, безопасный отказ при corruption, управляемое recovery и schema version.
 2. [x] Проверять точное равенство `card_ids` и целостность при каждой транзакции.
-3. [ ] Добавить startup integrity scan: missing/orphan/duplicate IDs, invalid timestamps, recovery report без автоматической потери данных.
+3. [x] Добавить startup integrity scan: missing/orphan/duplicate IDs, invalid timestamps, recovery report без автоматической потери данных.
 4. [ ] Перейти на SQLite: `decks`, `cards`, `deck_cards(position)`, foreign keys, transactions, migrations.
 5. [ ] Все UI/API операции адресовать card UUID + optimistic version, а не индексом.
 
