@@ -41,6 +41,9 @@ class FakeRenderer(DocumentRenderer):
         self.sides.append("back")
         return r"\documentclass{article}\begin{document}fake\end{document}"
 
+    def printable_area_warnings(self) -> tuple[str, ...]:
+        return ()
+
 
 def make_test_app(tmp_path, *, compiler_success: bool = True) -> Flask:
     app = Flask(__name__)

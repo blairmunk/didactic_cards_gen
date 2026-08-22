@@ -16,7 +16,7 @@
   - [x] Добавлен реальный четырёхстраничный `pdflatex`/`pdftotext` integration test.
   - [x] Добавлены независимые offsets сторон (±10 мм) и опциональные registration marks.
   - [x] Реальный PDF geometry test измеряет векторную рамку через `mutool` с допуском 0.1 мм.
-  - [ ] Добавить overflow preflight.
+  - [x] Добавлен read-only preflight: TeX-измерение vertical overflow с card/side mapping, horizontal overflow и missing glyphs из log, printable-area и empty/partial-sheet warnings.
   - [ ] Выполнить raster golden tests и физический прогон.
 - [x] Этап 2: безопасная граница TeX/HTTP на уровне приложения.
   - [x] Математические команды ограничены allowlist; malicious/malformed fixtures отклоняются до компиляции.
@@ -46,7 +46,8 @@
 - [ ] Этап 5: функциональное развитие.
   - [x] Versioned JSON/CSV export и транзакционный import-копия с lineage.
   - [x] Раздельные front-only/back-only PDF сохраняют sheet mapping, duplex transform и offsets для ручной подачи.
-  - [ ] Printer profiles, расширенная layout-конфигурация и preflight.
+  - [x] Компилируемый preflight проверяет overflow, missing glyphs, unsupported formulas и printable area до печати.
+  - [ ] Printer profiles, расширенная layout-конфигурация и auto-fit/clip policy.
 
 ## 1. Итог аудита
 
@@ -70,7 +71,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 270 проходящих тестов, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.89% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 281 проходящий тест, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.86% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -114,7 +115,7 @@
 - ✅ `BUG-UI-003`: MathJax 3.2.2 + fonts vendored локально, CDN удалён из templates/CSP, есть status/fallback.
 - ✅ Добавлен inline preview реально скомпилированного PDF; визуальный front/back overlay остаётся дальнейшим улучшением.
 - `back_border=False` скрывает совмещение. Нужен режим calibration/debug с крестами, crop marks и идентификаторами slot/page.
-- Длинный текст не получает overflow warning, auto-fit или clip policy; возможен выход за границы соседней карточки.
+- ✅ Preflight обнаруживает vertical overflow точным TeX-измерением и horizontal overflow по log до печати. Auto-fit/controlled clipping пока не реализованы, поэтому пользователь должен сократить помеченную сторону.
 - Single newline в исходном тексте не равен видимому переносу LaTeX; нужен определённый markdown/rich-text contract.
 - ✅ Routes адресуют карточки UUID; deck `version` защищает параллельные add/edit/delete/reorder/reset от lost update.
 - Времена сохраняются UTC, но UI форматирует без зоны и без явной конвертации в локальную.
@@ -202,7 +203,7 @@
 3. [x] Двусторонний PDF и два отдельных файла front/back для принтеров без duplex. Раздельные документы сохраняют одинаковую нумерацию физических листов, back permutation и калибровочные offsets; unit, HTTP и реальный `pdflatex` page-count test проходят.
 4. [x] Импорт/экспорт колоды в versioned JSON schema 1 и UTF-8-BOM CSV; импорт создаёт транзакционную копию с lineage, validation/quota и без перезаписи существующих данных. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
 5. Шаблоны оформления: шрифт, выравнивание, размер, фон, изображения/QR после отдельной security-модели.
-6. Auto-fit и preflight: overflow, missing glyphs, unsupported formulas, printable-area warning.
+6. [x] Preflight: overflow, missing glyphs, unsupported formulas, printable-area warning. Auto-fit/controlled clipping остаются отдельным улучшением.
 7. Поиск, теги, массовое редактирование, undo/trash вместо немедленного удаления.
 8. PDF metadata, deterministic builds и сохранение print job с конфигурацией для повторной печати.
 

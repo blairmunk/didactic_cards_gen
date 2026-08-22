@@ -189,6 +189,7 @@
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <button type="submit" class="btn-secondary">🔎 PDF-превью</button>
             </form>
+            <button type="button" id="preflight-button" class="btn-warning">Проверить перед печатью</button>
             <form action="{{ url_for('cards.reset', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="version" value="{{ deck.version }}">
@@ -196,6 +197,7 @@
                         onclick="return confirm('Удалить все карточки?')">🗑 Очистить всё</button>
             </form>
         </div>
+        <div id="preflight-result" class="preflight-result" role="status" aria-live="polite"></div>
     </div>
 
     <dialog id="pdf-preview-dialog" class="pdf-preview-dialog">

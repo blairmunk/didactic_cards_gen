@@ -95,6 +95,7 @@ MathJax 3.2.2 вместе с web fonts хранится локально в sta
 - «PDF-превью» компилирует тот же документ и открывает inline PDF в модальном окне; это точнее декоративной HTML-сетки по шрифту, pagination и duplex-порядку.
 - «Сгенерировать PDF» запускает `pdflatex` с таймаутом 30 секунд.
 - «PDF: только лица» и «PDF: только обороты» создают два согласованных файла для принтера без автоматического duplex. В обоих файлах один PDF-лист соответствует одному и тому же физическому листу колоды; обороты используют ту же выбранную permutation и калибровочные offsets, что и полный duplex PDF.
+- «Проверить перед печатью» выполняет read-only компиляцию и показывает пустые стороны, неполный последний лист, выход настроенной сетки за printable area, неподдерживаемые формулы, отсутствующие glyphs и horizontal/vertical overflow. Для вертикального overflow используется измерение содержимого самим TeX с привязкой к карточке и стороне; колода и её `version` не меняются.
 - Неполный лист дополняется пустыми ячейками до восьми карточек.
 - Страницы идут парами физических листов: `front-1, back-1, front-2, back-2, …`.
 - По умолчанию используется portrait long-edge: колонки оборота зеркальны, текст остаётся вертикальным. Short-edge доступен через `CardLayoutConfig.duplex_mode`.
@@ -207,7 +208,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 270 проходящих тестов, 0 `xfail`, общий branch coverage 98.89%. В него входят unit/HTTP-контракты раздельной печати и реальная TeX-проверка: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
+Текущее состояние основного набора: 281 проходящий тест, 0 `xfail`, общий branch coverage 98.86%. В него входят unit/HTTP-контракты раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
 
 Скриншоты можно переснять на запущенном приложении:
 

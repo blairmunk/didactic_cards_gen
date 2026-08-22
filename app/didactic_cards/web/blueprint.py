@@ -13,7 +13,7 @@ from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
     EditCard, ReorderCards, ResetCards, GetDeck,
     GenerateDocument, GenerateDocumentSide, PreviewDocument, CardLimitExceeded,
-    CsvValidationError, preview_csv_import,
+    PreflightDocument, CsvValidationError, preview_csv_import,
 )
 from ..use_cases.deck_use_cases import (
     ListDecks, GetDeckInfo, CreateDeck, UpdateDeck,
@@ -456,6 +456,29 @@ def generate_fronts(deck_id):
 @cards_bp.route('/deck/<deck_id>/generate/backs', methods=['POST'])
 def generate_backs(deck_id):
     return _generate_pdf_response(deck_id, attachment=True, side='back')
+
+
+@cards_bp.route('/api/deck/<deck_id>/preflight', methods=['POST'])
+def preflight_document(deck_id):
+    try:
+        report = PreflightDocument(
+            _repo(), _renderer(), _compiler(), _cards_per_page()
+        ).execute(deck_id)
+        return jsonify(report.to_dict())
+    except UnsafeLatexError as error:
+        return jsonify({
+            'ready': False,
+            'error_count': 1,
+            'warning_count': 0,
+            'issues': [{
+                'code': 'unsupported-formula',
+                'severity': 'error',
+                'message': str(error),
+                'card_id': None,
+                'card_number': None,
+                'side': None,
+            }],
+        })
 
 
 @cards_bp.route('/deck/<deck_id>/preview_latex', methods=['POST'])

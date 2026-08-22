@@ -127,6 +127,10 @@ class DocumentRenderer(ABC):
     def render_backs(self, deck: CardDeck) -> str:
         ...
 
+    @abstractmethod
+    def printable_area_warnings(self) -> tuple[str, ...]:
+        ...
+
 
 class PdfCompiler(ABC):
 

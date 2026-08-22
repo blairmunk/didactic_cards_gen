@@ -247,6 +247,18 @@ class TestLatexRenderer:
         assert without_marks.count(r'\registrationmarks') == 1  # macro definition only
         assert with_marks.count(r'\registrationmarks') == 3  # definition + two pages
 
+    def test_printable_area_warnings_include_offset_side_and_axis(self):
+        renderer = LatexRenderer(
+            front_offset_x_mm=-0.1,
+            back_offset_y_mm=-0.1,
+        )
+        warnings = renderer.printable_area_warnings()
+        assert any('Лицевая' in warning and 'горизонтальное' in warning for warning in warnings)
+        assert any('Оборотная' in warning and 'вертикальное' in warning for warning in warnings)
+
+    def test_default_layout_has_no_printable_area_warning(self):
+        assert LatexRenderer().printable_area_warnings() == ()
+
     def test_math_input_cannot_close_document_or_read_files(self):
         with pytest.raises(UnsafeLatexError):
             escape_latex(r'$x\end{document}\input{/etc/passwd}$')
@@ -358,6 +370,19 @@ def test_real_split_pdfs_have_one_page_per_physical_sheet(tmp_path):
             ['pdfinfo', str(pdf_path)], capture_output=True, text=True, check=True
         ).stdout
         assert 'Pages:           2' in info
+
+
+@pytest.mark.integration
+def test_real_latex_log_marks_vertical_card_overflow():
+    if not shutil.which('pdflatex'):
+        pytest.skip('pdflatex is required for the overflow integration test')
+
+    deck = CardDeck([Card(front='Очень длинный текст ' * 500, back='Ответ')])
+    result = PdfLatexCompiler().compile(
+        LatexRenderer(cards_per_row=1, rows_per_page=1).render(deck)
+    )
+    assert result.success, result.log
+    assert 'DIDACTIC-CARDS-OVERFLOW:1:front' in result.log
 
 
 @pytest.mark.integration

@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
         deleteCard: '/api/deck/' + DECK_ID + '/delete_card/',
         reorder:    '/api/deck/' + DECK_ID + '/reorder',
         previewCsv: '/api/deck/' + DECK_ID + '/preview_csv',
+        preflight:  '/api/deck/' + DECK_ID + '/preflight',
         editPage:   '/deck/' + DECK_ID + '/edit_card/',
     };
 
@@ -352,6 +353,60 @@ document.addEventListener('DOMContentLoaded', function() {
             pdfPreviewFrame.removeAttribute('src');
             if (pdfPreviewUrl) URL.revokeObjectURL(pdfPreviewUrl);
             pdfPreviewUrl = null;
+        });
+    }
+
+    // ── Проверка печатного документа ──
+
+    const preflightButton = document.getElementById('preflight-button');
+    const preflightResult = document.getElementById('preflight-result');
+    if (preflightButton && preflightResult) {
+        preflightButton.addEventListener('click', async function() {
+            preflightButton.disabled = true;
+            preflightResult.className = 'preflight-result';
+            preflightResult.textContent = 'Компиляция и проверка…';
+            try {
+                const response = await fetch(API.preflight, { method: 'POST' });
+                const data = await response.json();
+                if (!response.ok) {
+                    preflightResult.classList.add('has-errors');
+                    preflightResult.textContent = data.error || 'Не удалось проверить документ';
+                    return;
+                }
+
+                preflightResult.replaceChildren();
+                const summary = document.createElement('strong');
+                summary.textContent = data.ready
+                    ? 'Критических проблем не найдено.'
+                    : 'Перед печатью исправьте ошибки.';
+                preflightResult.appendChild(summary);
+                if (data.error_count) preflightResult.classList.add('has-errors');
+                else if (data.warning_count) preflightResult.classList.add('has-warnings');
+
+                if (data.issues.length) {
+                    const list = document.createElement('ul');
+                    data.issues.forEach(function(issue) {
+                        const item = document.createElement('li');
+                        item.className = 'preflight-' + issue.severity;
+                        if (issue.card_id) {
+                            const link = document.createElement('a');
+                            link.href = API.editPage + issue.card_id;
+                            link.textContent = issue.message;
+                            item.appendChild(link);
+                        } else {
+                            item.textContent = issue.message;
+                        }
+                        list.appendChild(item);
+                    });
+                    preflightResult.appendChild(list);
+                }
+            } catch (error) {
+                console.error(error);
+                preflightResult.classList.add('has-errors');
+                preflightResult.textContent = 'Ошибка сети при проверке документа';
+            } finally {
+                preflightButton.disabled = false;
+            }
         });
     }
 

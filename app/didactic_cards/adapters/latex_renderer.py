@@ -175,7 +175,32 @@ class LatexRenderer(DocumentRenderer):
     def render_backs(self, deck: CardDeck) -> str:
         return self._render_sides(deck, ('back',))
 
+    def printable_area_warnings(self) -> tuple[str, ...]:
+        grid_width = self.cards_per_row * self.card_width
+        grid_height = self.rows_per_page * (
+            self.card_height + 2 * PT_TO_CM
+        )
+        warnings = []
+        for side, (offset_x, offset_y) in (
+            ('Лицевая сторона', self.front_offset),
+            ('Оборотная сторона', self.back_offset),
+        ):
+            if offset_x < 0 or offset_x / 10 + grid_width > 20.0:
+                warnings.append(
+                    f'{side}: горизонтальное смещение выводит сетку за '
+                    'настраиваемую область A4'
+                )
+            if offset_y < 0 or offset_y / 10 + grid_height > 28.7:
+                warnings.append(
+                    f'{side}: вертикальное смещение выводит сетку за '
+                    'настраиваемую область A4'
+                )
+        return tuple(warnings)
+
     def _render_sides(self, deck: CardDeck, sides: tuple[str, ...]) -> str:
+        card_numbers = {
+            id(card): number for number, card in enumerate(deck.cards, start=1)
+        }
         sheets = build_sheets(
             deck.cards,
             rows=self.rows_per_page,
@@ -193,7 +218,9 @@ class LatexRenderer(DocumentRenderer):
         for page_index, (sheet_index, side, cards) in enumerate(pages):
             side_label = 'передние стороны' if side == 'front' else 'задние стороны'
             latex += f'\n% ===== Лист {sheet_index + 1}: {side_label} =====\n'
-            latex += self._render_page(cards, side=side)
+            latex += self._render_page(
+                cards, side=side, card_numbers=card_numbers
+            )
             if page_index < len(pages) - 1:
                 latex += r'\newpage' + '\n'
 
@@ -241,6 +268,16 @@ class LatexRenderer(DocumentRenderer):
 }}
 \newcommand{{\frontcard}}[1]{{\cardbox{{\fbox}}{{#1}}}}
 \newcommand{{\backcard}}[1]{{\cardbox{{{back_frame}}}{{#1}}}}
+\newbox\cardcontentbox
+\newcommand{{\checkedcardcontent}}[3]{{%
+    \setbox\cardcontentbox=\vbox{{%
+        \hsize=\cardcontentwidth\noindent #3\par
+    }}%
+    \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>\cardcontentheight
+        \typeout{{DIDACTIC-CARDS-OVERFLOW:#1:#2}}%
+    \fi
+    \box\cardcontentbox
+}}
 \newcommand{{\registrationmarks}}{{%
     \begin{{tikzpicture}}[remember picture,overlay,line width=0.2pt]
     \draw ([yshift=-5mm]current page.north) ++(-3mm,0) -- ++(6mm,0);
@@ -261,7 +298,13 @@ class LatexRenderer(DocumentRenderer):
 \begin{{document}}
 '''
 
-    def _render_page(self, cards: tuple[Card, ...], *, side: str) -> str:
+    def _render_page(
+        self,
+        cards: tuple[Card, ...],
+        *,
+        side: str,
+        card_numbers: dict[int, int],
+    ) -> str:
         command = r'\frontcard' if side == 'front' else r'\backcard'
         offset_x, offset_y = self.front_offset if side == 'front' else self.back_offset
         grid_width = self.cards_per_row * self.card_width
@@ -272,8 +315,14 @@ class LatexRenderer(DocumentRenderer):
         for row in range(self.rows_per_page):
             for column in range(self.cards_per_row):
                 index = row * self.cards_per_row + column
-                text = getattr(cards[index], side)
-                result += command + '{' + _card_content(text) + '}\n'
+                card = cards[index]
+                text = getattr(card, side)
+                card_number = card_numbers[id(card)]
+                checked_content = (
+                    r'\checkedcardcontent'
+                    f'{{{card_number}}}{{{side}}}{{{_card_content(text)}}}'
+                )
+                result += command + '{' + checked_content + '}\n'
                 if column < self.cards_per_row - 1:
                     result += '%\n'
             if row < self.rows_per_page - 1:

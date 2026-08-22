@@ -12,6 +12,7 @@ from didactic_cards.use_cases.card_use_cases import (
     GetDeck,
     ImportCsv,
     PreviewDocument,
+    PreflightDocument,
     ReorderCards,
     ResetCards,
     CardLimitExceeded,
@@ -167,6 +168,82 @@ def test_generate_single_side_rejects_unknown_side(repo, app):
         GenerateDocumentSide(
             repo, app.config["RENDERER"], app.config["COMPILER"], 8, "both"
         )
+
+
+def test_preflight_reports_card_and_compiler_issues(repo, deck_id, app):
+    card, _ = AddCard(repo).execute(deck_id, "Q", "")
+
+    class ReportingCompiler:
+        def compile(self, _source):
+            from didactic_cards.domain.interfaces import CompileResult
+            return CompileResult(
+                True,
+                b'%PDF',
+                'DIDACTIC-CARDS-OVERFLOW:1:front\n'
+                'Overfull \\hbox\nMissing character:',
+            )
+
+    report = PreflightDocument(
+        repo, app.config['RENDERER'], ReportingCompiler(), 8
+    ).execute(deck_id)
+    by_code = {issue.code: issue for issue in report.issues}
+
+    assert report.ready is False
+    assert by_code['empty-side'].card_id == card.id
+    assert by_code['partial-sheet'].severity == 'info'
+    assert by_code['vertical-overflow'].side == 'front'
+    assert by_code['horizontal-overflow'].severity == 'error'
+    assert by_code['missing-glyph'].severity == 'error'
+    assert report.to_dict()['error_count'] == 3
+    assert report.to_dict()['warning_count'] == 1
+
+
+def test_preflight_compile_failure_is_safe(repo, deck_id, app):
+    AddCard(repo).execute(deck_id, 'Q', 'A')
+
+    class FailingCompiler:
+        def compile(self, _source):
+            from didactic_cards.domain.interfaces import CompileResult
+            return CompileResult(False, b'', '/private/path', 'compile-error')
+
+    report = PreflightDocument(
+        repo, app.config['RENDERER'], FailingCompiler(), 8
+    ).execute(deck_id)
+    issue = next(issue for issue in report.issues if issue.code == 'compile-failed')
+    assert report.ready is False
+    assert '/private/path' not in issue.message
+
+
+def test_preflight_rejects_empty_deck_without_compilation(repo, deck_id, app):
+    report = PreflightDocument(
+        repo, app.config['RENDERER'], app.config['COMPILER'], 8
+    ).execute(deck_id)
+    assert report.ready is False
+    assert report.issues[0].code == 'empty-deck'
+    assert app.config['COMPILER'].sources == []
+
+
+def test_preflight_rejects_non_positive_page_capacity(repo, deck_id, app):
+    with pytest.raises(ValueError, match='cards_per_page'):
+        PreflightDocument(
+            repo, app.config['RENDERER'], app.config['COMPILER'], 0
+        ).execute(deck_id)
+
+
+def test_preflight_clean_full_sheet_and_layout_warning(repo, deck_id, app):
+    for number in range(8):
+        AddCard(repo).execute(deck_id, f'Q{number}', f'A{number}')
+    renderer = app.config['RENDERER']
+    renderer.printable_area_warnings = lambda: ('Сетка вне области',)
+
+    report = PreflightDocument(
+        repo, renderer, app.config['COMPILER'], 8
+    ).execute(deck_id)
+
+    assert report.ready is True
+    assert [(issue.code, issue.severity) for issue in report.issues] == [
+        ('printable-area', 'warning')
+    ]
 
 
 def test_generate_rejects_non_positive_page_capacity(repo, deck_id, app):

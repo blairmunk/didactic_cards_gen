@@ -468,6 +468,42 @@ def test_split_pdf_rejects_empty_deck(client, deck_id, endpoint):
     assert "Добавьте хотя бы одну карточку" in response.text
 
 
+def test_preflight_api_is_read_only_and_returns_report(client, repo, deck_id):
+    client.post(f"/api/deck/{deck_id}/add_card", json={"front": "Q", "back": ""})
+    version = repo.get_deck(deck_id).version
+
+    response = client.post(f"/api/deck/{deck_id}/preflight")
+
+    assert response.status_code == 200
+    assert response.json['ready'] is True
+    assert response.json['warning_count'] == 1
+    assert {issue['code'] for issue in response.json['issues']} == {
+        'empty-side', 'partial-sheet'
+    }
+    assert repo.get_deck(deck_id).version == version
+
+
+def test_preflight_api_reports_unsupported_formula(client, app, deck_id):
+    app.config['RENDERER'] = LatexRenderer(cards_per_row=2, rows_per_page=4)
+    client.post(
+        f"/api/deck/{deck_id}/add_card",
+        json={"front": r"$\input{/etc/passwd}$", "back": "A"},
+    )
+    response = client.post(f"/api/deck/{deck_id}/preflight")
+    assert response.status_code == 200
+    assert response.json['ready'] is False
+    assert response.json['issues'][0]['code'] == 'unsupported-formula'
+    assert app.config['COMPILER'].sources == []
+
+
+def test_preflight_api_rejects_empty_deck_without_compilation(client, app, deck_id):
+    response = client.post(f"/api/deck/{deck_id}/preflight")
+    assert response.status_code == 200
+    assert response.json['ready'] is False
+    assert response.json['issues'][0]['code'] == 'empty-deck'
+    assert app.config['COMPILER'].sources == []
+
+
 def test_security_headers_are_added(client):
     response = client.get('/')
     assert response.headers['X-Content-Type-Options'] == 'nosniff'

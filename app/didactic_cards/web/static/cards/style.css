@@ -97,6 +97,30 @@ select {
     font-size: 0.9rem;
 }
 
+.preflight-result {
+    margin-top: 1rem;
+    padding: 0.75rem;
+    border-left: 4px solid #2e7d32;
+    background: #edf7ed;
+}
+
+.preflight-result:empty {
+    display: none;
+}
+
+.preflight-result.has-warnings {
+    border-color: #ed6c02;
+    background: #fff4e5;
+}
+
+.preflight-result.has-errors {
+    border-color: #d32f2f;
+    background: #fdeded;
+}
+
+.preflight-error { color: #b71c1c; }
+.preflight-warning { color: #8a4b00; }
+
 .is-saving .drag-handle {
     opacity: 0.5;
     pointer-events: none;

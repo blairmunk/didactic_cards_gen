@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import dataclass
 
 from ..domain.interfaces import (
@@ -37,6 +38,44 @@ class CsvImportPreview:
             'cards': [card.to_dict() for card in self.cards[:preview_limit]],
             'rejected_rows': list(self.rejected_rows[:preview_limit]),
             'truncated': max(len(self.cards), len(self.rejected_rows)) > preview_limit,
+        }
+
+
+@dataclass(frozen=True)
+class PreflightIssue:
+    code: str
+    severity: str
+    message: str
+    card_id: str | None = None
+    card_number: int | None = None
+    side: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            'code': self.code,
+            'severity': self.severity,
+            'message': self.message,
+            'card_id': self.card_id,
+            'card_number': self.card_number,
+            'side': self.side,
+        }
+
+
+@dataclass(frozen=True)
+class PreflightReport:
+    ready: bool
+    issues: tuple[PreflightIssue, ...]
+
+    def to_dict(self) -> dict:
+        return {
+            'ready': self.ready,
+            'issues': [issue.to_dict() for issue in self.issues],
+            'error_count': sum(
+                issue.severity == 'error' for issue in self.issues
+            ),
+            'warning_count': sum(
+                issue.severity == 'warning' for issue in self.issues
+            ),
         }
 
 
@@ -284,6 +323,110 @@ class GenerateDocumentSide(GenerateDocument):
         method_name = 'render_fronts' if self.side == 'front' else 'render_backs'
         render_side = getattr(self.renderer, method_name)
         return self.compiler.compile(render_side(padded_deck))
+
+
+class PreflightDocument:
+    OVERFLOW_MARKER = re.compile(
+        r'DIDACTIC-CARDS-OVERFLOW:(\d+):(front|back)'
+    )
+
+    def __init__(
+        self,
+        repo: DeckRepository,
+        renderer: DocumentRenderer,
+        compiler: PdfCompiler,
+        cards_per_page: int,
+    ):
+        self.repo = repo
+        self.renderer = renderer
+        self.compiler = compiler
+        self.cards_per_page = cards_per_page
+
+    def execute(self, deck_id: str) -> PreflightReport:
+        deck = self.repo.load_cards(deck_id)
+        padded_deck = CardDeck(cards=deck.padded(self.cards_per_page))
+        if not deck.cards:
+            return PreflightReport(False, (PreflightIssue(
+                code='empty-deck',
+                severity='error',
+                message='Добавьте хотя бы одну карточку',
+            ),))
+
+        issues: list[PreflightIssue] = []
+        for number, card in enumerate(deck.cards, start=1):
+            for side in ('front', 'back'):
+                if not getattr(card, side).strip():
+                    issues.append(PreflightIssue(
+                        code='empty-side',
+                        severity='warning',
+                        message=(
+                            f'Карточка {number}: '
+                            f'{"лицевая" if side == "front" else "оборотная"} '
+                            'сторона пуста'
+                        ),
+                        card_id=card.id,
+                        card_number=number,
+                        side=side,
+                    ))
+
+        remainder = len(deck) % self.cards_per_page
+        if remainder:
+            empty_slots = self.cards_per_page - remainder
+            issues.append(PreflightIssue(
+                code='partial-sheet',
+                severity='info',
+                message=f'Последний лист содержит {empty_slots} пустых ячеек',
+            ))
+
+        for message in self.renderer.printable_area_warnings():
+            issues.append(PreflightIssue(
+                code='printable-area', severity='warning', message=message
+            ))
+
+        result = self.compiler.compile(self.renderer.render(padded_deck))
+        if not result.success:
+            issues.append(PreflightIssue(
+                code='compile-failed',
+                severity='error',
+                message='Документ не компилируется; проверьте содержимое карточек',
+            ))
+            return PreflightReport(False, tuple(issues))
+
+        seen_overflows: set[tuple[int, str]] = set()
+        for match in self.OVERFLOW_MARKER.finditer(result.log):
+            number = int(match.group(1))
+            side = match.group(2)
+            if number > len(deck.cards) or (number, side) in seen_overflows:
+                continue
+            seen_overflows.add((number, side))
+            card = deck.cards[number - 1]
+            side_label = 'лицевая' if side == 'front' else 'оборотная'
+            issues.append(PreflightIssue(
+                code='vertical-overflow',
+                severity='error',
+                message=f'Карточка {number}: {side_label} сторона не помещается по высоте',
+                card_id=card.id,
+                card_number=number,
+                side=side,
+            ))
+
+        if 'Overfull \\hbox' in result.log:
+            issues.append(PreflightIssue(
+                code='horizontal-overflow',
+                severity='error',
+                message='В документе найден текст, не помещающийся по ширине',
+            ))
+        if 'Missing character:' in result.log:
+            issues.append(PreflightIssue(
+                code='missing-glyph',
+                severity='error',
+                message='Выбранный LaTeX-шрифт не содержит один или несколько символов',
+            ))
+
+        return PreflightReport(
+            not any(issue.severity == 'error' for issue in issues),
+            tuple(issues),
+        )
 
 
 class PreviewDocument:
