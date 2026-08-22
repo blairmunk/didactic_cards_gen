@@ -6,6 +6,7 @@ from flask import (Blueprint, render_template, request, redirect,
                    url_for, jsonify, current_app, send_file, session, abort)
 
 from ..adapters.latex_renderer import UnsafeLatexError
+from ..adapters.json_repository import DeckNotFoundError, RepositoryCorruptionError
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
@@ -87,6 +88,28 @@ def add_security_headers(response):
         "base-uri 'self'; frame-ancestors 'none'",
     )
     return response
+
+
+@cards_bp.app_errorhandler(DeckNotFoundError)
+def handle_missing_deck(_error):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Колода не найдена'}), 404
+    return redirect(url_for('cards.decks_list'))
+
+
+@cards_bp.app_errorhandler(RepositoryCorruptionError)
+def handle_repository_corruption(error):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Хранилище данных повреждено'}), 500
+    return render_template(
+        'cards/error.html',
+        deck=None,
+        errors=[
+            'Хранилище данных повреждено. Запись остановлена; '
+            'восстановите JSON из резервной копии.'
+        ],
+        full_log=str(error) if current_app.debug else '',
+    ), 500
 
 
 def _render_deck_error(deck_id: str, message: str, status: int = 409):

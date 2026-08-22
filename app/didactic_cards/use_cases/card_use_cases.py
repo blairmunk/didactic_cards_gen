@@ -23,12 +23,12 @@ class AddCard:
         self.max_cards = max_cards
 
     def execute(self, deck_id: str, front: str, back: str) -> tuple[Card, int]:
-        deck = self.repo.load_cards(deck_id)
-        _ensure_capacity(deck, 1, self.max_cards)
-        card = Card(front=front, back=back)
-        index = deck.add(card)
-        self.repo.save_cards(deck_id, deck)
-        return card, index
+        def add(deck: CardDeck):
+            _ensure_capacity(deck, 1, self.max_cards)
+            card = Card(front=front, back=back)
+            return (card, deck.add(card)), True
+
+        return self.repo.mutate_cards(deck_id, add)
 
 
 class AddCardsBulk:
@@ -37,7 +37,6 @@ class AddCardsBulk:
         self.max_cards = max_cards
 
     def execute(self, deck_id: str, bulk_text: str) -> int:
-        deck = self.repo.load_cards(deck_id)
         new_cards = []
         for line in bulk_text.strip().splitlines():
             line = line.strip()
@@ -49,11 +48,13 @@ class AddCardsBulk:
             else:
                 front, back = line, ''
             new_cards.append(Card(front=front, back=back))
-        _ensure_capacity(deck, len(new_cards), self.max_cards)
-        for card in new_cards:
-            deck.add(card)
-        self.repo.save_cards(deck_id, deck)
-        return len(new_cards)
+        def add_all(deck: CardDeck):
+            _ensure_capacity(deck, len(new_cards), self.max_cards)
+            for card in new_cards:
+                deck.add(card)
+            return len(new_cards), bool(new_cards)
+
+        return self.repo.mutate_cards(deck_id, add_all)
 
 
 class ImportCsv:
@@ -62,7 +63,6 @@ class ImportCsv:
         self.max_cards = max_cards
 
     def execute(self, deck_id: str, file_bytes: bytes) -> int:
-        deck = self.repo.load_cards(deck_id)
         text = file_bytes.decode('utf-8-sig')
         reader = csv.reader(io.StringIO(text))
         new_cards = []
@@ -73,11 +73,13 @@ class ImportCsv:
             back = row[1].strip() if len(row) > 1 else ''
             if front or back:
                 new_cards.append(Card(front=front, back=back))
-        _ensure_capacity(deck, len(new_cards), self.max_cards)
-        for card in new_cards:
-            deck.add(card)
-        self.repo.save_cards(deck_id, deck)
-        return len(new_cards)
+        def add_all(deck: CardDeck):
+            _ensure_capacity(deck, len(new_cards), self.max_cards)
+            for card in new_cards:
+                deck.add(card)
+            return len(new_cards), bool(new_cards)
+
+        return self.repo.mutate_cards(deck_id, add_all)
 
 
 class DeleteCard:
@@ -85,11 +87,11 @@ class DeleteCard:
         self.repo = repo
 
     def execute(self, deck_id: str, index: int) -> bool:
-        deck = self.repo.load_cards(deck_id)
-        result = deck.delete(index)
-        if result:
-            self.repo.save_cards(deck_id, deck)
-        return result
+        def delete(deck: CardDeck):
+            result = deck.delete(index)
+            return result, result
+
+        return self.repo.mutate_cards(deck_id, delete)
 
 
 class EditCard:
@@ -97,11 +99,11 @@ class EditCard:
         self.repo = repo
 
     def execute(self, deck_id: str, index: int, front: str, back: str) -> bool:
-        deck = self.repo.load_cards(deck_id)
-        result = deck.edit(index, front, back)
-        if result:
-            self.repo.save_cards(deck_id, deck)
-        return result
+        def edit(deck: CardDeck):
+            result = deck.edit(index, front, back)
+            return result, result
+
+        return self.repo.mutate_cards(deck_id, edit)
 
 
 class ReorderCards:
@@ -109,11 +111,11 @@ class ReorderCards:
         self.repo = repo
 
     def execute(self, deck_id: str, new_order: list[int]) -> bool:
-        deck = self.repo.load_cards(deck_id)
-        result = deck.reorder(new_order)
-        if result:
-            self.repo.save_cards(deck_id, deck)
-        return result
+        def reorder(deck: CardDeck):
+            result = deck.reorder(new_order)
+            return result, result
+
+        return self.repo.mutate_cards(deck_id, reorder)
 
 
 class ResetCards:
@@ -121,9 +123,12 @@ class ResetCards:
         self.repo = repo
 
     def execute(self, deck_id: str) -> None:
-        deck = self.repo.load_cards(deck_id)
-        deck.clear()
-        self.repo.save_cards(deck_id, deck)
+        def reset(deck: CardDeck):
+            changed = bool(deck.cards)
+            deck.clear()
+            return None, changed
+
+        self.repo.mutate_cards(deck_id, reset)
 
 
 class GetDeck:

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from flask import Flask
 from config import AppConfig as Config
 from didactic_cards.adapters.json_repository import JsonRepository
@@ -6,16 +8,26 @@ from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 from didactic_cards.web.blueprint import cards_bp
 
 
-def create_app() -> Flask:
-    cfg = Config()
+def create_app(
+    config: Config | None = None,
+    *,
+    data_dir: str | Path | None = None,
+    repo=None,
+    renderer=None,
+    compiler=None,
+) -> Flask:
+    """Create an application with optional deployment/test dependencies."""
+    cfg = config or Config()
     app = Flask(__name__)
     app.secret_key = cfg.secret_key
 
-    repo = JsonRepository(data_dir='data')
+    repo = repo if repo is not None else JsonRepository(
+        data_dir=data_dir if data_dir is not None else cfg.data_dir
+    )
 
     layout = cfg.layout
     app.config['REPO'] = repo
-    app.config['RENDERER'] = LatexRenderer(
+    app.config['RENDERER'] = renderer if renderer is not None else LatexRenderer(
         card_width_cm=layout.card_width_cm,
         card_height_cm=layout.card_height_cm,
         cards_per_row=layout.cards_per_row,
@@ -30,7 +42,7 @@ def create_app() -> Flask:
         back_offset_y_mm=layout.back_offset_y_mm,
         registration_marks=layout.registration_marks,
     )
-    app.config['COMPILER'] = PdfLatexCompiler(
+    app.config['COMPILER'] = compiler if compiler is not None else PdfLatexCompiler(
         pdflatex_path=cfg.pdflatex_path,
         timeout=cfg.pdflatex_timeout,
     )

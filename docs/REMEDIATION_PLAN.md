@@ -27,6 +27,14 @@
   - [x] Добавлены CSRF, quotas, safe external logs и security headers.
   - [ ] Для production deployment изолировать TeX отдельным непривилегированным worker/container.
 - [ ] Этап 3: транзакционное persistence.
+  - [x] Путь базы абсолютный, поддерживает `DIDACTIC_CARDS_DATA_DIR` и не зависит от CWD.
+  - [x] Запись JSON использует temp + fsync + atomic replace и сохраняет последнюю `.bak`.
+  - [x] Read–modify–write сериализован между потоками и процессами; use cases используют единый mutation-контракт.
+  - [x] Corrupt/missing/invalid JSON останавливает запись и даёт безопасную HTTP-ошибку.
+  - [x] Устранены stale `card_ids`, orphan writes и потеря ancestry при clone.
+  - [ ] Добавить schema version, startup integrity report и управляемое восстановление backup.
+  - [ ] Мигрировать JSON в SQLite с FK, WAL, транзакциями и одноразовым backup/import.
+  - [ ] Перевести карточные операции с индексов на UUID + optimistic version.
 - [ ] Этап 4: импорт и web UX.
 - [ ] Этап 5: функциональное развитие.
 
@@ -40,7 +48,7 @@
 2. ✅ Ячейки оборота зеркалились по столбцам и одновременно безусловно поворачивались на 180° (`BUG-PRINT-002`). Теперь transform зависит от long/short edge и не переворачивает текст.
 3. ✅ Кириллица в названии колоды попадала в `Content-Disposition` без RFC 5987 и роняла реальный Werkzeug WSGI (`BUG-HTTP-003`). Исправлено через `send_file/download_name`.
 4. ✅ TeX внутри математических delimiters проходил без allowlist, а компилятор не получал явный `-no-shell-escape` (`BUG-SEC-001/002`). Оба слоя закрыты тестируемым контрактом.
-5. JSON обновляется неатомарно и без lock. Сбой посередине записи способен обнулить рабочий файл; повреждённый JSON затем молча трактуется как пустой (`BUG-DATA-002/004`).
+5. ✅ JSON persistence защищён атомарной заменой, fsync, backup и блокировкой полного read–modify–write; повреждение больше не маскируется пустыми данными (`BUG-DATA-002/004`).
 
 ## 2. Как проводилась проверка
 
@@ -52,7 +60,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 159 проходящих тестов и 16 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 98.71% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 181 проходящий тест и 8 строгих `xfail`-контрактов для подтверждённых дефектов. Общий branch coverage составляет 99.02% при обязательном CI-пороге 98%. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -66,25 +74,25 @@
 | ~~BUG-HTTP-003~~ ✅ | Русское имя PDF вызывало `UnicodeEncodeError` на реальном dev-сервере. | Выполнено через Werkzeug `send_file(..., download_name=...)`, который формирует ASCII fallback и RFC 5987 `filename*`. | Реальный Werkzeug/curl запрос вернул 200, PDF и Latin-1-safe headers. |
 | ~~BUG-SEC-001~~ ✅ | Команды внутри `$...$` не фильтровались. | Выполнено: allowlist учебной математики, balance validation, запрет опасных команд/символов до compiler call. | Malicious и malformed fixtures возвращают 422; compiler mock не вызывается. |
 | ~~BUG-SEC-002~~ ✅ | Не было явного `-no-shell-escape`. | Выполнено для pdfLaTeX и XeLaTeX: `-no-shell-escape -halt-on-error -file-line-error`. | Аргументы и реальные TeX builds проверяются тестами; отдельный OS/container sandbox ещё нужен для production. |
-| BUG-DATA-002 | Invalid JSON превращается в `[]`, скрывая аварию и открывая путь к перезаписи. | Различать missing/empty/corrupt; на corrupt прекращать запись, показывать recovery UI, сохранять `.broken-<timestamp>`. | Повреждение одного байта не уничтожает исходник и даёт диагностируемую ошибку. |
-| BUG-DATA-004 | `_write_json` пишет прямо в live-файл. | `NamedTemporaryFile` в том же каталоге → flush/fsync → `os.replace`; file lock на read-modify-write. | Fault-injection на каждом шаге сохраняет либо старую, либо полностью новую валидную версию. |
+| ~~BUG-DATA-002~~ ✅ | Invalid JSON превращался в `[]`, скрывая аварию и открывая путь к перезаписи. | Выполнено: missing/corrupt/schema errors останавливают операцию, HTTP не раскрывает путь; рядом хранится последняя `.bak`. Управляемый recovery UI остаётся отдельным пунктом этапа 3. | Byte/schema/missing fault tests подтверждают отказ без перезаписи. |
+| ~~BUG-DATA-004~~ ✅ | `_write_json` писал прямо в live-файл. | Выполнено: `NamedTemporaryFile` в том же каталоге → flush/fsync → backup → `os.replace`; lock охватывает полный read-modify-write. | Fault injection сохраняет прежний live JSON; concurrent stress не теряет добавления. |
 
 ### P1 — нарушение данных, API и ключевых пользовательских сценариев
 
 | ID | Дефект | Исправление и тест |
 |---|---|---|
-| BUG-DATA-001 | `card_ids` синхронизируются только при различии длины; равная длина с другими ID остаётся stale. | Сравнивать полный упорядоченный список либо удалить денормализацию. Strict xfail уже воспроизводит. |
-| BUG-DATA-003 / BUG-WEB-001 | Запись в несуществующую колоду создаёт orphan JSON; API отвечает success. | Проверять deck existence в use case/repository, отдавать 404, удалять/мигрировать orphan files. |
-| BUG-DATA-005 | Deep-clone создаёт новые UUID, но теряет `parent_id` карточек. | Вызывать `Card.clone()`; сохранить lineage contract обычным тестом. |
+| ~~BUG-DATA-001~~ ✅ | `card_ids` синхронизировались только при различии длины. | Выполнено: сравнивается полный упорядоченный список; equal-length stale IDs покрыты регрессией. |
+| ~~BUG-DATA-003 / BUG-WEB-001~~ ✅ | Запись в несуществующую колоду создавала orphan JSON; API отвечал success. | Выполнено: repository под lock проверяет существование до записи; API возвращает 404, HTML безопасно перенаправляет. |
+| ~~BUG-DATA-005~~ ✅ | Deep-clone создавал новые UUID, но терял `parent_id` карточек. | Выполнено через `Card.clone()`; lineage contract стал обычным тестом. |
 | ~~BUG-ARCH-001~~ ✅ | Старый `JsonFileStorage` импортировал удалённый `StorageBackend`; весь старый test collection раньше падал. | Выполнено на этапе 0: неиспользуемые `JsonFileStorage` и `FlaskSessionRepository` удалены вместе с устаревшими тестами; активным остаётся один `JsonRepository`. |
 | BUG-UI-001 | Drag-and-drop вызывает `renumberRows()` до построения permutation и всегда отправляет `[0,1,…]`. | Хранить stable card IDs; собрать old indices до mutation; optimistic UI откатывать без `location.reload`. Добавить browser E2E reorder + reload. |
 | BUG-IMP-001 | UI обещает `||`, parser делит по первому одиночному `|`. | Единый parser с exact delimiter `||`, escaping/quoting и preview результата до commit. |
 | BUG-IMP-002 | UI обещает `;`, `csv.reader` использует `,`. | `csv.Sniffer` с явным выбором delimiter; UTF-8/UTF-8-BOM; header toggle; preview и отчёт rejected rows. |
 | ~~BUG-PDF-001~~ ✅ | Partial PDF считался успехом даже при non-zero exit code. | Выполнено: обязательный return code 0, наличие PDF, safe failure flags и fallback stdout/stderr log. |
 | ~~BUG-LIMIT-001~~ ✅ | `max_cards=200` не использовался. | Выполнено: единый quota в use cases и web/API; bulk/CSV проверяют будущую ёмкость до сохранения. |
-| BUG-CONF-001 | База зависит от process CWD. | Абсолютный `DATA_DIR` из env/Flask instance path; миграционная диагностика найденных `data/`. |
+| ~~BUG-CONF-001~~ ✅ | База зависела от process CWD. | Выполнено: стабильный абсолютный `app/data`, override через `DIDACTIC_CARDS_DATA_DIR`; оба CWD дают один путь. Диагностика legacy-каталогов остаётся частью миграции. |
 | ~~BUG-CONF-002~~ ✅ / BUG-VAL-001 | Layout теперь проверяет positive/finite dimensions, frame inset и попадание сетки в printable A4. Прямой вызов use case с `cards_per_page=0` ещё требует отдельной защиты. | Config/renderer validation выполнена; добавить invariant в `CardDeck.padded`/use case. |
-| BUG-CONF-003 | `create_app()` не принимает config/dependencies. | `create_app(config=None, repo=None, renderer=None, compiler=None)`; env mapping; production/test profiles. |
+| ~~BUG-CONF-003~~ ✅ | `create_app()` не принимал config/dependencies. | Выполнено: фабрика принимает config, data_dir, repository, renderer и compiler; профиль production остаётся этапом deployment. |
 | ~~BUG-HTTP-001~~ ✅ | Удаление карточки было доступно через GET. | Выполнено: HTML fallback принимает только POST + CSRF, AJAX использует DELETE JSON API. |
 | ~~BUG-HTTP-002~~ ✅ | Ошибка компиляции возвращала 200. | Validation и compile failure теперь возвращают 422. Разделение tool failure на 503/504 и sanitization log остаются в этапе 2. |
 | BUG-WEB-002/003 | Число вместо string и `order=None` дают необработанные исключения. | Schema validation (dataclass/Pydantic/ручная) до use case; единый JSON error handler. |
@@ -156,11 +164,11 @@
 
 ### Этап 3. Сделать persistence транзакционным
 
-1. Сначала исправить текущий JSON: absolute path, atomic replace, lock, backup, corruption recovery и schema version.
-2. Убрать двойной источник истины `card_ids` либо проверять точное равенство и целостность на каждой транзакции.
-3. Добавить startup integrity scan: missing/orphan/duplicate IDs, invalid timestamps, recovery report без автоматической потери данных.
-4. Перейти на SQLite: `decks`, `cards`, `deck_cards(position)`, foreign keys, transactions, migrations.
-5. Все UI/API операции адресовать card UUID + optimistic version, а не индексом.
+1. [ ] Исправить текущий JSON: [x] absolute path, [x] atomic replace, [x] lock, [x] backup, [x] безопасный отказ при corruption; [ ] управляемое recovery и schema version.
+2. [x] Проверять точное равенство `card_ids` и целостность при каждой транзакции.
+3. [ ] Добавить startup integrity scan: missing/orphan/duplicate IDs, invalid timestamps, recovery report без автоматической потери данных.
+4. [ ] Перейти на SQLite: `decks`, `cards`, `deck_cards(position)`, foreign keys, transactions, migrations.
+5. [ ] Все UI/API операции адресовать card UUID + optimistic version, а не индексом.
 
 Выход: concurrent add/edit/reorder stress test без lost updates; kill/fault injection не портит последнюю подтверждённую версию; старые JSON мигрируются один раз с backup.
 

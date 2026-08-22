@@ -194,3 +194,8 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Runtime persistence artifacts (the JSON data itself may be tracked intentionally)
+app/data/.repository.lock
+app/data/**/*.bak
+app/data/*.bak

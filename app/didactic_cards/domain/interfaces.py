@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
 from .entities import Card, Deck, CardDeck
+
+
+MutationResult = TypeVar('MutationResult')
 
 
 @dataclass
@@ -65,6 +68,22 @@ class DeckRepository(ABC):
     @abstractmethod
     def save_cards(self, deck_id: str, card_deck: CardDeck) -> None:
         ...
+
+    def mutate_cards(
+        self,
+        deck_id: str,
+        mutation: Callable[[CardDeck], tuple[MutationResult, bool]],
+    ) -> MutationResult:
+        """Apply one read-modify-write operation.
+
+        Adapters with transactional facilities should override this method.
+        The default keeps compatibility with simple in-memory test doubles.
+        """
+        deck = self.load_cards(deck_id)
+        result, changed = mutation(deck)
+        if changed:
+            self.save_cards(deck_id, deck)
+        return result
 
 
 class DocumentRenderer(ABC):

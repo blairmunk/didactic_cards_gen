@@ -24,13 +24,10 @@ def test_create_app_registers_required_services(tmp_path, monkeypatch):
     app = create_app()
     assert {'REPO', 'RENDERER', 'COMPILER', 'CARDS_PER_PAGE'} <= app.config.keys()
     assert app.url_map.bind('').match('/')[0] == 'cards.decks_list'
-    assert (tmp_path / 'data' / 'decks.json').exists()
+    assert app.config['REPO'].decks_file == AppConfig().data_dir / 'decks.json'
+    assert app.config['REPO'].decks_file.exists()
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='BUG-CONF-001: data_dir is relative to process CWD, so launch location changes the database',
-)
 def test_data_location_is_independent_of_current_working_directory(tmp_path, monkeypatch):
     first_cwd = tmp_path / 'one'
     second_cwd = tmp_path / 'two'
@@ -65,10 +62,6 @@ def test_layout_rejects_invalid_or_oversized_values(kwargs):
         CardLayoutConfig(**kwargs)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason='BUG-CONF-003: the factory cannot receive test/deployment configuration',
-)
 def test_app_factory_accepts_configuration_override(tmp_path):
     config = AppConfig(secret_key='override')
     app = create_app(config=config, data_dir=tmp_path / 'data')

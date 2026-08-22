@@ -22,11 +22,10 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 export DIDACTIC_CARDS_SECRET_KEY='replace-with-a-long-random-value'
-cd app
-../.venv/bin/python run.py
+python app/run.py
 ```
 
-Откройте <http://127.0.0.1:5000>. Для одноразового локального запуска secret можно не задавать — он будет создан автоматически, но браузерная сессия сбросится после рестарта. Запуск именно из каталога `app` важен для текущей версии: путь к `data/` вычисляется относительно рабочего каталога процесса.
+Откройте <http://127.0.0.1:5000>. Для одноразового локального запуска secret можно не задавать — он будет создан автоматически, но браузерная сессия сбросится после рестарта. База всегда находится в `app/data`, независимо от рабочего каталога. Другой абсолютный каталог можно задать переменной `DIDACTIC_CARDS_DATA_DIR`.
 
 Если существующий `venv` не запускается с `Exec format error`, не переиспользуйте его: это непереносимый Windows/WSL link-файл. Создайте `.venv` командами выше.
 
@@ -38,7 +37,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Подтверждённые дефекты зафиксированы строгими `xfail`-тестами, а их актуальный статус отмечается непосредственно в [плане ревизии](docs/REMEDIATION_PLAN.md). GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с порогом branch coverage 98%.
+Подтверждённые дефекты зафиксированы строгими `xfail`-тестами, а их актуальный статус отмечается непосредственно в [плане ревизии](docs/REMEDIATION_PLAN.md). Текущая база — 181 проходящий тест, 8 строгих `xfail`, branch coverage 99.02%. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с порогом branch coverage 98%.
 
 ## Структура
 
@@ -51,7 +50,7 @@ app/
     use_cases/               # операции над колодами и документом
     adapters/                # JSON, LaTeX, pdflatex/xelatex
     web/                     # routes, шаблоны, CSS и JavaScript
-  data/                      # JSON-данные при запуске из app/
+  data/                      # JSON-данные, lock и локальные backup-файлы
   tests/                     # unit, web, integration и xfail-контракты
 docs/
   USER_AND_TECHNICAL_GUIDE.md

@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 import math
 import os
+from pathlib import Path
 import secrets
 
 from didactic_cards.domain.printing import DuplexMode
@@ -70,6 +71,12 @@ class CardLayoutConfig:
 @dataclass
 class AppConfig:
     """Конфигурация приложения."""
+    data_dir: Path = field(default_factory=lambda: Path(
+        os.environ.get(
+            'DIDACTIC_CARDS_DATA_DIR',
+            Path(__file__).resolve().parent / 'data',
+        )
+    ).expanduser().resolve())
     secret_key: str = field(default_factory=lambda: os.environ.get(
         'DIDACTIC_CARDS_SECRET_KEY', secrets.token_urlsafe(32)
     ))

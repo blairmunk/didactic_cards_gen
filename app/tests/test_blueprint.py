@@ -6,6 +6,7 @@ import io
 
 import pytest
 
+from didactic_cards.adapters.json_repository import RepositoryCorruptionError
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.domain.interfaces import CompileResult
 
@@ -176,16 +177,40 @@ def test_api_empty_json_contracts(client, deck_id):
     assert client.put(f"/api/deck/{deck_id}/edit_card/0", **headers).status_code == 400
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="BUG-WEB-001: unknown deck writes create orphan JSON instead of returning 404",
-)
 def test_api_rejects_unknown_deck(client, repo):
     response = client.post(
         "/api/deck/missing/add_card", json={"front": "orphan", "back": ""}
     )
     assert response.status_code == 404
     assert not repo._cards_path("missing").exists()
+
+
+def test_html_unknown_deck_mutation_redirects(client):
+    response = client.post(
+        "/deck/missing/add_card", data={"front": "orphan", "back": ""}
+    )
+    assert response.status_code == 302
+    assert response.location.endswith("/")
+
+
+def test_repository_corruption_has_safe_html_and_api_errors(client, repo, monkeypatch):
+    error = RepositoryCorruptionError(repo.decks_file, "test failure")
+
+    def fail(*_args):
+        raise error
+
+    monkeypatch.setattr(repo, "list_decks", fail)
+    html_response = client.get("/")
+    assert html_response.status_code == 500
+    assert "Хранилище данных повреждено" in html_response.text
+    assert str(repo.decks_file) not in html_response.text
+
+    monkeypatch.setattr(repo, "mutate_cards", fail)
+    api_response = client.post(
+        "/api/deck/anything/add_card", json={"front": "Q", "back": "A"}
+    )
+    assert api_response.status_code == 500
+    assert api_response.json == {"error": "Хранилище данных повреждено"}
 
 
 def test_delete_card_requires_non_get_method(client, deck_id):
