@@ -108,6 +108,9 @@ class JsonRepository(DeckRepository, CardRepository):
                     {'schema_version': SCHEMA_VERSION},
                 )
 
+    def readiness_check(self) -> list[str]:
+        return [issue.code for issue in self.scan_integrity().issues]
+
     @contextmanager
     def _transaction(self, *, validate_schema: bool = True) -> Iterator[None]:
         """Serialize repository operations across threads and processes."""

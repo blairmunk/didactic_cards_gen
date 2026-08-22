@@ -457,3 +457,17 @@ class SqliteRepository(DeckRepository, CardRepository):
             issues = []
         issues.extend(f'foreign-key: {tuple(row)}' for row in foreign_keys)
         return issues
+
+    def readiness_check(self) -> list[str]:
+        issues = self.integrity_check()
+        if issues:
+            return issues
+        connection = self._connect()
+        try:
+            connection.execute('BEGIN IMMEDIATE')
+            connection.rollback()
+        except sqlite3.Error:
+            return ['write-transaction-unavailable']
+        finally:
+            connection.close()
+        return []

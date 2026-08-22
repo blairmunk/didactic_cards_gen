@@ -14,6 +14,9 @@ class FakeCompiler(PdfCompiler):
         self.success = success
         self.sources: list[str] = []
 
+    def is_available(self) -> bool:
+        return True
+
     def compile(self, latex_source: str) -> CompileResult:
         self.sources.append(latex_source)
         if self.success:

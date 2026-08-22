@@ -42,6 +42,25 @@ def test_database_initializes_wal_schema_and_foreign_keys(sqlite_repo):
         }
     assert {'repository_meta', 'decks', 'cards', 'deck_cards'} <= tables
     assert sqlite_repo.integrity_check() == []
+    assert sqlite_repo.readiness_check() == []
+
+
+def test_readiness_stops_on_integrity_error(sqlite_repo, monkeypatch):
+    monkeypatch.setattr(sqlite_repo, 'integrity_check', lambda: ['broken'])
+    assert sqlite_repo.readiness_check() == ['broken']
+
+
+def test_readiness_reports_unavailable_write_transaction(sqlite_repo, monkeypatch):
+    class BrokenConnection:
+        def execute(self, _statement):
+            raise sqlite3.OperationalError('private path')
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(sqlite_repo, 'integrity_check', lambda: [])
+    monkeypatch.setattr(sqlite_repo, '_connect', BrokenConnection)
+    assert sqlite_repo.readiness_check() == ['write-transaction-unavailable']
 
 
 def test_deck_and_ordered_card_round_trip(sqlite_repo):

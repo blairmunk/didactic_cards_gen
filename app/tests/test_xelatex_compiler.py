@@ -5,6 +5,15 @@ from unittest.mock import MagicMock, patch
 from didactic_cards.adapters.xelatex_compiler import XelatexCompiler
 
 
+def test_xelatex_availability_uses_configured_executable():
+    with patch(
+        'didactic_cards.adapters.xelatex_compiler.shutil.which',
+        return_value='/opt/bin/xelatex',
+    ) as which:
+        assert XelatexCompiler('custom-xelatex').is_available() is True
+    which.assert_called_once_with('custom-xelatex')
+
+
 def test_xelatex_compile_success():
     def fake_run(cmd, **_kwargs):
         output_dir = cmd[cmd.index('-output-directory') + 1]

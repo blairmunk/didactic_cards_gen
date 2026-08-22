@@ -8,6 +8,22 @@ from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 
 class TestPdfLatexCompiler:
 
+    def test_availability_uses_configured_executable(self):
+        compiler = PdfLatexCompiler(pdflatex_path='custom-pdflatex')
+        with patch(
+            'didactic_cards.adapters.pdflatex_compiler.shutil.which',
+            return_value='/opt/bin/custom-pdflatex',
+        ) as which:
+            assert compiler.is_available() is True
+        which.assert_called_once_with('custom-pdflatex')
+
+    def test_unavailable_executable_is_reported(self):
+        with patch(
+            'didactic_cards.adapters.pdflatex_compiler.shutil.which',
+            return_value=None,
+        ):
+            assert PdfLatexCompiler('/missing').is_available() is False
+
     def test_compile_success(self, tmp_path):
         compiler = PdfLatexCompiler(pdflatex_path='pdflatex', timeout=10)
 

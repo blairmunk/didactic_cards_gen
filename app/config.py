@@ -8,6 +8,18 @@ import re
 from didactic_cards.domain.printing import DuplexMode
 
 
+def _environment_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in {'1', 'true', 'yes', 'on'}:
+        return True
+    if normalized in {'0', 'false', 'no', 'off'}:
+        return False
+    raise ValueError(f'{name} must be a boolean value')
+
+
 @dataclass
 class CardLayoutConfig:
     """Параметры раскладки карточек на странице."""
@@ -141,12 +153,17 @@ class AppConfig:
     max_cards: int = 200
     max_request_bytes: int = 2 * 1024 * 1024
     csrf_enabled: bool = True
+    debug: bool = field(
+        default_factory=lambda: _environment_bool('DIDACTIC_CARDS_DEBUG')
+    )
     layout: CardLayoutConfig = field(default_factory=CardLayoutConfig)
     printer_profiles: tuple[PrinterProfile, ...] = field(
         default_factory=_default_printer_profiles
     )
 
     def __post_init__(self) -> None:
+        if not isinstance(self.debug, bool):
+            raise ValueError('debug must be boolean')
         keys = [profile.key for profile in self.printer_profiles]
         if len(keys) != len(set(keys)):
             raise ValueError('printer profile keys must be unique')

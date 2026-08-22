@@ -135,5 +135,9 @@ class DocumentRenderer(ABC):
 class PdfCompiler(ABC):
 
     @abstractmethod
+    def is_available(self) -> bool:
+        ...
+
+    @abstractmethod
     def compile(self, latex_source: str) -> CompileResult:
         ...

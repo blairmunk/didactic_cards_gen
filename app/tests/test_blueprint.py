@@ -575,6 +575,43 @@ def test_local_favicon_is_served(client):
     assert response.mimetype == 'image/svg+xml'
 
 
+def test_health_endpoints_report_ready_components(client):
+    live = client.get('/health/live')
+    ready = client.get('/health/ready')
+    assert live.status_code == 200
+    assert live.json == {'status': 'ok'}
+    assert ready.status_code == 200
+    assert ready.json == {
+        'status': 'ready',
+        'components': {'storage': 'ok', 'tex': 'ok'},
+    }
+
+
+def test_readiness_reports_dependency_failure_without_internal_details(
+    client, app, repo
+):
+    repo.readiness_check = lambda: ['private-storage-detail']
+    app.config['COMPILER'].is_available = lambda: False
+    response = client.get('/health/ready')
+    assert response.status_code == 503
+    assert response.json['status'] == 'unavailable'
+    assert response.json['components'] == {
+        'storage': 'unavailable', 'tex': 'unavailable'
+    }
+    assert 'private-storage-detail' not in response.text
+
+
+def test_readiness_contains_unexpected_dependency_exceptions(client, app, repo):
+    def fail():
+        raise RuntimeError('/private/path')
+
+    repo.readiness_check = fail
+    app.config['COMPILER'].is_available = fail
+    response = client.get('/health/ready')
+    assert response.status_code == 503
+    assert '/private/path' not in response.text
+
+
 def test_request_size_limit_is_enforced(client, app, deck_id):
     app.config['MAX_CONTENT_LENGTH'] = 64
     response = client.post(

@@ -25,6 +25,24 @@ export DIDACTIC_CARDS_SECRET_KEY='replace-with-a-long-random-value'
 python app/run.py
 ```
 
+Встроенный сервер предназначен для локальной разработки и стартует без debug по умолчанию. Явно включить debug можно только переменной `DIDACTIC_CARDS_DEBUG=true`; значения кроме `true/false`, `yes/no`, `on/off`, `1/0` отклоняются, чтобы опечатка не включила небезопасный режим неожиданно.
+
+Production-пример для Linux/WSL:
+
+```bash
+export DIDACTIC_CARDS_SECRET_KEY='replace-with-a-long-random-value'
+export DIDACTIC_CARDS_DATA_DIR='/srv/didactic-cards/data'
+.venv/bin/gunicorn \
+  --chdir app \
+  --workers 2 \
+  --bind 127.0.0.1:8000 \
+  --access-logfile - \
+  --error-logfile - \
+  'run:create_app()'
+```
+
+TLS и аутентификацию следует завершать на reverse proxy. Liveness probe — `GET /health/live`; readiness probe — `GET /health/ready`. Readiness возвращает 503, если SQLite integrity/write-transaction check или поиск настроенного TeX executable не прошёл. Ответ показывает только `storage`/`tex: ok|unavailable` и не раскрывает внутренние пути.
+
 По умолчанию данные сохраняются в абсолютном пути `app/data`, поэтому каталог запуска не меняет выбранную базу. Для отдельной базы используйте, например, `DIDACTIC_CARDS_DATA_DIR=/srv/didactic-cards/data`; каталог будет приведён к абсолютному пути.
 
 Проверка TeX:
@@ -211,7 +229,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 298 проходящих тестов, 0 `xfail`, общий branch coverage 98.80%. В него входят unit/HTTP-контракты профилей, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
+Текущее состояние основного набора: 317 проходящих тестов, 0 `xfail`, общий branch coverage 98.66%. В него входят unit/HTTP-контракты production health, профилей, раздельной печати и preflight, а также реальные TeX-проверки: колода на 16 карточек даёт два листа в `fronts.pdf` и два листа в `backs.pdf`, чрезмерно длинная сторона оставляет адресный overflow-маркер в TeX log. Отдельный Chromium E2E покрывает create → add/formula → keyboard reorder → reload → UUID edit → CSV preview/import → PDF generate на временной SQLite-базе. Последний локальный rerun после финальной проверки offline resource URLs ожидает доступного socket/browser approval.
 
 Скриншоты можно переснять на запущенном приложении:
 
@@ -233,3 +251,4 @@ python scripts/capture_screenshots.py \
 - Колоды «пропали»: проверьте `DIDACTIC_CARDS_DATA_DIR`; без этой переменной приложение всегда использует `app/data`.
 - Ошибка повреждения хранилища: сначала выполните `python scripts/check_storage.py` и скопируйте весь каталог; затем восстановите только указанный в отчёте файл через `--recover ... --yes` или вручную после проверки `.bak`.
 - PDF не скачивается: проверьте HTTP-статус и первую диагностическую строку; кириллические имена поддерживаются.
+- `/health/live` отвечает 200, а `/health/ready` — 503: процесс жив, но проверьте доступ на запись к `DIDACTIC_CARDS_DATA_DIR` и наличие `pdflatex` в `PATH`.

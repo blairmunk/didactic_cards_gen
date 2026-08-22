@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import tempfile
 
@@ -12,6 +13,9 @@ class PdfLatexCompiler(PdfCompiler):
     def __init__(self, pdflatex_path: str = 'pdflatex', timeout: int = 30):
         self.pdflatex_path = pdflatex_path
         self.timeout = timeout
+
+    def is_available(self) -> bool:
+        return shutil.which(self.pdflatex_path) is not None
 
     def compile(self, latex_source: str) -> CompileResult:
         with tempfile.TemporaryDirectory() as tmpdir:

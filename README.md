@@ -27,6 +27,16 @@ python app/run.py
 
 Откройте <http://127.0.0.1:5000>. Для одноразового локального запуска secret можно не задавать — он будет создан автоматически, но браузерная сессия сбросится после рестарта. База всегда находится в `app/data`, независимо от рабочего каталога. Другой абсолютный каталог можно задать переменной `DIDACTIC_CARDS_DATA_DIR`.
 
+Для production не используйте встроенный Flask-сервер:
+
+```bash
+export DIDACTIC_CARDS_SECRET_KEY='replace-with-a-long-random-value'
+export DIDACTIC_CARDS_DATA_DIR='/srv/didactic-cards/data'
+.venv/bin/gunicorn --chdir app --workers 2 --bind 127.0.0.1:8000 'run:create_app()'
+```
+
+`GET /health/live` проверяет процесс, `GET /health/ready` — целостность/доступность SQLite write-транзакции и наличие TeX executable. Debug по умолчанию выключен; `DIDACTIC_CARDS_DEBUG=true` предназначен только для локальной диагностики.
+
 Если существующий `venv` не запускается с `Exec format error`, не переиспользуйте его: это непереносимый Windows/WSL link-файл. Создайте `.venv` командами выше.
 
 ## Проверки
@@ -37,7 +47,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 298 проходящих тестов без `xfail`, branch coverage 98.80%; отдельный Chromium E2E запускается marker-ом `browser`. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с обязательным порогом 98%.
+Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 317 проходящих тестов без `xfail`, branch coverage 98.66%; отдельный Chromium E2E запускается marker-ом `browser`. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает реальную TeX-интеграцию с обязательным порогом 98%.
 
 Проверить целостность хранилища без автоматического исправления:
 

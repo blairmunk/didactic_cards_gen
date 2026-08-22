@@ -64,6 +64,41 @@ def _max_cards():
     return current_app.config.get('MAX_CARDS')
 
 
+@cards_bp.route('/health/live', methods=['GET'])
+def health_live():
+    return jsonify({'status': 'ok'})
+
+
+@cards_bp.route('/health/ready', methods=['GET'])
+def health_ready():
+    storage_ok = False
+    compiler_ok = False
+    try:
+        readiness_check = getattr(_repo(), 'readiness_check', None)
+        if readiness_check is not None:
+            storage_ok = not readiness_check()
+        else:
+            integrity_report = getattr(_repo(), 'integrity_report', None)
+            storage_ok = integrity_report is None or integrity_report.healthy
+    except Exception:
+        storage_ok = False
+
+    try:
+        availability_check = getattr(_compiler(), 'is_available', None)
+        compiler_ok = availability_check is None or availability_check()
+    except Exception:
+        compiler_ok = False
+
+    ready = storage_ok and compiler_ok
+    return jsonify({
+        'status': 'ready' if ready else 'unavailable',
+        'components': {
+            'storage': 'ok' if storage_ok else 'unavailable',
+            'tex': 'ok' if compiler_ok else 'unavailable',
+        },
+    }), 200 if ready else 503
+
+
 def _optional_version(value) -> int | None:
     if value is None or value == '':
         return None

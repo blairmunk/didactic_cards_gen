@@ -20,6 +20,7 @@ def create_app(
     cfg = config or Config()
     app = Flask(__name__)
     app.secret_key = cfg.secret_key
+    app.debug = cfg.debug
 
     repo = repo if repo is not None else SqliteRepository(
         data_dir=data_dir if data_dir is not None else cfg.data_dir
@@ -68,5 +69,6 @@ def create_app(
 
 
 if __name__ == '__main__':
-    app = create_app()
-    app.run(debug=True)
+    runtime_config = Config()
+    app = create_app(runtime_config)
+    app.run(debug=runtime_config.debug)

@@ -52,6 +52,35 @@ def test_default_data_location_is_next_to_application(monkeypatch):
     assert AppConfig().data_dir == Path(__file__).resolve().parents[1] / 'data'
 
 
+@pytest.mark.parametrize('value', ['1', 'true', 'YES', 'on'])
+def test_debug_environment_accepts_explicit_true(monkeypatch, value):
+    monkeypatch.setenv('DIDACTIC_CARDS_DEBUG', value)
+    assert AppConfig().debug is True
+
+
+@pytest.mark.parametrize('value', ['0', 'false', 'NO', 'off'])
+def test_debug_environment_accepts_explicit_false(monkeypatch, value):
+    monkeypatch.setenv('DIDACTIC_CARDS_DEBUG', value)
+    assert AppConfig().debug is False
+
+
+def test_debug_environment_rejects_ambiguous_value(monkeypatch):
+    monkeypatch.setenv('DIDACTIC_CARDS_DEBUG', 'perhaps')
+    with pytest.raises(ValueError, match='DIDACTIC_CARDS_DEBUG'):
+        AppConfig()
+
+
+def test_debug_configuration_must_be_boolean():
+    with pytest.raises(ValueError, match='debug'):
+        AppConfig(debug=1)
+
+
+def test_app_debug_is_disabled_by_default(tmp_path, monkeypatch):
+    monkeypatch.delenv('DIDACTIC_CARDS_DEBUG', raising=False)
+    app = create_app(data_dir=tmp_path / 'data')
+    assert app.debug is False
+
+
 @pytest.mark.parametrize(
     'kwargs',
     [

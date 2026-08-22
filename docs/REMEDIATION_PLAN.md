@@ -49,6 +49,11 @@
   - [x] Компилируемый preflight проверяет overflow, missing glyphs, unsupported formulas и printable area до печати.
   - [x] Именованные config-профили принтера выбираются на print job и изолированы между запросами.
   - [ ] Web calibration wizard с сохранением пользовательских профилей, расширенная layout-конфигурация и auto-fit/clip policy.
+- [ ] Production runtime.
+  - [x] Debug выключен по умолчанию и включается только строгой env-переменной.
+  - [x] Добавлены `/health/live` и sanitised `/health/ready` для SQLite/TeX.
+  - [x] Gunicorn добавлен в runtime dependencies; WSGI-команда и probe semantics документированы.
+  - [ ] Добавить structured logging, request/error IDs и метрики времени компиляции.
 
 ## 1. Итог аудита
 
@@ -72,7 +77,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 298 проходящих тестов, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.80% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 317 проходящих тестов, 0 `xfail`, один отдельный browser E2E; общий branch coverage составляет 98.66% при обязательном CI-пороге 98%. Chromium-сценарий прошёл весь workflow до последней offline-resource assertion, но финальный rerun после исправления assertion ожидает доступного approval. Физический прогон на нескольких моделях принтеров ещё обязателен: PDF-проверка не моделирует driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -122,10 +127,10 @@
 - Времена сохраняются UTC, но UI форматирует без зоны и без явной конвертации в локальную.
 - Полный LaTeX log показывается пользователю и может раскрыть пути/служебные детали.
 - `MAX_CONTENT_LENGTH=2 MiB` и `max_cards=200` реализованы; отдельные ограничения длины стороны/имени ещё нужны.
-- Нет structured logging, healthcheck (`pdflatex`/write access), error IDs и метрик времени компиляции.
+- ✅ Liveness/readiness проверяют процесс, SQLite integrity/write transaction и TeX executable без утечки деталей. Structured logging, error IDs и метрики времени компиляции остаются.
 - Нет backup/restore/export всей колоды и schema version/migrations.
 - ✅ Активный backend переведён с JSON read-modify-write на SQLite transactions/WAL; thread/process stress tests не теряют обновления. Legacy JSON оставлен read-only источником миграции и recovery.
-- Dev entrypoint всегда запускается с `debug=True`; production должен использовать WSGI server и env-controlled debug.
+- ✅ Debug по умолчанию выключен и управляется строгой env-переменной; Gunicorn runtime/команда добавлены. Reverse proxy/TLS и deployment hardening зависят от окружения.
 - Secret берётся из `DIDACTIC_CARDS_SECRET_KEY`, без env генерируется случайный для локального запуска; production должен задавать стабильное значение.
 - UI: emoji-only actions без accessible names, слабая keyboard DnD, таблица не имеет mobile overflow, focus/disabled/loading states неполны.
 - Нет favicon (реальный browser audit получил 404), CSP и стандартных security headers.
