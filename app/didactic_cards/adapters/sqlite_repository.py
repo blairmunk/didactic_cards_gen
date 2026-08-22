@@ -17,7 +17,7 @@ from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 2
+SQLITE_SCHEMA_VERSION = 3
 
 
 class LegacyMigrationError(ValueError):
@@ -65,7 +65,7 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _initialize_database(self) -> None:
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {0, 1, SQLITE_SCHEMA_VERSION}:
+            if version not in {0, 1, 2, SQLITE_SCHEMA_VERSION}:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
@@ -108,6 +108,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                     name TEXT NOT NULL,
                     duplex_mode TEXT NOT NULL
                         CHECK (duplex_mode IN ('long-edge', 'short-edge')),
+                    back_rotation_deg INTEGER NOT NULL DEFAULT 180
+                        CHECK (back_rotation_deg IN (0, 180)),
                     front_offset_x_mm REAL NOT NULL,
                     front_offset_y_mm REAL NOT NULL,
                     back_offset_x_mm REAL NOT NULL,
@@ -118,6 +120,25 @@ class SqliteRepository(DeckRepository, CardRepository):
                 );
                 '''
             )
+            profile_columns = {
+                row['name'] for row in connection.execute(
+                    'PRAGMA table_info(printer_profiles)'
+                )
+            }
+            if 'back_rotation_deg' not in profile_columns:
+                connection.execute(
+                    '''
+                    ALTER TABLE printer_profiles
+                    ADD COLUMN back_rotation_deg INTEGER NOT NULL DEFAULT 0
+                        CHECK (back_rotation_deg IN (0, 180))
+                    '''
+                )
+                connection.execute(
+                    '''
+                    UPDATE printer_profiles SET back_rotation_deg = 180
+                    WHERE duplex_mode = 'long-edge'
+                    '''
+                )
             if version < SQLITE_SCHEMA_VERSION:
                 connection.execute(f'PRAGMA user_version = {SQLITE_SCHEMA_VERSION}')
             connection.execute('PRAGMA journal_mode = WAL')
@@ -469,6 +490,7 @@ class SqliteRepository(DeckRepository, CardRepository):
             key=row['key'],
             name=row['name'],
             duplex_mode=row['duplex_mode'],
+            back_rotation_deg=row['back_rotation_deg'],
             front_offset_x_mm=row['front_offset_x_mm'],
             front_offset_y_mm=row['front_offset_y_mm'],
             back_offset_x_mm=row['back_offset_x_mm'],
@@ -489,14 +511,15 @@ class SqliteRepository(DeckRepository, CardRepository):
             connection.execute(
                 '''
                 INSERT INTO printer_profiles(
-                    key, name, duplex_mode,
+                    key, name, duplex_mode, back_rotation_deg,
                     front_offset_x_mm, front_offset_y_mm,
                     back_offset_x_mm, back_offset_y_mm,
                     back_border, registration_marks
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(key) DO UPDATE SET
                     name = excluded.name,
                     duplex_mode = excluded.duplex_mode,
+                    back_rotation_deg = excluded.back_rotation_deg,
                     front_offset_x_mm = excluded.front_offset_x_mm,
                     front_offset_y_mm = excluded.front_offset_y_mm,
                     back_offset_x_mm = excluded.back_offset_x_mm,
@@ -508,6 +531,7 @@ class SqliteRepository(DeckRepository, CardRepository):
                     profile.key,
                     profile.name,
                     profile.duplex_mode.value,
+                    profile.back_rotation_deg,
                     profile.front_offset_x_mm,
                     profile.front_offset_y_mm,
                     profile.back_offset_x_mm,

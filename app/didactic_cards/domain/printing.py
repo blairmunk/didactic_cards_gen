@@ -23,6 +23,7 @@ class PrinterProfile:
     key: str
     name: str
     duplex_mode: DuplexMode = DuplexMode.LONG_EDGE
+    back_rotation_deg: int = 180
     front_offset_x_mm: float = 0.0
     front_offset_y_mm: float = 0.0
     back_offset_x_mm: float = 0.0
@@ -49,6 +50,10 @@ class PrinterProfile:
             self.registration_marks, bool
         ):
             raise ValueError('printer profile flags must be boolean')
+        if isinstance(self.back_rotation_deg, bool) or self.back_rotation_deg not in {
+            0, 180
+        }:
+            raise ValueError('back rotation must be 0 or 180 degrees')
         object.__setattr__(self, 'duplex_mode', DuplexMode(self.duplex_mode))
 
 

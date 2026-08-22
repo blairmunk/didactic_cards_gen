@@ -143,6 +143,7 @@ class TestLatexRenderer:
     def test_calibration_sheet_contains_two_sides_scale_and_offsets(self):
         source = LatexRenderer(
             duplex_mode='short-edge',
+            back_rotation_deg=0,
             front_offset_x_mm=0.25,
             back_offset_x_mm=-1.5,
             back_offset_y_mm=0.75,
@@ -152,6 +153,8 @@ class TestLatexRenderer:
         assert 'контрольная длина 100 мм' in source
         assert r'\calibrationtargets{0.25}{0.0}{black}' in source
         assert r'\calibrationtargets{-1.5}{0.75}{magenta,dashed}' in source
+        assert r'{ОБОРОТ: пунктирная линия}{0}' in source
+        assert 'ВЕРХ КАРТОЧКИ' in source
         assert r'\texttt{short-edge}' in source
         assert 'remember picture' not in source
         assert r'\path[use as bounding box] (0,0) rectangle (186,225)' in source
@@ -251,10 +254,21 @@ class TestLatexRenderer:
         assert all('передние стороны' not in page for page in pages)
         assert not any(f'Q{number}' in ''.join(pages) for number in range(1, 5))
 
-    def test_long_edge_back_text_is_not_upside_down(self):
+    def test_default_long_edge_rotates_each_back_card_by_180_degrees(self):
         source = LatexRenderer(cards_per_row=2, rows_per_page=1).render(self.make_deck(2))
         back_section = source.split('задние стороны', 1)[1]
+        assert back_section.count(r'\rotatebox{180}{\backcard') == 2
+
+    def test_back_rotation_can_be_disabled_independently_of_duplex_mode(self):
+        source = LatexRenderer(
+            cards_per_row=2,
+            rows_per_page=1,
+            duplex_mode='long-edge',
+            back_rotation_deg=0,
+        ).render(self.make_deck(2))
+        back_section = source.split('задние стороны', 1)[1]
         assert r'\rotatebox{180}' not in back_section
+        assert back_section.index('A2') < back_section.index('A1')
 
     def test_short_edge_back_rows_are_reversed(self):
         source = LatexRenderer(
@@ -278,6 +292,8 @@ class TestLatexRenderer:
             {'back_offset_x_mm': 11},
             {'front_offset_y_mm': float('nan')},
             {'auto_fit': 1},
+            {'back_rotation_deg': 90},
+            {'back_rotation_deg': True},
         ],
     )
     def test_invalid_layout_is_rejected(self, kwargs):
@@ -311,14 +327,52 @@ class TestLatexRenderer:
         assert without_marks.count(r'\registrationmarks') == 1  # macro definition only
         assert with_marks.count(r'\registrationmarks') == 3  # definition + two pages
 
-    def test_printable_area_warnings_include_offset_side_and_axis(self):
-        renderer = LatexRenderer(
-            front_offset_x_mm=-0.1,
-            back_offset_y_mm=-0.1,
-        )
-        warnings = renderer.printable_area_warnings()
-        assert any('Лицевая' in warning and 'горизонтальное' in warning for warning in warnings)
-        assert any('Оборотная' in warning and 'вертикальное' in warning for warning in warnings)
+    @pytest.mark.parametrize(
+        'kwargs',
+        [
+            {'front_offset_x_mm': -5.0},
+            {'front_offset_y_mm': -5.0},
+            {'back_offset_x_mm': -5.0},
+            {'back_offset_y_mm': -5.0},
+            {'front_offset_x_mm': 10.0},
+            {'front_offset_y_mm': 10.0},
+        ],
+    )
+    def test_printable_area_allows_offsets_while_grid_stays_on_a4(self, kwargs):
+        assert LatexRenderer(**kwargs).printable_area_warnings() == ()
+
+    @pytest.mark.parametrize(
+        ('kwargs', 'side', 'axis'),
+        [
+            ({'front_offset_x_mm': -5.01}, 'Лицевая', 'горизонтальное'),
+            ({'front_offset_y_mm': -5.01}, 'Лицевая', 'вертикальное'),
+            ({'back_offset_x_mm': -5.01}, 'Оборотная', 'горизонтальное'),
+            ({'back_offset_y_mm': -5.01}, 'Оборотная', 'вертикальное'),
+            (
+                {
+                    'card_width_cm': 10,
+                    'cards_per_row': 2,
+                    'front_offset_x_mm': 5.01,
+                },
+                'Лицевая',
+                'горизонтальное',
+            ),
+            (
+                {
+                    'card_height_cm': 28.62,
+                    'rows_per_page': 1,
+                    'back_offset_y_mm': 5.2,
+                },
+                'Оборотная',
+                'вертикальное',
+            ),
+        ],
+    )
+    def test_printable_area_warns_only_after_grid_crosses_a4_edge(
+        self, kwargs, side, axis
+    ):
+        warnings = LatexRenderer(**kwargs).printable_area_warnings()
+        assert any(side in warning and axis in warning for warning in warnings)
 
     def test_default_layout_has_no_printable_area_warning(self):
         assert LatexRenderer().printable_area_warnings() == ()
@@ -512,6 +566,44 @@ def test_real_calibration_sheet_is_a_two_page_a4_pdf(tmp_path):
 
 
 @pytest.mark.integration
+def test_real_registration_marks_have_four_edge_targets_in_one_tex_pass(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('mutool'):
+        pytest.skip('pdflatex/mutool are required for registration mark test')
+
+    source = LatexRenderer(
+        cards_per_row=1,
+        rows_per_page=1,
+        registration_marks=True,
+    ).render(CardDeck([Card(front='ЛИЦО', back='ОБОРОТ')]))
+    assert 'remember picture' not in source
+
+    result = PdfLatexCompiler().compile(source)
+    assert result.success, result.log
+    assert 'Label(s) may have changed' not in result.log
+
+    pdf_path = tmp_path / 'registration.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    subprocess.run(
+        [
+            'mutool', 'draw', '-q', '-r', '72', '-F', 'pbm',
+            '-o', str(tmp_path / 'registration-%d.pbm'), str(pdf_path),
+        ],
+        capture_output=True,
+        check=True,
+    )
+    expected_targets = (
+        (298, 14),
+        (298, 828),
+        (14, 421),
+        (581, 421),
+    )
+    for page_number in (1, 2):
+        raster = tmp_path / f'registration-{page_number}.pbm'
+        assert _read_pbm(raster)[:2] == (596, 842)
+        assert all(_has_ink_near(raster, x, y) for x, y in expected_targets)
+
+
+@pytest.mark.integration
 def test_real_latex_auto_fits_before_minimum_size_overflow():
     if not shutil.which('pdflatex'):
         pytest.skip('pdflatex is required for the auto-fit integration test')
@@ -594,18 +686,28 @@ def test_real_pdf_card_frame_matches_configured_cut_size(tmp_path):
     pdf_path.write_bytes(result.pdf_data)
     svg_pattern = tmp_path / 'geometry-%d.svg'
     subprocess.run(
-        ['mutool', 'draw', '-F', 'svg', '-o', str(svg_pattern), str(pdf_path), '1'],
+        [
+            'mutool', 'draw', '-F', 'svg', '-o', str(svg_pattern),
+            str(pdf_path), '1-2',
+        ],
         capture_output=True,
         text=True,
         check=True,
     )
-    svg = (tmp_path / 'geometry-1.svg').read_text(encoding='utf-8')
-    horizontal_lengths = [float(value) for value in re.findall(r'd="M0 0H([0-9.]+)', svg)]
-    vertical_lengths = [float(value) for value in re.findall(r'd="M0 0V([0-9.]+)', svg)]
-    rule_widths = [float(value) for value in re.findall(r'stroke-width="([0-9.]+)', svg)]
+    for page_number in (1, 2):
+        svg = (tmp_path / f'geometry-{page_number}.svg').read_text(encoding='utf-8')
+        horizontal_lengths = [
+            float(value) for value in re.findall(r'd="M0 0H([0-9.]+)', svg)
+        ]
+        vertical_lengths = [
+            float(value) for value in re.findall(r'd="M0 0V([0-9.]+)', svg)
+        ]
+        rule_widths = [
+            float(value) for value in re.findall(r'stroke-width="([0-9.]+)', svg)
+        ]
 
-    assert horizontal_lengths and vertical_lengths and rule_widths
-    width_cm = max(horizontal_lengths) * 2.54 / 72
-    height_cm = (max(vertical_lengths) + max(rule_widths)) * 2.54 / 72
-    assert width_cm == pytest.approx(9.3, abs=0.01)
-    assert height_cm == pytest.approx(6.3, abs=0.01)
+        assert horizontal_lengths and vertical_lengths and rule_widths
+        width_cm = max(horizontal_lengths) * 2.54 / 72
+        height_cm = (max(vertical_lengths) + max(rule_widths)) * 2.54 / 72
+        assert width_cm == pytest.approx(9.3, abs=0.01)
+        assert height_cm == pytest.approx(6.3, abs=0.01)

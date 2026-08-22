@@ -15,9 +15,10 @@
 
     <div class="info-panel">
         <strong>Встроенные профили</strong> ниже — это предустановки приложения, а не настройки
-        драйвера или самого принтера. Профиль задаёт способ переворота, рамки и компенсацию
-        положения печатной сетки. В окне печати всё равно нужно выбрать тот же duplex-режим
-        и масштаб 100% / Actual size без Fit или Shrink.
+        драйвера или самого принтера. Профиль независимо задаёт способ переворота листа,
+        поворот содержимого оборота, рамки и компенсацию положения печатной сетки. В окне
+        печати всё равно нужно выбрать тот же duplex-режим и масштаб 100% / Actual size
+        без Fit или Shrink.
     </div>
 
     <h2>Калибровочный лист</h2>
@@ -25,7 +26,8 @@
         Скачайте двухстраничный PDF и напечатайте обе страницы на одном листе. На лице находятся
         чёрные сплошные мишени, на обороте — пурпурные пунктирные. Сначала проверьте линейкой
         контрольный отрезок 100 мм, затем держите лист лицом к себе на просвет и измерьте у
-        центральной мишени сдвиг пунктирного креста относительно сплошного.
+        центральной мишени сдвиг пунктирного креста относительно сплошного. Стрелки
+        «ВЕРХ КАРТОЧКИ» показывают, соответствует ли профилю ориентация оборота.
     </p>
     <ol>
         <li>Сдвиг вправо считается положительным X, влево — отрицательным.</li>
@@ -52,19 +54,20 @@
     <h2>Предустановленные профили приложения</h2>
     <ul>
         {% for profile in configured_profiles %}
-        <li><strong>{{ profile.name }}</strong> — {{ profile.duplex_mode.value }}, offsets F({{ profile.front_offset_x_mm }}, {{ profile.front_offset_y_mm }}) мм / B({{ profile.back_offset_x_mm }}, {{ profile.back_offset_y_mm }}) мм</li>
+        <li><strong>{{ profile.name }}</strong> — {{ profile.duplex_mode.value }}, оборот {{ profile.back_rotation_deg }}°, offsets F({{ profile.front_offset_x_mm }}, {{ profile.front_offset_y_mm }}) мм / B({{ profile.back_offset_x_mm }}, {{ profile.back_offset_y_mm }}) мм</li>
         {% endfor %}
     </ul>
 
     <h2>Сохранённые профили</h2>
     {% if saved_profiles %}
     <table class="cards-table">
-        <thead><tr><th>Ключ / имя</th><th>Режим</th><th>Offsets, мм</th><th>Метки</th><th>Действия</th></tr></thead>
+        <thead><tr><th>Ключ / имя</th><th>Режим</th><th>Оборот</th><th>Offsets, мм</th><th>Метки</th><th>Действия</th></tr></thead>
         <tbody>
         {% for profile in saved_profiles %}
         <tr>
             <td><code>{{ profile.key }}</code><br>{{ profile.name }}</td>
             <td>{{ profile.duplex_mode.value }}</td>
+            <td>{{ profile.back_rotation_deg }}°</td>
             <td>F: {{ profile.front_offset_x_mm }}, {{ profile.front_offset_y_mm }}<br>B: {{ profile.back_offset_x_mm }}, {{ profile.back_offset_y_mm }}</td>
             <td>{{ 'да' if profile.registration_marks else 'нет' }}</td>
             <td>
@@ -91,6 +94,15 @@
             <option value="long-edge">long-edge</option>
             <option value="short-edge">short-edge</option>
         </select>
+        <label for="profile-back-rotation">Поворот содержимого оборота</label>
+        <select id="profile-back-rotation" name="back_rotation_deg">
+            <option value="180" selected>180° — legacy long-edge</option>
+            <option value="0">0° — без поворота</option>
+        </select>
+        <small>
+            Duplex-режим переставляет карточки по ячейкам листа, а эта настройка отдельно
+            поворачивает содержимое каждой оборотной карточки.
+        </small>
         <div class="profile-offset-grid">
             {% for field, label in (
                 ('front_offset_x_mm', 'Лицо X'), ('front_offset_y_mm', 'Лицо Y'),

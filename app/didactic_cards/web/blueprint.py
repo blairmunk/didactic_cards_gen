@@ -148,6 +148,17 @@ def _profile_offset(name: str) -> float:
         raise ValueError(f'Поле {name} должно быть числом') from error
 
 
+def _profile_back_rotation() -> int:
+    raw_value = request.form.get('back_rotation_deg', '180').strip()
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise ValueError('Поворот оборота должен быть 0° или 180°') from error
+    if value not in {0, 180}:
+        raise ValueError('Поворот оборота должен быть 0° или 180°')
+    return value
+
+
 def _csrf_token() -> str:
     token = session.get('_csrf_token')
     if not token:
@@ -316,6 +327,7 @@ def save_printer_profile():
             key=key,
             name=request.form.get('name', '').strip(),
             duplex_mode=request.form.get('duplex_mode', 'long-edge'),
+            back_rotation_deg=_profile_back_rotation(),
             front_offset_x_mm=_profile_offset('front_offset_x_mm'),
             front_offset_y_mm=_profile_offset('front_offset_y_mm'),
             back_offset_x_mm=_profile_offset('back_offset_x_mm'),

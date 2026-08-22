@@ -30,6 +30,7 @@ class CardLayoutConfig:
     fbox_rule_pt: float = 0.4
     back_border: bool = False  # True = рамка на обороте (для отладки центровки)
     duplex_mode: DuplexMode = DuplexMode.LONG_EDGE
+    back_rotation_deg: int = 180
     front_offset_x_mm: float = 0.0
     front_offset_y_mm: float = 0.0
     back_offset_x_mm: float = 0.0
@@ -66,6 +67,10 @@ class CardLayoutConfig:
         )
         if any(abs(offset) > 10 for offset in offsets):
             raise ValueError('calibration offsets must be within +/- 10 mm')
+        if isinstance(self.back_rotation_deg, bool) or self.back_rotation_deg not in {
+            0, 180
+        }:
+            raise ValueError('back rotation must be 0 or 180 degrees')
 
         frame_inset_cm = 2 * (self.fbox_sep_pt + self.fbox_rule_pt) * 2.54 / 72.27
         if self.card_width_cm <= frame_inset_cm or self.card_height_cm <= frame_inset_cm:
@@ -99,6 +104,7 @@ def _default_printer_profiles() -> tuple[PrinterProfile, ...]:
             key='standard-short-edge',
             name='Стандартный short-edge',
             duplex_mode=DuplexMode.SHORT_EDGE,
+            back_rotation_deg=0,
         ),
     )
 

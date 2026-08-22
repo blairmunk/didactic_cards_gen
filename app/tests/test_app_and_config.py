@@ -96,6 +96,8 @@ def test_app_debug_is_disabled_by_default(tmp_path, monkeypatch):
         {'back_offset_x_mm': 11},
         {'front_offset_y_mm': float('nan')},
         {'duplex_mode': 'diagonal'},
+        {'back_rotation_deg': 90},
+        {'back_rotation_deg': False},
         {'auto_fit': 1},
     ],
 )
@@ -111,6 +113,13 @@ def test_app_factory_accepts_configuration_override(tmp_path):
     assert app.config['REPO'].data_dir == Path(tmp_path / 'data')
 
 
+def test_builtin_profiles_restore_legacy_long_edge_rotation():
+    profiles = {profile.key: profile for profile in AppConfig().printer_profiles}
+    assert profiles['standard-long-edge'].back_rotation_deg == 180
+    assert profiles['calibration-long-edge'].back_rotation_deg == 180
+    assert profiles['standard-short-edge'].back_rotation_deg == 0
+
+
 @pytest.mark.parametrize(
     'kwargs',
     [
@@ -120,6 +129,8 @@ def test_app_factory_accepts_configuration_override(tmp_path):
         {'key': 'valid', 'name': 'Name', 'back_offset_x_mm': 11},
         {'key': 'valid', 'name': 'Name', 'front_offset_y_mm': float('nan')},
         {'key': 'valid', 'name': 'Name', 'duplex_mode': 'diagonal'},
+        {'key': 'valid', 'name': 'Name', 'back_rotation_deg': 90},
+        {'key': 'valid', 'name': 'Name', 'back_rotation_deg': True},
         {'key': 'valid', 'name': 'Name', 'back_border': 1},
         {'key': 'valid', 'name': 'Name', 'registration_marks': 'yes'},
     ],
@@ -142,6 +153,7 @@ def test_renderer_factory_creates_isolated_profile_renderer(tmp_path):
         'office-printer',
         'Office printer',
         duplex_mode='short-edge',
+        back_rotation_deg=0,
         back_offset_x_mm=1.25,
         registration_marks=True,
     )
@@ -156,5 +168,6 @@ def test_renderer_factory_creates_isolated_profile_renderer(tmp_path):
     assert first is not second
     assert first.back_offset == (1.25, 0.0)
     assert first.duplex_mode.value == 'short-edge'
+    assert first.back_rotation_deg == 0
     assert first.registration_marks is True
     assert list(app.config['PRINT_PROFILES']) == ['office-printer']

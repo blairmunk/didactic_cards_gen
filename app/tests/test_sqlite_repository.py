@@ -71,6 +71,7 @@ def test_printer_profile_crud_round_trip(sqlite_repo):
         key='office-printer',
         name='Office printer',
         duplex_mode='short-edge',
+        back_rotation_deg=0,
         front_offset_x_mm=0.25,
         back_offset_x_mm=-1.5,
         back_offset_y_mm=0.75,
@@ -92,7 +93,7 @@ def test_printer_profile_crud_round_trip(sqlite_repo):
     assert sqlite_repo.list_printer_profiles() == []
 
 
-def test_schema_one_database_migrates_to_two_without_losing_decks(tmp_path):
+def test_schema_one_database_migrates_to_current_without_losing_decks(tmp_path):
     data_dir = tmp_path / 'schema-one'
     repository = SqliteRepository(data_dir)
     deck = repository.create_deck('Preserved')
@@ -106,7 +107,57 @@ def test_schema_one_database_migrates_to_two_without_losing_decks(tmp_path):
     assert migrated.get_deck(deck.id).name == 'Preserved'
     assert migrated.list_printer_profiles() == []
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 2
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == SQLITE_SCHEMA_VERSION
+
+
+def test_schema_two_profiles_migrate_rotation_by_duplex_mode(tmp_path):
+    data_dir = tmp_path / 'schema-two'
+    repository = SqliteRepository(data_dir)
+    with closing(repository._connect()) as connection:
+        connection.execute('PRAGMA user_version = 2')
+        connection.execute('ALTER TABLE printer_profiles RENAME TO printer_profiles_v3')
+        connection.execute(
+            '''
+            CREATE TABLE printer_profiles (
+                key TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                duplex_mode TEXT NOT NULL,
+                front_offset_x_mm REAL NOT NULL,
+                front_offset_y_mm REAL NOT NULL,
+                back_offset_x_mm REAL NOT NULL,
+                back_offset_y_mm REAL NOT NULL,
+                back_border INTEGER NOT NULL,
+                registration_marks INTEGER NOT NULL
+            )
+            '''
+        )
+        connection.executemany(
+            '''
+            INSERT INTO printer_profiles VALUES (?, ?, ?, 0, 0, 0, 0, 0, 0)
+            ''',
+            (
+                ('old-long', 'Old long edge', 'long-edge'),
+                ('old-short', 'Old short edge', 'short-edge'),
+            ),
+        )
+        connection.execute('DROP TABLE printer_profiles_v3')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+
+    profiles = {profile.key: profile for profile in migrated.list_printer_profiles()}
+    assert profiles['old-long'].back_rotation_deg == 180
+    assert profiles['old-short'].back_rotation_deg == 0
+    with closing(migrated._connect()) as connection:
+        columns = {
+            row['name'] for row in connection.execute(
+                'PRAGMA table_info(printer_profiles)'
+            )
+        }
+        assert 'back_rotation_deg' in columns
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == (
+            SQLITE_SCHEMA_VERSION
+        )
 
 
 def test_deck_and_ordered_card_round_trip(sqlite_repo):

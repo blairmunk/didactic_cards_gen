@@ -43,6 +43,7 @@ def create_app(
             fbox_rule_pt=layout.fbox_rule_pt,
             back_border=profile.back_border,
             duplex_mode=profile.duplex_mode,
+            back_rotation_deg=profile.back_rotation_deg,
             front_offset_x_mm=profile.front_offset_x_mm,
             front_offset_y_mm=profile.front_offset_y_mm,
             back_offset_x_mm=profile.back_offset_x_mm,

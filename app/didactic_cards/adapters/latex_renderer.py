@@ -9,6 +9,9 @@ from ..domain.printing import DuplexMode, build_sheets
 
 
 PT_TO_CM = 2.54 / 72.27
+PAGE_WIDTH_MM = 210.0
+PAGE_HEIGHT_MM = 297.0
+PAGE_MARGIN_MM = 5.0
 
 ALLOWED_MATH_COMMANDS = {
     'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta',
@@ -119,6 +122,7 @@ class LatexRenderer(DocumentRenderer):
         fbox_rule_pt: float = 0.4,
         back_border: bool = False,
         duplex_mode: DuplexMode | str = DuplexMode.LONG_EDGE,
+        back_rotation_deg: int = 180,
         front_offset_x_mm: float = 0.0,
         front_offset_y_mm: float = 0.0,
         back_offset_x_mm: float = 0.0,
@@ -134,6 +138,8 @@ class LatexRenderer(DocumentRenderer):
             raise ValueError('frame spacing and rule must not be negative')
         if not isinstance(auto_fit, bool):
             raise ValueError('auto_fit must be boolean')
+        if isinstance(back_rotation_deg, bool) or back_rotation_deg not in {0, 180}:
+            raise ValueError('back rotation must be 0 or 180 degrees')
         offsets = (
             front_offset_x_mm,
             front_offset_y_mm,
@@ -164,6 +170,7 @@ class LatexRenderer(DocumentRenderer):
         self.fbox_rule = fbox_rule_pt
         self.back_border = back_border
         self.duplex_mode = DuplexMode(duplex_mode)
+        self.back_rotation_deg = back_rotation_deg
         self.front_offset = (front_offset_x_mm, front_offset_y_mm)
         self.back_offset = (back_offset_x_mm, back_offset_y_mm)
         self.registration_marks = registration_marks
@@ -193,7 +200,7 @@ class LatexRenderer(DocumentRenderer):
 \usepackage{{xcolor}}
 \geometry{{a4paper,margin=12mm}}
 \pagestyle{{empty}}
-\newcommand{{\calibrationtargets}}[4]{{%
+\newcommand{{\calibrationtargets}}[5]{{%
   \noindent\begin{{tikzpicture}}[x=1mm,y=1mm]
     \path[use as bounding box] (0,0) rectangle (186,225);
     \begin{{scope}}[shift={{(#1,-#2)}}]
@@ -208,6 +215,7 @@ class LatexRenderer(DocumentRenderer):
       }}
       \node[#3,anchor=south] at (93,15) {{контрольная длина 100 мм}};
       \node[#3,anchor=north] at (93,100) {{#4}};
+      \node[#3,rotate=#5] at (93,165) {{\Large $\uparrow$ ВЕРХ КАРТОЧКИ}};
     \end{{scope}}
   \end{{tikzpicture}}%
 }}
@@ -217,35 +225,40 @@ class LatexRenderer(DocumentRenderer):
   Режим переворота: \texttt{{{mode}}}. Масштаб печати: 100\% / Actual size.\\
   Сплошные чёрные мишени должны совпасть с пунктирными мишенями оборота.\\
   На просвет измеряйте расхождение у центрального креста по горизонтали и вертикали.}}
-\calibrationtargets{{{front_x}}}{{{front_y}}}{{black}}{{ЛИЦО: сплошная линия}}
+\calibrationtargets{{{front_x}}}{{{front_y}}}{{black}}{{ЛИЦО: сплошная линия}}{{0}}
 \newpage
 \noindent\parbox[t][35mm][t]{{\textwidth}}{{\centering
   {{\Large\bfseries Калибровочный лист: оборотная сторона}}\\[2mm]
-  Профиль: \texttt{{{mode}}}; offsets X={back_x} мм, Y={back_y} мм.\\
+  Профиль: \texttt{{{mode}}}; поворот содержимого: {self.back_rotation_deg}$^\circ$.\\
+  Offsets X={back_x} мм, Y={back_y} мм.\\
   Эта страница должна печататься оборотом того же физического листа.\\
   Не используйте Fit, Shrink или дополнительное масштабирование драйвера.}}
-\calibrationtargets{{{back_x}}}{{{back_y}}}{{magenta,dashed}}{{ОБОРОТ: пунктирная линия}}
+\calibrationtargets{{{back_x}}}{{{back_y}}}{{magenta,dashed}}{{ОБОРОТ: пунктирная линия}}{{{self.back_rotation_deg}}}
 \end{{document}}'''
 
     def printable_area_warnings(self) -> tuple[str, ...]:
-        grid_width = self.cards_per_row * self.card_width
-        grid_height = self.rows_per_page * (
+        grid_width_mm = self.cards_per_row * self.card_width * 10
+        grid_height_mm = self.rows_per_page * (
             self.card_height + 2 * PT_TO_CM
-        )
+        ) * 10
         warnings = []
         for side, (offset_x, offset_y) in (
             ('Лицевая сторона', self.front_offset),
             ('Оборотная сторона', self.back_offset),
         ):
-            if offset_x < 0 or offset_x / 10 + grid_width > 20.0:
+            left = PAGE_MARGIN_MM + offset_x
+            right = left + grid_width_mm
+            top = PAGE_MARGIN_MM + offset_y
+            bottom = top + grid_height_mm
+            if left < 0 or right > PAGE_WIDTH_MM:
                 warnings.append(
                     f'{side}: горизонтальное смещение выводит сетку за '
-                    'настраиваемую область A4'
+                    'границы листа A4'
                 )
-            if offset_y < 0 or offset_y / 10 + grid_height > 28.7:
+            if top < 0 or bottom > PAGE_HEIGHT_MM:
                 warnings.append(
                     f'{side}: вертикальное смещение выводит сетку за '
-                    'настраиваемую область A4'
+                    'границы листа A4'
                 )
         return tuple(warnings)
 
@@ -322,6 +335,7 @@ class LatexRenderer(DocumentRenderer):
 \usepackage{{multicol}}
 \usepackage{{xcolor}}
 \usepackage{{tikz}}
+\usepackage{{eso-pic}}
 
 \geometry{{a4paper, margin=0.5cm}}
 
@@ -358,16 +372,19 @@ class LatexRenderer(DocumentRenderer):
     \box\cardcontentbox
 }}
 \newcommand{{\registrationmarks}}{{%
-    \begin{{tikzpicture}}[remember picture,overlay,line width=0.2pt]
-    \draw ([yshift=-5mm]current page.north) ++(-3mm,0) -- ++(6mm,0);
-    \draw ([yshift=-5mm]current page.north) ++(0,-3mm) -- ++(0,6mm);
-    \draw ([yshift=5mm]current page.south) ++(-3mm,0) -- ++(6mm,0);
-    \draw ([yshift=5mm]current page.south) ++(0,-3mm) -- ++(0,6mm);
-    \draw ([xshift=5mm]current page.west) ++(-3mm,0) -- ++(6mm,0);
-    \draw ([xshift=5mm]current page.west) ++(0,-3mm) -- ++(0,6mm);
-    \draw ([xshift=-5mm]current page.east) ++(-3mm,0) -- ++(6mm,0);
-    \draw ([xshift=-5mm]current page.east) ++(0,-3mm) -- ++(0,6mm);
-    \end{{tikzpicture}}%
+    \AddToShipoutPictureFG*{{%
+      \AtPageUpperLeft{{%
+        \linethickness{{0.35pt}}%
+        \put(\LenToUnit{{102mm}},\LenToUnit{{-5mm}}){{\line(1,0){{\LenToUnit{{6mm}}}}}}%
+        \put(\LenToUnit{{105mm}},\LenToUnit{{-8mm}}){{\line(0,1){{\LenToUnit{{6mm}}}}}}%
+        \put(\LenToUnit{{102mm}},\LenToUnit{{-292mm}}){{\line(1,0){{\LenToUnit{{6mm}}}}}}%
+        \put(\LenToUnit{{105mm}},\LenToUnit{{-295mm}}){{\line(0,1){{\LenToUnit{{6mm}}}}}}%
+        \put(\LenToUnit{{2mm}},\LenToUnit{{-148.5mm}}){{\line(1,0){{\LenToUnit{{6mm}}}}}}%
+        \put(\LenToUnit{{5mm}},\LenToUnit{{-151.5mm}}){{\line(0,1){{\LenToUnit{{6mm}}}}}}%
+        \put(\LenToUnit{{202mm}},\LenToUnit{{-148.5mm}}){{\line(1,0){{\LenToUnit{{6mm}}}}}}%
+        \put(\LenToUnit{{205mm}},\LenToUnit{{-151.5mm}}){{\line(0,1){{\LenToUnit{{6mm}}}}}}%
+      }}%
+    }}%
 }}
 
 \pagestyle{{empty}}
@@ -401,7 +418,10 @@ class LatexRenderer(DocumentRenderer):
                     r'\checkedcardcontent'
                     f'{{{card_number}}}{{{side}}}{{{_card_content(text)}}}'
                 )
-                result += command + '{' + checked_content + '}\n'
+                rendered_card = command + '{' + checked_content + '}'
+                if side == 'back' and self.back_rotation_deg == 180:
+                    rendered_card = r'\rotatebox{180}{' + rendered_card + '}'
+                result += rendered_card + '\n'
                 if column < self.cards_per_row - 1:
                     result += '%\n'
             if row < self.rows_per_page - 1:

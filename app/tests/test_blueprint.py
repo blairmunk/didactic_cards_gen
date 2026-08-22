@@ -521,6 +521,7 @@ def test_print_profile_is_applied_to_generate_preview_and_preflight(
     app.config['RENDERER_FACTORY'] = lambda selected: LatexRenderer(
         cards_per_row=2,
         rows_per_page=4,
+        back_rotation_deg=selected.back_rotation_deg,
         back_offset_x_mm=selected.back_offset_x_mm,
         registration_marks=selected.registration_marks,
     )
@@ -537,6 +538,7 @@ def test_print_profile_is_applied_to_generate_preview_and_preflight(
     )
     assert generated.status_code == 200
     assert r'\hspace*{1.5mm}' in app.config['COMPILER'].sources[-1]
+    assert r'\rotatebox{180}{\backcard' in app.config['COMPILER'].sources[-1]
     preflight = client.post(
         f'/api/deck/{deck_id}/preflight', data={'profile_id': profile.key}
     )
@@ -588,6 +590,7 @@ def test_persistent_printer_profile_web_crud_and_print_job(tmp_path):
         'key': 'office-printer',
         'name': 'Office <printer>',
         'duplex_mode': 'short-edge',
+        'back_rotation_deg': '0',
         'front_offset_x_mm': '0,25',
         'front_offset_y_mm': '0',
         'back_offset_x_mm': '-1.5',
@@ -600,9 +603,11 @@ def test_persistent_printer_profile_web_crud_and_print_job(tmp_path):
     assert saved.key == 'office-printer'
     assert saved.front_offset_x_mm == 0.25
     assert saved.duplex_mode.value == 'short-edge'
+    assert saved.back_rotation_deg == 0
 
     page = profile_client.get('/printer_profiles')
     assert 'Office &lt;printer&gt;' in page.text
+    assert '0°' in page.text
     deck = profile_app.config['REPO'].create_deck('Profile deck')
     profile_app.config['REPO'].save_cards(
         deck.id, CardDeck([Card(front='Q', back='A')])
@@ -668,6 +673,7 @@ def test_calibration_sheet_download_uses_selected_profile(tmp_path):
         {'key': 'Invalid', 'name': 'Name'},
         {'key': 'valid', 'name': '', 'duplex_mode': 'long-edge'},
         {'key': 'valid', 'name': 'Name', 'duplex_mode': 'diagonal'},
+        {'key': 'valid', 'name': 'Name', 'back_rotation_deg': '90'},
         {'key': 'valid', 'name': 'Name', 'back_offset_x_mm': 'not-number'},
         {'key': 'valid', 'name': 'Name', 'back_offset_x_mm': '11'},
         {'key': 'standard-long-edge', 'name': 'Override built-in'},
