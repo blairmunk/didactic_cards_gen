@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -25,7 +26,7 @@ from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 7
+SQLITE_SCHEMA_VERSION = 8
 
 
 class LegacyMigrationError(ValueError):
@@ -73,7 +74,7 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _initialize_database(self) -> None:
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6, SQLITE_SCHEMA_VERSION}:
+            if version not in {0, 1, 2, 3, 4, 5, 6, 7, SQLITE_SCHEMA_VERSION}:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
@@ -138,7 +139,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                     ),
                     section_break TEXT NOT NULL DEFAULT 'continuous' CHECK (
                         section_break IN ('continuous', 'new-row', 'new-sheet')
-                    )
+                    ),
+                    typography_json TEXT NOT NULL DEFAULT '{}'
                 );
                 CREATE TABLE IF NOT EXISTS printer_profiles (
                     key TEXT PRIMARY KEY,
@@ -252,6 +254,13 @@ class SqliteRepository(DeckRepository, CardRepository):
                         CHECK (section_break IN ('continuous', 'new-row', 'new-sheet'))
                     """
                 )
+            if 'typography_json' not in settings_columns:
+                connection.execute(
+                    """
+                    ALTER TABLE deck_render_settings
+                    ADD COLUMN typography_json TEXT NOT NULL DEFAULT '{}'
+                    """
+                )
             template_columns = {
                 row['name'] for row in connection.execute(
                     'PRAGMA table_info(trusted_templates)'
@@ -349,16 +358,33 @@ class SqliteRepository(DeckRepository, CardRepository):
 
     @staticmethod
     def _settings_from_row(row: sqlite3.Row) -> DeckRenderSettings:
-        return DeckRenderSettings(
-            preset=row['preset'],
-            horizontal_alignment=row['horizontal_alignment'],
-            vertical_alignment=row['vertical_alignment'],
-            header_visibility=row['header_visibility'],
-            header_position=row['header_position'],
-            header_alignment=row['header_alignment'],
-            header_repeat=row['header_repeat'],
-            section_break=row['section_break'],
+        data = {
+            'preset': row['preset'],
+            'horizontal_alignment': row['horizontal_alignment'],
+            'vertical_alignment': row['vertical_alignment'],
+            'header_visibility': row['header_visibility'],
+            'header_position': row['header_position'],
+            'header_alignment': row['header_alignment'],
+            'header_repeat': row['header_repeat'],
+            'section_break': row['section_break'],
+        }
+        try:
+            typography_data = json.loads(row['typography_json'])
+        except (TypeError, json.JSONDecodeError) as error:
+            raise ValueError('Invalid typography settings in database') from error
+        if not isinstance(typography_data, dict):
+            raise ValueError('Typography settings in database must be an object')
+        allowed_typography_fields = set(
+            DeckRenderSettings().typography_dict()
         )
+        unknown_fields = set(typography_data) - allowed_typography_fields
+        if unknown_fields:
+            raise ValueError(
+                'Unknown typography settings in database: '
+                + ', '.join(sorted(unknown_fields))
+            )
+        data.update(typography_data)
+        return DeckRenderSettings.from_dict(data)
 
     def _get_render_settings(
         self, connection: sqlite3.Connection, deck_id: str
@@ -520,8 +546,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                 deck_id, preset, horizontal_alignment,
                 vertical_alignment, header_visibility,
                 header_position, header_alignment, header_repeat,
-                section_break
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                section_break, typography_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 deck.id,
@@ -533,6 +559,7 @@ class SqliteRepository(DeckRepository, CardRepository):
                 settings.header_alignment.value,
                 settings.header_repeat.value,
                 settings.section_break.value,
+                json.dumps(settings.typography_dict(), ensure_ascii=False),
             ),
         )
 
@@ -786,7 +813,7 @@ class SqliteRepository(DeckRepository, CardRepository):
                     preset = ?, horizontal_alignment = ?,
                     vertical_alignment = ?, header_visibility = ?,
                     header_position = ?, header_alignment = ?,
-                    header_repeat = ?, section_break = ?
+                    header_repeat = ?, section_break = ?, typography_json = ?
                 WHERE deck_id = ?
                 ''',
                 (
@@ -798,6 +825,7 @@ class SqliteRepository(DeckRepository, CardRepository):
                     settings.header_alignment.value,
                     settings.header_repeat.value,
                     settings.section_break.value,
+                    json.dumps(settings.typography_dict(), ensure_ascii=False),
                     deck_id,
                 ),
             )
@@ -1071,12 +1099,20 @@ class SqliteRepository(DeckRepository, CardRepository):
             trusted_rows = connection.execute(
                 'SELECT * FROM trusted_templates ORDER BY id'
             ).fetchall()
+            settings_rows = connection.execute(
+                'SELECT * FROM deck_render_settings ORDER BY deck_id'
+            ).fetchall()
         if issues == ['ok']:
             issues = []
         issues.extend(f'foreign-key: {tuple(row)}' for row in foreign_keys)
         issues.extend(
             f"missing-render-settings: {row['id']}" for row in missing_settings
         )
+        for row in settings_rows:
+            try:
+                self._settings_from_row(row)
+            except (TypeError, ValueError):
+                issues.append(f"invalid-render-settings: {row['deck_id']}")
         for row in trusted_rows:
             try:
                 self._trusted_template_from_row(row)

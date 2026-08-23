@@ -308,6 +308,49 @@ def _render_settings_from_form() -> DeckRenderSettings:
         header_alignment=request.form.get('header_alignment', 'left'),
         header_repeat=request.form.get('header_repeat', 'every-card'),
         section_break=request.form.get('section_break', 'continuous'),
+        typography_profile=request.form.get('typography_profile', 'off'),
+        body_font_family=request.form.get('body_font_family', 'serif'),
+        body_font_size=request.form.get('body_font_size', 'normal'),
+        body_font_weight=request.form.get('body_font_weight', 'normal'),
+        body_font_style=request.form.get('body_font_style', 'upright'),
+        line_spacing=request.form.get('line_spacing', 'normal'),
+        paragraph_spacing=request.form.get('paragraph_spacing', 'none'),
+        header_source=request.form.get('header_source', 'section'),
+        header_text=request.form.get('header_text', '').strip(),
+        header_font_family=request.form.get('header_font_family', 'sans'),
+        header_font_size=request.form.get('header_font_size', 'small'),
+        header_font_weight=request.form.get('header_font_weight', 'normal'),
+        header_font_style=request.form.get('header_font_style', 'upright'),
+        secondary_header_visibility=request.form.get(
+            'secondary_header_visibility', 'none'
+        ),
+        secondary_header_position=request.form.get(
+            'secondary_header_position', 'bottom'
+        ),
+        secondary_header_alignment=request.form.get(
+            'secondary_header_alignment', 'right'
+        ),
+        secondary_header_repeat=request.form.get(
+            'secondary_header_repeat', 'every-card'
+        ),
+        secondary_header_source=request.form.get(
+            'secondary_header_source', 'card-number'
+        ),
+        secondary_header_text=request.form.get(
+            'secondary_header_text', ''
+        ).strip(),
+        secondary_header_font_family=request.form.get(
+            'secondary_header_font_family', 'sans'
+        ),
+        secondary_header_font_size=request.form.get(
+            'secondary_header_font_size', 'small'
+        ),
+        secondary_header_font_weight=request.form.get(
+            'secondary_header_font_weight', 'normal'
+        ),
+        secondary_header_font_style=request.form.get(
+            'secondary_header_font_style', 'upright'
+        ),
     )
 
 

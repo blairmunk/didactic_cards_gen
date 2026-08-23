@@ -101,12 +101,12 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function refreshSectionHeaders() {
-        const sectionStartOnly = document.body.dataset.headerRepeat === 'section-start';
         let previousSection = null;
         document.querySelectorAll('#preview-grid .preview-card').forEach(function(card) {
             const section = card.dataset.section || '';
-            const visible = !sectionStartOnly || previousSection === null || section !== previousSection;
-            card.querySelectorAll('.preview-section').forEach(function(header) {
+            card.querySelectorAll('.preview-header').forEach(function(header) {
+                const sectionStartOnly = header.dataset.repeat === 'section-start';
+                const visible = !sectionStartOnly || previousSection === null || section !== previousSection;
                 header.classList.toggle('section-header-suppressed', !visible);
             });
             previousSection = section;
@@ -140,6 +140,35 @@ document.addEventListener('DOMContentLoaded', function() {
         applyPresetControls();
     }
 
+    const typographyProfile = document.getElementById('typography-profile');
+    const typographyCustomControls = document.getElementById('typography-custom-controls');
+    function applyTypographyProfileControls() {
+        if (!typographyProfile || !typographyCustomControls) return;
+        const custom = typographyProfile.value === 'custom';
+        typographyCustomControls.classList.toggle('settings-inactive', !custom);
+        typographyCustomControls.setAttribute('aria-disabled', String(!custom));
+    }
+    if (typographyProfile) {
+        typographyProfile.addEventListener('change', applyTypographyProfileControls);
+        applyTypographyProfileControls();
+    }
+
+    [
+        ['header-source', 'header-text'],
+        ['secondary-header-source', 'secondary-header-text']
+    ].forEach(function(ids) {
+        const source = document.getElementById(ids[0]);
+        const text = document.getElementById(ids[1]);
+        if (!source || !text) return;
+        function refreshCustomText() {
+            const enabled = source.value === 'custom';
+            text.readOnly = !enabled;
+            text.classList.toggle('settings-input-inactive', !enabled);
+        }
+        source.addEventListener('change', refreshCustomText);
+        refreshCustomText();
+    });
+
     const printProfile = document.getElementById('print-profile');
     document.querySelectorAll('.print-form').forEach(function(form) {
         form.addEventListener('submit', function() {
@@ -171,17 +200,32 @@ document.addEventListener('DOMContentLoaded', function() {
         div.className = 'preview-card';
         div.dataset.cardId = cardData.id;
         div.dataset.section = cardData.section || '';
-        const visibility = document.body.dataset.headerVisibility;
-        const position = document.body.dataset.headerPosition;
+        function headerValue(source, customText) {
+            if (source === 'section') return cardData.section || '';
+            if (source === 'card-number') return '№ ' + (index + 1);
+            return customText || '';
+        }
+        function headerHtml(prefix, side, position) {
+            const dataPrefix = prefix === 'primary' ? 'header' : 'secondaryHeader';
+            const visibility = document.body.dataset[dataPrefix + 'Visibility'];
+            const configuredPosition = document.body.dataset[dataPrefix + 'Position'];
+            if (configuredPosition !== position || (visibility !== 'both' && visibility !== side)) {
+                return '';
+            }
+            const source = document.body.dataset[dataPrefix + 'Source'];
+            const customText = document.body.dataset[dataPrefix + 'Text'];
+            const repeat = document.body.dataset[dataPrefix + 'Repeat'];
+            return '<div class="preview-section preview-header preview-header-' + prefix +
+                '" data-repeat="' + repeat + '">' +
+                escapeHtml(headerValue(source, customText)) + '</div>';
+        }
         function sideHtml(side, content, label) {
-            const visible = visibility === 'both' || visibility === side;
-            const header = visible
-                ? '<div class="preview-section">' + escapeHtml(cardData.section || '') + '</div>'
-                : '';
             return '<div class="preview-side preview-' + side + '">' +
-                (position === 'top' ? header : '') +
+                headerHtml('primary', side, 'top') +
+                headerHtml('secondary', side, 'top') +
                 '<div class="preview-content">' + escapeHtml(content) + '</div>' +
-                (position === 'bottom' ? header : '') +
+                headerHtml('primary', side, 'bottom') +
+                headerHtml('secondary', side, 'bottom') +
                 '<span class="preview-side-label">' + label + '</span>' +
                 '</div>';
         }

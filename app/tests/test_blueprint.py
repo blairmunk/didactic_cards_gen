@@ -417,6 +417,73 @@ def test_render_settings_form_rejects_unknown_values_atomically(
     assert repo.get_deck(deck_id).version == before.version
 
 
+def test_safe_typography_and_two_headers_are_available_and_saved_from_ui(
+    client, repo, deck_id
+):
+    deck = repo.get_deck(deck_id)
+    page = client.get(f'/deck/{deck_id}')
+    assert 'id="typography-profile"' in page.text
+    assert 'id="typography-custom-controls"' in page.text
+    assert 'id="secondary-header-visibility"' in page.text
+    assert 'Содержимое карточки не становится LaTeX-кодом' in page.text
+
+    response = client.post(
+        f'/deck/{deck_id}/render_settings',
+        data={
+            'version': deck.version,
+            'preset': 'centered',
+            'typography_profile': 'custom',
+            'body_font_family': 'sans',
+            'body_font_size': 'large',
+            'body_font_weight': 'bold',
+            'body_font_style': 'italic',
+            'line_spacing': 'relaxed',
+            'paragraph_spacing': 'medium',
+            'header_visibility': 'both',
+            'header_source': 'custom',
+            'header_text': 'Курс & группа',
+            'header_font_family': 'serif',
+            'header_font_size': 'normal',
+            'header_font_weight': 'bold',
+            'header_font_style': 'italic',
+            'secondary_header_visibility': 'front',
+            'secondary_header_position': 'bottom',
+            'secondary_header_alignment': 'right',
+            'secondary_header_repeat': 'section-start',
+            'secondary_header_source': 'card-number',
+            'secondary_header_font_family': 'mono',
+            'secondary_header_font_size': 'small',
+            'secondary_header_font_weight': 'normal',
+            'secondary_header_font_style': 'upright',
+        },
+    )
+
+    assert response.status_code == 302
+    saved = repo.get_render_settings(deck_id)
+    assert saved.typography_profile.value == 'custom'
+    assert saved.body_font_family.value == 'sans'
+    assert saved.header_text == 'Курс & группа'
+    assert saved.secondary_header_visibility.value == 'front'
+    assert saved.secondary_header_source.value == 'card-number'
+
+
+def test_safe_typography_form_rejects_latex_as_font_token(client, repo, deck_id):
+    deck = repo.get_deck(deck_id)
+
+    response = client.post(
+        f'/deck/{deck_id}/render_settings',
+        data={
+            'version': deck.version,
+            'preset': 'centered',
+            'typography_profile': 'custom',
+            'body_font_family': r'\input{/etc/passwd}',
+        },
+    )
+
+    assert response.status_code == 400
+    assert repo.get_render_settings(deck_id) == DeckRenderSettings.centered()
+
+
 @pytest.mark.parametrize(
     ('preset', 'horizontal', 'vertical'),
     [

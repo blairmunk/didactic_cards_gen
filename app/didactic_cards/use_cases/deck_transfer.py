@@ -14,8 +14,8 @@ from ..domain.trusted import (
 )
 
 
-DECK_EXPORT_SCHEMA_VERSION = 4
-SUPPORTED_DECK_EXPORT_SCHEMAS = {1, 2, 3, DECK_EXPORT_SCHEMA_VERSION}
+DECK_EXPORT_SCHEMA_VERSION = 5
+SUPPORTED_DECK_EXPORT_SCHEMAS = {1, 2, 3, 4, DECK_EXPORT_SCHEMA_VERSION}
 
 
 class DeckTransferError(ValueError):
@@ -130,11 +130,11 @@ def import_deck_json(
         ))
 
     trusted_templates: list[TrustedTemplateVersion] = []
-    if schema_version == DECK_EXPORT_SCHEMA_VERSION:
+    if schema_version >= 4:
         template_items = payload.get('trusted_templates')
         if not isinstance(template_items, list):
             raise DeckTransferError(
-                'Export schema 4 должен содержать trusted_templates'
+                'Export schema 4+ должен содержать trusted_templates'
             )
         template_ids: set[str] = set()
         template_versions: set[int] = set()

@@ -76,6 +76,32 @@ def test_integrity_reports_missing_render_settings(sqlite_repo):
         sqlite_repo.get_deck(deck.id)
 
 
+@pytest.mark.parametrize(
+    'payload',
+    [
+        'not-json',
+        '[]',
+        '{"preset": "legacy-top-left"}',
+        '{"body_font_family": "\\\\input"}',
+    ],
+)
+def test_integrity_reports_invalid_typography_settings(sqlite_repo, payload):
+    deck = sqlite_repo.create_deck('Broken typography')
+    with closing(sqlite_repo._connect()) as connection:
+        connection.execute(
+            'UPDATE deck_render_settings SET typography_json = ? WHERE deck_id = ?',
+            (payload, deck.id),
+        )
+        connection.commit()
+
+    assert sqlite_repo.integrity_check() == [
+        f'invalid-render-settings: {deck.id}'
+    ]
+    assert sqlite_repo.readiness_check() == [
+        f'invalid-render-settings: {deck.id}'
+    ]
+
+
 def test_readiness_reports_unavailable_write_transaction(sqlite_repo, monkeypatch):
     class BrokenConnection:
         def execute(self, _statement):
@@ -257,7 +283,7 @@ def test_schema_four_adds_section_layout_settings_without_changing_behavior(
             )
         }
         assert {'header_repeat', 'section_break'} <= columns
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 7
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
 
 
 def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
@@ -273,7 +299,7 @@ def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
 
     assert migrated.list_trusted_templates(deck.id) == []
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 7
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
 
 
 def test_schema_six_adds_escaped_content_modes_without_activating_template(
@@ -324,7 +350,29 @@ def test_schema_six_adds_escaped_content_modes_without_activating_template(
     assert restored.back_content_mode.value == 'escaped'
     assert restored.status is TemplateStatus.QUARANTINED
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 7
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
+
+
+def test_schema_seven_adds_disabled_typography_without_changing_output(tmp_path):
+    data_dir = tmp_path / 'schema-seven'
+    repository = SqliteRepository(data_dir)
+    deck = repository.create_deck('Existing layout')
+    with closing(repository._connect()) as connection:
+        connection.execute('ALTER TABLE deck_render_settings DROP COLUMN typography_json')
+        connection.execute('PRAGMA user_version = 7')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+
+    assert migrated.get_render_settings(deck.id).typography is None
+    with closing(migrated._connect()) as connection:
+        columns = {
+            row['name'] for row in connection.execute(
+                'PRAGMA table_info(deck_render_settings)'
+            )
+        }
+        assert 'typography_json' in columns
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
 
 
 def test_deck_and_ordered_card_round_trip(sqlite_repo):
@@ -377,6 +425,11 @@ def test_render_settings_are_versioned_and_cloned(sqlite_repo):
         header_visibility='both',
         header_repeat='section-start',
         section_break='new-sheet',
+        typography_profile='custom',
+        body_font_family='mono',
+        secondary_header_visibility='front',
+        secondary_header_source='custom',
+        secondary_header_text='Лабораторная работа',
     )
 
     saved = sqlite_repo.save_render_settings(

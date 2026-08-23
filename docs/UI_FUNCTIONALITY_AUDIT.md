@@ -28,7 +28,7 @@ JavaScript controls и фактически отрисованный Chromium UI
 | Главная | Printer profiles и calibration | Верхняя навигация |
 | Главная | Состояние Advanced | Статус «включён/выключен»; при выключении раскрывается команда запуска |
 | Колода | Название/описание и printer profiles | Верхняя навигация колоды |
-| Колода | Preset, выравнивание 3×3, колонтитулы и section breaks | «Оформление карточек» |
+| Колода | Preset, выравнивание 3×3, два колонтитула, профили шрифтов/интервалов и section breaks | «Оформление карточек» |
 | Колода | Advanced template | Всегда видимый раздел: link при enabled, инструкция при disabled |
 | Колода | Single/bulk/CSV import и read-only CSV preview | Формы добавления |
 | Колода | Table/visual preview, edit/delete, drag и keyboard reorder | Таблица/превью карточек |

@@ -164,6 +164,35 @@ button:hover, .btn:hover,
     color: #666;
 }
 
+.typography-settings {
+    margin: 1rem 0;
+    padding: 0.75rem 1rem;
+    border: 1px solid #d8dde3;
+    border-radius: 6px;
+    background: #fff;
+}
+
+.typography-settings summary {
+    cursor: pointer;
+}
+
+.typography-settings .settings-grid {
+    margin-top: 1rem;
+}
+
+.settings-inactive {
+    opacity: 0.55;
+}
+
+.settings-inactive select {
+    pointer-events: none;
+}
+
+.settings-input-inactive {
+    color: #777;
+    background: #eee;
+}
+
 .preview-notice {
     color: #555;
     font-size: 0.9rem;
@@ -535,6 +564,36 @@ summary {
 .header-align-left .preview-section { text-align: left; }
 .header-align-center .preview-section { text-align: center; }
 .header-align-right .preview-section { text-align: right; }
+.secondary-header-align-left .preview-header-secondary { text-align: left; }
+.secondary-header-align-center .preview-header-secondary { text-align: center; }
+.secondary-header-align-right .preview-header-secondary { text-align: right; }
+
+.body-family-serif .preview-content { font-family: Georgia, serif; }
+.body-family-sans .preview-content { font-family: Arial, sans-serif; }
+.body-family-mono .preview-content { font-family: monospace; }
+.body-size-small .preview-content { font-size: 0.86em; }
+.body-size-normal .preview-content { font-size: 1em; }
+.body-size-large .preview-content { font-size: 1.18em; }
+.body-weight-bold .preview-content { font-weight: 700; }
+.body-style-italic .preview-content { font-style: italic; }
+.line-spacing-compact .preview-content { line-height: 1.15; }
+.line-spacing-normal .preview-content { line-height: 1.4; }
+.line-spacing-relaxed .preview-content { line-height: 1.65; }
+
+.primary-family-serif .preview-header-primary,
+.secondary-family-serif .preview-header-secondary { font-family: Georgia, serif; }
+.primary-family-sans .preview-header-primary,
+.secondary-family-sans .preview-header-secondary { font-family: Arial, sans-serif; }
+.primary-family-mono .preview-header-primary,
+.secondary-family-mono .preview-header-secondary { font-family: monospace; }
+.primary-size-normal .preview-header-primary,
+.secondary-size-normal .preview-header-secondary { font-size: 0.86rem; }
+.primary-size-large .preview-header-primary,
+.secondary-size-large .preview-header-secondary { font-size: 1rem; }
+.primary-weight-bold .preview-header-primary,
+.secondary-weight-bold .preview-header-secondary { font-weight: 700; }
+.primary-style-italic .preview-header-primary,
+.secondary-style-italic .preview-header-secondary { font-style: italic; }
 
 .preview-section.section-header-suppressed { display: none; }
 

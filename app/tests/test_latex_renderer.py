@@ -329,6 +329,73 @@ class TestLatexRenderer:
         assert source.count('HEADER-ALPHA') == 1
         assert source.count('HEADER-BETA') == 1
 
+    def test_safe_typography_emits_only_renderer_owned_font_commands(self):
+        source = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                typography_profile='custom',
+                body_font_family='sans',
+                body_font_size='large',
+                body_font_weight='bold',
+                body_font_style='italic',
+                line_spacing='relaxed',
+                paragraph_spacing='medium',
+            ),
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render_fronts(CardDeck([Card(front='Текст & формула $x^2$')]))
+
+        assert (
+            r'\newcommand{\cardbodyfont}'
+            r'{\fontsize{14pt}{20.30pt}\selectfont\sffamily\bfseries\itshape}'
+            in source
+        )
+        assert r'\newcommand{\cardparagraphspacing}{4pt}' in source
+        assert r'Текст \& формула $x^2$' in source
+
+    def test_two_headers_have_independent_sources_positions_and_escaping(self):
+        settings = DeckRenderSettings(
+            header_visibility='both',
+            header_position='top',
+            header_source='custom',
+            header_text='Курс & класс',
+            secondary_header_visibility='front',
+            secondary_header_position='bottom',
+            secondary_header_alignment='right',
+            secondary_header_source='card-number',
+        )
+        source = LatexRenderer(
+            render_settings=settings,
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render(CardDeck([Card(front='Q', back='A', section='Section')]))
+
+        front, back = source.split('задние стороны', 1)
+        front_card = front.split(r'\begin{document}', 1)[1]
+        assert r'\checkedcardheader{1}{front}{Курс \& класс}' in front
+        assert r'\checkedcardsecondaryheader{1}{front}{№ 1}' in front
+        assert front_card.index(r'\checkedcardheader') < front_card.index(
+            r'\checkedcardcontent'
+        )
+        assert front_card.index(r'\checkedcardcontent') < front_card.index(
+            r'\checkedcardsecondaryheader'
+        )
+        assert r'\checkedcardheader{1}{back}{Курс \& класс}' in back
+        assert r'\checkedcardsecondaryheader{1}{back}' not in back
+        assert r'\newcommand{\cardsecondaryheaderalign}{\raggedleft}' in source
+
+    def test_padding_cells_do_not_receive_numbered_headers(self):
+        source = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                secondary_header_visibility='both',
+                secondary_header_source='card-number',
+            ),
+            cards_per_row=2,
+            rows_per_page=1,
+        ).render_fronts(CardDeck([Card(front='Only')]))
+
+        assert source.count(r'\checkedcardsecondaryheader') == 2
+        assert r'\checkedcardsecondaryheader{0}' not in source
+
     def test_genuine_empty_card_keeps_its_logical_number(self):
         source = LatexRenderer(
             cards_per_row=1, rows_per_page=1
@@ -813,6 +880,43 @@ def test_real_latex_auto_fits_before_minimum_size_overflow():
     assert without_fit.success, without_fit.log
     assert 'DIDACTIC-CARDS-AUTOFIT' not in without_fit.log
     assert 'DIDACTIC-CARDS-OVERFLOW:1:front' in without_fit.log
+
+
+@pytest.mark.integration
+def test_real_pdf_compiles_custom_typography_and_two_header_bands():
+    if not shutil.which('pdflatex'):
+        pytest.skip('pdflatex is required for typography integration test')
+
+    settings = DeckRenderSettings(
+        typography_profile='custom',
+        body_font_family='sans',
+        body_font_size='large',
+        body_font_weight='bold',
+        body_font_style='italic',
+        line_spacing='relaxed',
+        paragraph_spacing='medium',
+        header_visibility='both',
+        header_source='section',
+        header_font_family='serif',
+        header_font_style='italic',
+        secondary_header_visibility='both',
+        secondary_header_position='bottom',
+        secondary_header_source='custom',
+        secondary_header_text='Курс & группа',
+        secondary_header_font_family='mono',
+    )
+    source = LatexRenderer(
+        cards_per_row=1,
+        rows_per_page=1,
+        render_settings=settings,
+    ).render(CardDeck([Card(front='Задание', back='Ответ', section='Алгебра')]))
+
+    result = PdfLatexCompiler().compile(source)
+
+    assert result.success, result.log
+    assert 'DIDACTIC-CARDS-OVERFLOW' not in result.log
+    assert 'DIDACTIC-CARDS-HEADER-OVERFLOW' not in result.log
+    assert 'DIDACTIC-CARDS-SECONDARY-HEADER-OVERFLOW' not in result.log
 
 
 @pytest.mark.integration

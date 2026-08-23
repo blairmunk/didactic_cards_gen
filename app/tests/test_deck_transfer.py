@@ -31,6 +31,9 @@ def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
             header_visibility='both',
             header_repeat='section-start',
             section_break='new-row',
+            typography_profile='book',
+            secondary_header_visibility='both',
+            secondary_header_source='card-number',
         ),
     )
 
@@ -56,6 +59,11 @@ def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
     assert repo.get_render_settings(imported.id).header_visibility.value == 'both'
     assert repo.get_render_settings(imported.id).header_repeat.value == 'section-start'
     assert repo.get_render_settings(imported.id).section_break.value == 'new-row'
+    assert repo.get_render_settings(imported.id).typography_profile.value == 'book'
+    assert (
+        repo.get_render_settings(imported.id).secondary_header_visibility.value
+        == 'both'
+    )
 
 
 def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):

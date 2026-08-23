@@ -15,11 +15,19 @@ from ..domain.printing import (
 )
 from ..domain.rendering import (
     DeckRenderSettings,
+    FontFamily,
+    FontSize,
+    FontStyle,
+    FontWeight,
     HeaderPosition,
     HeaderRepeat,
+    HeaderSource,
     HeaderVisibility,
     HorizontalAlignment,
+    LineSpacing,
+    ParagraphSpacing,
     StylePreset,
+    TextStyle,
     VerticalAlignment,
 )
 from ..domain.trusted import (
@@ -130,6 +138,51 @@ def _card_content(text: str) -> str:
     """Возвращает экранированный текст или mbox для пустых карточек."""
     escaped = escape_latex(text) if text.strip() else ''
     return escaped if escaped else r'\mbox{}'
+
+
+def _font_command(
+    style: TextStyle,
+    points: float,
+    line_spacing: LineSpacing = LineSpacing.NORMAL,
+) -> str:
+    """Return commands assembled only from validated typography enums."""
+    family = {
+        FontFamily.SERIF: r'\rmfamily',
+        FontFamily.SANS: r'\sffamily',
+        FontFamily.MONO: r'\ttfamily',
+    }[style.family]
+    weight = {
+        FontWeight.NORMAL: r'\mdseries',
+        FontWeight.BOLD: r'\bfseries',
+    }[style.weight]
+    shape = {
+        FontStyle.UPRIGHT: r'\upshape',
+        FontStyle.ITALIC: r'\itshape',
+    }[style.style]
+    factor = {
+        LineSpacing.COMPACT: 1.05,
+        LineSpacing.NORMAL: 1.20,
+        LineSpacing.RELAXED: 1.45,
+    }[line_spacing]
+    leading = points * factor
+    return (
+        rf'\fontsize{{{points:g}pt}}{{{leading:.2f}pt}}\selectfont'
+        f'{family}{weight}{shape}'
+    )
+
+
+def _font_steps(
+    style: TextStyle,
+    line_spacing: LineSpacing = LineSpacing.NORMAL,
+) -> tuple[str, str, str, str]:
+    points = {
+        FontSize.SMALL: (10.0, 9.0, 8.0, 7.0),
+        FontSize.NORMAL: (12.0, 10.0, 9.0, 8.0),
+        FontSize.LARGE: (14.0, 12.0, 10.0, 9.0),
+    }[style.size]
+    return tuple(
+        _font_command(style, point, line_spacing) for point in points
+    )
 
 
 class LatexRenderer(DocumentRenderer):
@@ -395,17 +448,41 @@ class LatexRenderer(DocumentRenderer):
         header_alignment = horizontal_commands[
             self.render_settings.header_alignment
         ]
+        secondary_header_alignment = horizontal_commands[
+            self.render_settings.secondary_header_alignment
+        ]
         vertical_position = vertical_positions[
             self.render_settings.vertical_alignment
         ]
+        typography = self.render_settings.typography
+        if typography is None:
+            body_fonts = (
+                r'\normalsize', r'\small', r'\footnotesize', r'\scriptsize'
+            )
+            primary_header_fonts = (
+                r'\footnotesize', r'\scriptsize', r'\scriptsize', r'\scriptsize'
+            )
+            secondary_header_fonts = primary_header_fonts
+            paragraph_spacing = '0pt'
+        else:
+            body_fonts = _font_steps(
+                typography.body, typography.line_spacing
+            )
+            primary_header_fonts = _font_steps(typography.primary_header)
+            secondary_header_fonts = _font_steps(typography.secondary_header)
+            paragraph_spacing = {
+                ParagraphSpacing.NONE: '0pt',
+                ParagraphSpacing.SMALL: '2pt',
+                ParagraphSpacing.MEDIUM: '4pt',
+            }[typography.paragraph_spacing]
         if self.auto_fit:
             fit_logic = r'''
     \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
-        \setcardcontentbox{\small}{#4}{#1}{#2}%
+        \setcardcontentbox{@body-small@}{#4}{#1}{#2}%
         \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
-            \setcardcontentbox{\footnotesize}{#4}{#1}{#2}%
+            \setcardcontentbox{@body-smaller@}{#4}{#1}{#2}%
             \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
-                \setcardcontentbox{\scriptsize}{#4}{#1}{#2}%
+                \setcardcontentbox{@body-smallest@}{#4}{#1}{#2}%
                 \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
                     \typeout{DIDACTIC-CARDS-OVERFLOW:#1:#2}%
                 \else
@@ -423,6 +500,11 @@ class LatexRenderer(DocumentRenderer):
     \ifdim\dimexpr\ht\cardcontentbox+\dp\cardcontentbox\relax>#3
         \typeout{DIDACTIC-CARDS-OVERFLOW:#1:#2}%
     \fi'''
+        fit_logic = (
+            fit_logic.replace('@body-small@', body_fonts[1])
+            .replace('@body-smaller@', body_fonts[2])
+            .replace('@body-smallest@', body_fonts[3])
+        )
         return rf'''\documentclass[a4paper,12pt]{{extarticle}}
 \usepackage{{amsmath}}
 \usepackage{{amsfonts}}
@@ -450,6 +532,9 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\cardheaderheight}}{{{HEADER_HEIGHT_CM}cm}}
 \newcommand{{\cardbodyalign}}{{{body_alignment}}}
 \newcommand{{\cardheaderalign}}{{{header_alignment}}}
+\newcommand{{\cardsecondaryheaderalign}}{{{secondary_header_alignment}}}
+\newcommand{{\cardbodyfont}}{{{body_fonts[0]}}}
+\newcommand{{\cardparagraphspacing}}{{{paragraph_spacing}}}
 
 \setlength{{\fboxsep}}{{{self.fbox_sep}pt}}
 \setlength{{\fboxrule}}{{{self.fbox_rule}pt}}
@@ -471,12 +556,13 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\setcardcontentbox}}[4]{{%
     \typeout{{DIDACTIC-CARDS-HBOX-BEGIN:#3:#4:body}}%
     \setbox\cardcontentbox=\vbox{{%
-        \hsize=\cardcontentwidth #1\cardbodyalign\noindent #2\par
+        \hsize=\cardcontentwidth #1\cardbodyalign
+        \setlength{{\parskip}}{{\cardparagraphspacing}}\noindent #2\par
     }}%
     \typeout{{DIDACTIC-CARDS-HBOX-END:#3:#4:body}}%
 }}
 \newcommand{{\fitcardcontent}}[4]{{%
-    \setcardcontentbox{{\normalsize}}{{#4}}{{#1}}{{#2}}%{fit_logic}
+    \setcardcontentbox{{\cardbodyfont}}{{#4}}{{#1}}{{#2}}%{fit_logic}
 }}
 \newcommand{{\legacycheckedcardcontent}}[3]{{%
     \fitcardcontent{{#1}}{{#2}}{{\cardcontentheight}}{{#3}}%
@@ -496,9 +582,9 @@ class LatexRenderer(DocumentRenderer):
     \typeout{{DIDACTIC-CARDS-HBOX-END:#3:#4:header}}%
 }}
 \newcommand{{\checkedcardheader}}[3]{{%
-    \setcardheaderbox{{\footnotesize}}{{#3}}{{#1}}{{#2}}%
+    \setcardheaderbox{{{primary_header_fonts[0]}}}{{#3}}{{#1}}{{#2}}%
     \ifdim\dimexpr\ht\cardheaderbox+\dp\cardheaderbox\relax>\cardheaderheight
-        \setcardheaderbox{{\scriptsize}}{{#3}}{{#1}}{{#2}}%
+        \setcardheaderbox{{{primary_header_fonts[1]}}}{{#3}}{{#1}}{{#2}}%
         \ifdim\dimexpr\ht\cardheaderbox+\dp\cardheaderbox\relax>\cardheaderheight
             \typeout{{DIDACTIC-CARDS-HEADER-OVERFLOW:#1:#2}}%
         \else
@@ -507,6 +593,28 @@ class LatexRenderer(DocumentRenderer):
     \fi
     \begin{{minipage}}[t][\cardheaderheight][c]{{\cardcontentwidth}}%
         \box\cardheaderbox
+    \end{{minipage}}%
+}}
+\newbox\cardsecondaryheaderbox
+\newcommand{{\setcardsecondaryheaderbox}}[4]{{%
+    \typeout{{DIDACTIC-CARDS-HBOX-BEGIN:#3:#4:secondary-header}}%
+    \setbox\cardsecondaryheaderbox=\vbox{{%
+        \hsize=\cardcontentwidth #1\cardsecondaryheaderalign\noindent #2\par
+    }}%
+    \typeout{{DIDACTIC-CARDS-HBOX-END:#3:#4:secondary-header}}%
+}}
+\newcommand{{\checkedcardsecondaryheader}}[3]{{%
+    \setcardsecondaryheaderbox{{{secondary_header_fonts[0]}}}{{#3}}{{#1}}{{#2}}%
+    \ifdim\dimexpr\ht\cardsecondaryheaderbox+\dp\cardsecondaryheaderbox\relax>\cardheaderheight
+        \setcardsecondaryheaderbox{{{secondary_header_fonts[1]}}}{{#3}}{{#1}}{{#2}}%
+        \ifdim\dimexpr\ht\cardsecondaryheaderbox+\dp\cardsecondaryheaderbox\relax>\cardheaderheight
+            \typeout{{DIDACTIC-CARDS-SECONDARY-HEADER-OVERFLOW:#1:#2}}%
+        \else
+            \typeout{{DIDACTIC-CARDS-SECONDARY-HEADER-AUTOFIT:#1:#2:small}}%
+        \fi
+    \fi
+    \begin{{minipage}}[t][\cardheaderheight][c]{{\cardcontentwidth}}%
+        \box\cardsecondaryheaderbox
     \end{{minipage}}%
 }}
 \newcommand{{\registrationmarks}}{{%
@@ -570,8 +678,14 @@ class LatexRenderer(DocumentRenderer):
                 result += '\n'
         return result + r'\end{minipage}' + '\n'
 
-    def _header_is_visible(self, side: str, *, is_section_start: bool) -> bool:
-        visibility = self.render_settings.header_visibility
+    @staticmethod
+    def _header_is_visible(
+        side: str,
+        *,
+        visibility: HeaderVisibility,
+        repeat: HeaderRepeat,
+        is_section_start: bool,
+    ) -> bool:
         visible_on_side = visibility is HeaderVisibility.BOTH or (
             visibility is HeaderVisibility.FRONT and side == 'front'
         ) or (
@@ -579,10 +693,20 @@ class LatexRenderer(DocumentRenderer):
         )
         if not visible_on_side:
             return False
-        return (
-            self.render_settings.header_repeat is HeaderRepeat.EVERY_CARD
-            or is_section_start
-        )
+        return repeat is HeaderRepeat.EVERY_CARD or is_section_start
+
+    @staticmethod
+    def _header_content(
+        source: HeaderSource,
+        custom_text: str,
+        card: Card,
+        card_number: int,
+    ) -> str:
+        if source is HeaderSource.SECTION:
+            return _card_content(card.section)
+        if source is HeaderSource.CARD_NUMBER:
+            return _card_content(f'№ {card_number}')
+        return _card_content(custom_text)
 
     def _render_card_content(
         self,
@@ -618,6 +742,8 @@ class LatexRenderer(DocumentRenderer):
             and settings.horizontal_alignment is HorizontalAlignment.LEFT
             and settings.vertical_alignment is VerticalAlignment.TOP
             and settings.header_visibility is HeaderVisibility.NONE
+            and settings.secondary_header_visibility is HeaderVisibility.NONE
+            and settings.typography is None
         )
         content = _card_content(text)
         if legacy_layout:
@@ -626,11 +752,21 @@ class LatexRenderer(DocumentRenderer):
                 f'{{{card_number}}}{{{side}}}{{{content}}}'
             )
 
-        header_visible = self._header_is_visible(
-            side, is_section_start=is_section_start
+        header_visible = bool(card_number) and self._header_is_visible(
+            side,
+            visibility=settings.header_visibility,
+            repeat=settings.header_repeat,
+            is_section_start=is_section_start,
         )
-        reserved_height = (
-            HEADER_HEIGHT_CM + HEADER_GAP_CM if header_visible else 0.0
+        secondary_header_visible = bool(card_number) and self._header_is_visible(
+            side,
+            visibility=settings.secondary_header_visibility,
+            repeat=settings.secondary_header_repeat,
+            is_section_start=is_section_start,
+        )
+        visible_header_count = int(header_visible) + int(secondary_header_visible)
+        reserved_height = visible_header_count * (
+            HEADER_HEIGHT_CM + HEADER_GAP_CM
         )
         body_height = self.card_content_height - reserved_height
         body = (
@@ -638,17 +774,49 @@ class LatexRenderer(DocumentRenderer):
             f'{{{card_number}}}{{{side}}}{{{body_height:.6f}cm}}'
             f'{{{content}}}'
         )
-        if not header_visible:
+        if not visible_header_count:
             return body
 
-        header = (
-            r'\checkedcardheader'
-            f'{{{card_number}}}{{{side}}}{{{_card_content(card.section)}}}'
-        )
+        top_bands: list[str] = []
+        bottom_bands: list[str] = []
+        if header_visible:
+            primary_content = self._header_content(
+                settings.header_source,
+                settings.header_text,
+                card,
+                card_number,
+            )
+            header = (
+                r'\checkedcardheader'
+                f'{{{card_number}}}{{{side}}}'
+                f'{{{primary_content}}}'
+            )
+            destination = (
+                top_bands
+                if settings.header_position is HeaderPosition.TOP
+                else bottom_bands
+            )
+            destination.append(header)
+        if secondary_header_visible:
+            secondary_content = self._header_content(
+                settings.secondary_header_source,
+                settings.secondary_header_text,
+                card,
+                card_number,
+            )
+            secondary_header = (
+                r'\checkedcardsecondaryheader'
+                f'{{{card_number}}}{{{side}}}'
+                f'{{{secondary_content}}}'
+            )
+            destination = (
+                top_bands
+                if settings.secondary_header_position is HeaderPosition.TOP
+                else bottom_bands
+            )
+            destination.append(secondary_header)
         gap = (
             r'\par\nointerlineskip'
             rf'\vspace*{{{HEADER_GAP_CM}cm}}\noindent'
         )
-        if settings.header_position is HeaderPosition.TOP:
-            return header + gap + body
-        return body + gap + header
+        return gap.join([*top_bands, body, *bottom_bands])
