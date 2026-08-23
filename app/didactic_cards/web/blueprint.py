@@ -12,7 +12,7 @@ from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
 from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import CompileResult, ConcurrentModificationError
 from ..domain.printing import PrinterProfile, recommend_back_offsets
-from ..domain.rendering import DeckRenderSettings, StylePreset
+from ..domain.rendering import AuthoringMode, DeckRenderSettings, StylePreset
 from ..domain.trusted import ContentMode, PrintJobSnapshot, TrustedTemplateVersion
 
 from ..use_cases.card_use_cases import (
@@ -103,9 +103,26 @@ def _active_trusted_template(deck_id: str):
     return _trusted_service().active(deck_id)
 
 
+def _require_advanced_deck(deck_id: str):
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
+        raise DeckNotFoundError(deck_id)
+    if deck.render_settings.authoring_mode is not AuthoringMode.ADVANCED:
+        abort(404)
+    return deck
+
+
 def _print_compiler_and_template(deck_id: str):
     get_snapshot = getattr(_repo(), 'get_print_job_snapshot', None)
     snapshot = get_snapshot(deck_id) if get_snapshot is not None else None
+    settings = (
+        snapshot.render_settings
+        if snapshot is not None
+        else _repo().get_render_settings(deck_id)
+    )
+    advanced = settings.authoring_mode is AuthoringMode.ADVANCED
+    if not advanced:
+        return _compiler(), None, snapshot
     template = (
         snapshot.trusted_template
         if snapshot is not None else _active_trusted_template(deck_id)
@@ -119,8 +136,6 @@ def _print_compiler_and_template(deck_id: str):
                 cards=snapshot.cards,
                 render_settings=snapshot.render_settings,
             )
-    if template is None:
-        return _compiler(), None, snapshot
     compiler = _trusted_compiler()
     if compiler is None:
         class UnavailableTrustedCompiler:
@@ -151,7 +166,16 @@ def _deck_page_context(deck_info, card_deck, **extra):
         'print_pages': len(layout.cards) // cards_per_page,
         'empty_slots': layout.section_padding + layout.trailing_padding,
         'trusted_enabled': _trusted_enabled(),
-        'trusted_active': _active_trusted_template(deck_info.id),
+        'trusted_active': (
+            _active_trusted_template(deck_info.id)
+            if deck_info.render_settings.authoring_mode
+            is AuthoringMode.ADVANCED
+            else None
+        ),
+        'is_advanced': (
+            deck_info.render_settings.authoring_mode
+            is AuthoringMode.ADVANCED
+        ),
     }
     context.update(extra)
     return context
@@ -286,7 +310,9 @@ def _profile_back_rotation() -> int:
     return value
 
 
-def _render_settings_from_form() -> DeckRenderSettings:
+def _render_settings_from_form(
+    authoring_mode: AuthoringMode = AuthoringMode.SAFE,
+) -> DeckRenderSettings:
     preset = StylePreset(request.form.get('preset', 'centered'))
     if preset is StylePreset.LEGACY_TOP_LEFT:
         horizontal_alignment = 'left'
@@ -300,11 +326,12 @@ def _render_settings_from_form() -> DeckRenderSettings:
         )
         vertical_alignment = request.form.get('vertical_alignment', 'top')
     return DeckRenderSettings(
+        authoring_mode=authoring_mode,
         preset=preset,
         horizontal_alignment=horizontal_alignment,
         vertical_alignment=vertical_alignment,
         header_visibility=request.form.get('header_visibility', 'none'),
-        header_position=request.form.get('header_position', 'top'),
+        header_position='top',
         header_alignment=request.form.get('header_alignment', 'left'),
         header_repeat=request.form.get('header_repeat', 'every-card'),
         section_break=request.form.get('section_break', 'continuous'),
@@ -324,9 +351,7 @@ def _render_settings_from_form() -> DeckRenderSettings:
         secondary_header_visibility=request.form.get(
             'secondary_header_visibility', 'none'
         ),
-        secondary_header_position=request.form.get(
-            'secondary_header_position', 'bottom'
-        ),
+        secondary_header_position='bottom',
         secondary_header_alignment=request.form.get(
             'secondary_header_alignment', 'right'
         ),
@@ -608,7 +633,24 @@ def delete_printer_profile(key):
 def create_deck():
     name = request.form.get('name', '').strip()
     desc = request.form.get('description', '').strip()
-    CreateDeck(_repo()).execute(name, desc)
+    try:
+        mode = AuthoringMode(request.form.get('authoring_mode', 'safe'))
+    except ValueError:
+        return render_template(
+            'cards/decks.html',
+            decks=ListDecks(_repo()).execute(),
+            error='Неизвестный тип колоды.',
+        ), 400
+    if mode is AuthoringMode.ADVANCED and not _trusted_enabled():
+        return render_template(
+            'cards/decks.html',
+            decks=ListDecks(_repo()).execute(),
+            error=(
+                'Advanced-колоду нельзя создать: trusted LaTeX '
+                'выключен при запуске сервера.'
+            ),
+        ), 503
+    CreateDeck(_repo()).execute(name, desc, mode)
     return redirect(url_for('cards.decks_list'))
 
 
@@ -712,13 +754,11 @@ def _render_trusted_page(
     draft_back_mode: str | None = None,
 ):
     _trusted_service()
-    deck = GetDeckInfo(_repo()).execute(deck_id)
-    if deck is None:
-        raise DeckNotFoundError(deck_id)
+    deck = _require_advanced_deck(deck_id)
     templates = _repo().list_trusted_templates(deck_id)
     latest = templates[-1] if templates else None
     default_source = (
-        r'\centering\vfill {{ content }}\vfill'
+        r'{{ content }}'
     )
     return render_template(
         'cards/trusted_latex.html',
@@ -732,11 +772,11 @@ def _render_trusted_page(
         ),
         draft_front_mode=(
             draft_front_mode
-            or (latest.front_content_mode.value if latest else 'escaped')
+            or 'raw'
         ),
         draft_back_mode=(
             draft_back_mode
-            or (latest.back_content_mode.value if latest else 'escaped')
+            or 'raw'
         ),
         sandbox_ready=_trusted_sandbox_ready(),
         error=error,
@@ -748,12 +788,8 @@ def _trusted_draft_from_form(deck_id: str) -> TrustedTemplateVersion:
         deck_id=deck_id,
         version=1,
         source=request.form.get('source', ''),
-        front_content_mode=ContentMode(
-            request.form.get('front_content_mode', 'escaped')
-        ),
-        back_content_mode=ContentMode(
-            request.form.get('back_content_mode', 'escaped')
-        ),
+        front_content_mode=ContentMode.RAW,
+        back_content_mode=ContentMode.RAW,
     )
 
 
@@ -783,6 +819,7 @@ def trusted_latex_editor(deck_id):
 
 @cards_bp.route('/deck/<deck_id>/advanced/test', methods=['POST'])
 def test_trusted_latex(deck_id):
+    _require_advanced_deck(deck_id)
     _trusted_service()
     try:
         template = _trusted_draft_from_form(deck_id)
@@ -832,6 +869,7 @@ def test_trusted_latex(deck_id):
 
 @cards_bp.route('/deck/<deck_id>/advanced/stage', methods=['POST'])
 def stage_trusted_latex(deck_id):
+    _require_advanced_deck(deck_id)
     service = _trusted_service()
     try:
         template = _trusted_draft_from_form(deck_id)
@@ -857,6 +895,7 @@ def stage_trusted_latex(deck_id):
     '/deck/<deck_id>/advanced/<template_id>/approve', methods=['POST']
 )
 def approve_trusted_latex(deck_id, template_id):
+    _require_advanced_deck(deck_id)
     service = _trusted_service()
     if request.form.get('confirm_trusted') != 'yes':
         return _render_trusted_page(
@@ -898,6 +937,7 @@ def approve_trusted_latex(deck_id, template_id):
 
 @cards_bp.route('/deck/<deck_id>/advanced/reset', methods=['POST'])
 def reset_trusted_latex(deck_id):
+    _require_advanced_deck(deck_id)
     service = _trusted_service()
     active = service.active(deck_id)
     if active is not None:
@@ -908,7 +948,14 @@ def reset_trusted_latex(deck_id):
 @cards_bp.route('/deck/<deck_id>/render_settings', methods=['POST'])
 def update_render_settings(deck_id):
     try:
-        settings = _render_settings_from_form()
+        current = _repo().get_render_settings(deck_id)
+        if current.authoring_mode is AuthoringMode.ADVANCED:
+            return _render_deck_error(
+                deck_id,
+                'У Advanced-колоды нет встроенных настроек оформления.',
+                409,
+            )
+        settings = _render_settings_from_form(current.authoring_mode)
         UpdateDeckRenderSettings(_repo()).execute(
             deck_id,
             settings,
@@ -1143,7 +1190,11 @@ def _generate_pdf_response(
         }
         status = status_by_kind.get(result.error_kind, 500)
         message = message_by_kind.get(result.error_kind, 'Внутренняя ошибка генерации PDF.')
-        if trusted_template is not None:
+        if (
+            snapshot is not None
+            and snapshot.render_settings.authoring_mode
+            is AuthoringMode.ADVANCED
+        ):
             context = compile_error_context(result.log, card_deck)
             if context is not None:
                 number, failed_side, _card = context

@@ -5,31 +5,31 @@ JavaScript controls и фактически отрисованный Chromium UI
 
 ## Итог
 
-Все прикладные пользовательские сценарии имеют видимую точку входа. Advanced LaTeX
-остаётся закрыт deployment-флагом, но больше не исчезает бесследно: UI показывает его
-состояние, причину ограничения и точную команду включения. Сам флаг намеренно нельзя
-изменить из браузера, поскольку режим разрешает доверенный исполняемый TeX-код.
+Все прикладные сценарии имеют видимую точку входа. Колоды жёстко делятся на
+«Обычные» и «Advanced» при создании. Обычная колода показывает только safe-оформление;
+Advanced — raw TeX и необязательную общую оболочку, без встроенных шрифтов и колонтитулов.
+Deployment-флаг лишь разрешает создание/исполнение Advanced-колод и не меняет тип уже созданных.
 
 В ходе аудита исправлены три разрыва:
 
-1. При выключенном Advanced UI раньше вообще не упоминал функцию; при включённом ссылка
-   находилась только в форме оформления конкретной колоды.
+1. Advanced перенесён из смешанной панели оформления в явный неизменяемый тип колоды.
 2. Export JSON/CSV находился внутри скрытого блока генерации и поэтому исчезал у пустой
    колоды, хотя export хранит также настройки и trusted history.
-3. Backend поддерживал обновление printer profile по ключу, но в таблице был только
+3. Два произвольно перемещаемых numbered-колонтитула заменены на семантические верхний и нижний.
+4. Backend поддерживал обновление printer profile по ключу, но в таблице был только
    Delete: для изменения приходилось вручную заново вводить ключ и все значения.
 
 ## Матрица пользовательских функций
 
 | Область | Функции | Видимый вход |
 |---|---|---|
-| Главная | Создание и versioned JSON import | Отдельные формы |
+| Главная | Создание обычной/Advanced-колоды и versioned JSON import | Явный выбор типа в форме создания; import сохраняет тип |
 | Главная | Открытие, переименование, clone, delete колоды | Текстовые действия в каждой строке |
 | Главная | Printer profiles и calibration | Верхняя навигация |
 | Главная | Состояние Advanced | Статус «включён/выключен»; при выключении раскрывается команда запуска |
 | Колода | Название/описание и printer profiles | Верхняя навигация колоды |
-| Колода | Preset, выравнивание 3×3, два колонтитула, профили шрифтов/интервалов и section breaks | «Оформление карточек» |
-| Колода | Advanced template | Всегда видимый раздел: link при enabled, инструкция при disabled |
+| Обычная колода | Preset, выравнивание 3×3, верхний/нижний колонтитулы, профили шрифтов/интервалов и section breaks | «Оформление обычной колоды»; дополнительные секции свёрнуты |
+| Advanced-колода | Raw TeX каждой стороны; необязательная versioned-оболочка | Отдельная Advanced-панель; safe-оформление отсутствует |
 | Колода | Single/bulk/CSV import и read-only CSV preview | Формы добавления |
 | Колода | Table/visual preview, edit/delete, drag и keyboard reorder | Таблица/превью карточек |
 | Колода | JSON/CSV export, включая пустую колоду | Всегда видимый раздел «Данные колоды» |
@@ -37,7 +37,7 @@ JavaScript controls и фактически отрисованный Chromium UI
 | Колода | Preflight с переходом к проблемной карточке | «Проверить перед печатью» |
 | Printer profiles | Calibration PDF и calculator X/Y | Верхние формы страницы |
 | Printer profiles | Create, edit/update и delete сохранённого профиля | Текстовые действия таблицы и prefilled editor |
-| Advanced | Test compile, quarantine, history, approval и reset | Versioned Advanced editor |
+| Advanced | Direct raw print; test compile, quarantine, history, approval и reset общей оболочки | Versioned Advanced editor |
 
 ## Маршруты без отдельной страницы
 
@@ -61,8 +61,8 @@ JavaScript controls и фактически отрисованный Chromium UI
 
 ## Проверяемый контракт
 
-Regression-тест открывает непустую колоду и требует присутствия controls для оформления,
-Advanced discovery, single/bulk/CSV, edit/delete/reorder, обоих exports, всех PDF-вариантов,
+Regression-тесты отдельно открывают safe и Advanced-колоды и запрещают смешанные controls. Также покрыты
+single/bulk/CSV, edit/delete/reorder, оба export, все PDF-варианты,
 preview, preflight, reset и printer profile. Отдельные тесты проверяют disabled/enabled
 Advanced navigation, export пустой колоды и prefilled edit printer profile. Chromium E2E
 проходит реальную навигацию в Advanced editor и calibration calculator.

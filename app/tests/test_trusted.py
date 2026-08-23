@@ -194,7 +194,7 @@ def test_print_snapshot_requires_matching_approved_template():
         deck_id='deck',
         deck_version=2,
         cards=(Card(front='Q'),),
-        render_settings=DeckRenderSettings.centered(),
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
         trusted_template=approved,
     )
     assert snapshot.trusted_template.source_hash == approved.source_hash
@@ -208,6 +208,8 @@ def test_print_snapshot_requires_matching_approved_template():
         )
     with pytest.raises(ValueError, match='approved'):
         replace(snapshot, trusted_template=replace(approved, deck_id='another'))
+    with pytest.raises(ValueError, match='advanced deck'):
+        replace(snapshot, render_settings=DeckRenderSettings.centered())
 
 
 @pytest.mark.parametrize(

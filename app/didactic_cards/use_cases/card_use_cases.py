@@ -10,7 +10,7 @@ from ..domain.interfaces import (
     DocumentRenderer, PdfCompiler, CompileResult,
 )
 from ..domain.entities import Card, CardDeck
-from ..domain.rendering import DeckRenderSettings
+from ..domain.rendering import AuthoringMode, DeckRenderSettings
 from ..domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
 
 
@@ -41,7 +41,11 @@ def _configure_print_renderer(
     template: TrustedTemplateVersion | None,
 ) -> DocumentRenderer:
     configured = renderer.with_render_settings(settings)
-    return configured.with_trusted_template(template)
+    return configured.with_trusted_template(
+        template
+        if settings.authoring_mode is AuthoringMode.ADVANCED
+        else None
+    )
 
 
 class CardLimitExceeded(ValueError):

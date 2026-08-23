@@ -3,52 +3,35 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Trusted LaTeX — {{ deck.name }}</title>
+    <title>Общая TeX-оболочка — {{ deck.name }}</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
     <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
 </head>
 <body>
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> →
-        <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}">{{ deck.name }}</a> → Advanced LaTeX
+        <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}">{{ deck.name }}</a> → общая оболочка
     </div>
 
-    <h1>Advanced / trusted LaTeX</h1>
+    <h1>Необязательная общая TeX-оболочка</h1>
     <div class="warning-panel">
-        <strong>Это исполняемый TeX-код.</strong>
-        Шаблон может сломать вёрстку или исчерпать ресурсы. Приложение запускает его без сети и доступа к проекту в одноразовом sandbox, но активируйте только код, которому доверяете.
+        <strong>Сама колода уже работает в Advanced-режиме:</strong> front/back каждой карточки являются доверенным TeX-кодом и без оболочки вставляются напрямую. Эта настройка нужна только для общего повторяющегося оформления и тоже исполняется в sandbox.
     </div>
     <div class="info-panel">
         <strong>Sandbox:</strong> {{ 'готов' if sandbox_ready else 'недоступен' }}
         &nbsp;|&nbsp;
-        <strong>Режим печати:</strong>
-        {% if active %}trusted template v{{ active.version }}, SHA-256 {{ active.source_hash[:12] }}…{% else %}обычный built-in{% endif %}
+        <strong>Оболочка:</strong>
+        {% if active %}версия {{ active.version }}, SHA-256 {{ active.source_hash[:12] }}…{% else %}не используется — raw-контент вставляется напрямую{% endif %}
     </div>
     {% if error %}<div class="error-message" role="alert">{{ error }}</div>{% endif %}
 
-    <h2>Новая версия шаблона</h2>
+    <h2>Новая версия оболочки</h2>
     <div class="card-form trusted-editor">
         <form method="post">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <p>Допустимые placeholders: <code>{% raw %}{{ content }}{% endraw %}</code> (ровно один), <code>{% raw %}{{ section }}{% endraw %}</code>, <code>{% raw %}{{ card_number }}{% endraw %}</code>, <code>{% raw %}{{ side }}{% endraw %}</code>.</p>
-            <label for="trusted-source">Внутренний TeX-фрагмент карточки:</label>
+            <p><code>{% raw %}{{ content }}{% endraw %}</code> обязателен ровно один раз и обозначает raw-код конкретной стороны. Дополнительно доступны <code>{% raw %}{{ section }}{% endraw %}</code>, <code>{% raw %}{{ card_number }}{% endraw %}</code> и <code>{% raw %}{{ side }}{% endraw %}</code>.</p>
+            <label for="trusted-source">Общий TeX-фрагмент вокруг содержимого:</label>
             <textarea id="trusted-source" name="source" rows="14" spellcheck="false" required>{{ draft_source }}</textarea>
-            <div class="settings-grid">
-                <div>
-                    <label for="front-content-mode">Лицевая сторона:</label>
-                    <select id="front-content-mode" name="front_content_mode">
-                        <option value="escaped" {% if draft_front_mode == 'escaped' %}selected{% endif %}>Безопасный текст и allowlisted math</option>
-                        <option value="raw" {% if draft_front_mode == 'raw' %}selected{% endif %}>Raw trusted TeX</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="back-content-mode">Оборотная сторона:</label>
-                    <select id="back-content-mode" name="back_content_mode">
-                        <option value="escaped" {% if draft_back_mode == 'escaped' %}selected{% endif %}>Безопасный текст и allowlisted math</option>
-                        <option value="raw" {% if draft_back_mode == 'raw' %}selected{% endif %}>Raw trusted TeX</option>
-                    </select>
-                </div>
-            </div>
             <p class="preview-notice">Test compile ничего не сохраняет. «Сохранить в карантин» создаёт неизменяемую версию, но не включает её в печать.</p>
             <button type="submit" formaction="{{ url_for('cards.test_trusted_latex', deck_id=deck.id) }}" class="btn-secondary">Test compile / PDF</button>
             <button type="submit" formaction="{{ url_for('cards.stage_trusted_latex', deck_id=deck.id) }}" class="btn-primary">Сохранить в карантин</button>
@@ -62,7 +45,7 @@
         <article class="card-form trusted-version">
             <h3>Версия {{ template.version }} — {{ template.status.value }}</h3>
             <p><strong>Источник:</strong> {{ template.provenance.value }} · <strong>SHA-256:</strong> <code>{{ template.source_hash }}</code></p>
-            <p><strong>Front/back:</strong> {{ template.front_content_mode.value }} / {{ template.back_content_mode.value }} · {{ template.created_at.isoformat() }}</p>
+            <p><strong>Содержимое:</strong> raw trusted TeX · {{ template.created_at.isoformat() }}</p>
             <pre>{{ template.source }}</pre>
             {% if template.status.value != 'approved' %}
             <form action="{{ url_for('cards.approve_trusted_latex', deck_id=deck.id, template_id=template.id) }}" method="post">
@@ -83,7 +66,7 @@
     {% if active %}
     <form action="{{ url_for('cards.reset_trusted_latex', deck_id=deck.id) }}" method="post">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn-secondary">Вернуться к built-in оформлению</button>
+        <button type="submit" class="btn-secondary">Отключить оболочку и оставить raw-контент</button>
     </form>
     {% endif %}
 </body>

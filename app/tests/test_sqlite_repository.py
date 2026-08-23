@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
@@ -18,7 +19,7 @@ from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import ConcurrentModificationError
 from didactic_cards.domain.printing import PrinterProfile
 from didactic_cards.domain.rendering import DeckRenderSettings
-from didactic_cards.domain.trusted import TemplateStatus
+from didactic_cards.domain.trusted import TemplateStatus, TrustedTemplateVersion
 from didactic_cards.use_cases.trusted_template_use_cases import (
     TrustedLatexDisabledError,
     TrustedTemplateService,
@@ -283,7 +284,7 @@ def test_schema_four_adds_section_layout_settings_without_changing_behavior(
             )
         }
         assert {'header_repeat', 'section_break'} <= columns
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
 
 
 def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
@@ -299,7 +300,7 @@ def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
 
     assert migrated.list_trusted_templates(deck.id) == []
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
 
 
 def test_schema_six_adds_escaped_content_modes_without_activating_template(
@@ -350,7 +351,7 @@ def test_schema_six_adds_escaped_content_modes_without_activating_template(
     assert restored.back_content_mode.value == 'escaped'
     assert restored.status is TemplateStatus.QUARANTINED
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
 
 
 def test_schema_seven_adds_disabled_typography_without_changing_output(tmp_path):
@@ -372,7 +373,44 @@ def test_schema_seven_adds_disabled_typography_without_changing_output(tmp_path)
             )
         }
         assert 'typography_json' in columns
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 8
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
+
+
+def test_schema_eight_separates_safe_and_approved_advanced_decks(tmp_path):
+    data_dir = tmp_path / 'schema-eight'
+    repository = SqliteRepository(data_dir)
+    safe = repository.create_deck('Safe')
+    advanced = repository.create_deck('Previously approved')
+    template = repository.quarantine_trusted_template(
+        advanced.id, '{{ content }}'
+    )
+    repository.approve_trusted_template(advanced.id, template.id)
+    with closing(repository._connect()) as connection:
+        for deck in (safe, advanced):
+            row = connection.execute(
+                'SELECT typography_json FROM deck_render_settings '
+                'WHERE deck_id = ?',
+                (deck.id,),
+            ).fetchone()
+            payload = json.loads(row['typography_json'])
+            payload.pop('authoring_mode', None)
+            payload['secondary_header_position'] = 'top'
+            connection.execute(
+                'UPDATE deck_render_settings '
+                "SET header_position = 'bottom', typography_json = ? "
+                'WHERE deck_id = ?',
+                (json.dumps(payload), deck.id),
+            )
+        connection.execute('PRAGMA user_version = 8')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+
+    assert migrated.get_render_settings(safe.id).authoring_mode.value == 'safe'
+    settings = migrated.get_render_settings(advanced.id)
+    assert settings.authoring_mode.value == 'advanced'
+    assert settings.header_position.value == 'top'
+    assert settings.secondary_header_position.value == 'bottom'
 
 
 def test_deck_and_ordered_card_round_trip(sqlite_repo):
@@ -488,7 +526,10 @@ def test_trusted_templates_are_versioned_quarantined_and_explicitly_approved(
 
 
 def test_cloned_trusted_history_never_inherits_approval(sqlite_repo):
-    source = sqlite_repo.create_deck('Source')
+    source = sqlite_repo.create_deck(
+        'Source',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
     template = sqlite_repo.quarantine_trusted_template(
         source.id, '{{ content }}'
     )
@@ -504,16 +545,55 @@ def test_cloned_trusted_history_never_inherits_approval(sqlite_repo):
     assert sqlite_repo.get_approved_trusted_template(clone.id) is None
 
 
+def test_safe_clone_does_not_copy_stale_trusted_history(sqlite_repo):
+    source = sqlite_repo.create_deck('Safe source')
+    sqlite_repo.quarantine_trusted_template(source.id, '{{ content }}')
+
+    clone = sqlite_repo.clone_deck(source.id)
+
+    assert clone.render_settings.authoring_mode.value == 'safe'
+    assert sqlite_repo.list_trusted_templates(clone.id) == []
+
+
+def test_atomic_trusted_import_requires_advanced_settings(sqlite_repo):
+    template = TrustedTemplateVersion(
+        deck_id='source', source='{{ content }}', version=1
+    )
+
+    with pytest.raises(ValueError, match='advanced deck'):
+        sqlite_repo.create_deck_with_cards_and_trusted(
+            'Wrong mode',
+            '',
+            None,
+            CardDeck(),
+            DeckRenderSettings.centered(),
+            (template,),
+        )
+
+    assert sqlite_repo.list_decks() == []
+
+
 def test_trusted_service_denies_every_operation_until_feature_is_enabled(
     sqlite_repo,
 ):
-    deck = sqlite_repo.create_deck('Disabled')
+    deck = sqlite_repo.create_deck(
+        'Disabled',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
     disabled = TrustedTemplateService(sqlite_repo)
     with pytest.raises(TrustedLatexDisabledError):
         disabled.stage_local(deck.id, '{{ content }}')
 
     enabled = TrustedTemplateService(sqlite_repo, enabled=True)
+    with pytest.raises(ValueError, match='must be raw'):
+        enabled.stage_local(
+            deck.id,
+            '{{ content }}',
+            front_content_mode='escaped',
+        )
     staged = enabled.stage_local(deck.id, '{{ content }}')
+    assert staged.front_content_mode.value == 'raw'
+    assert staged.back_content_mode.value == 'raw'
     assert enabled.active(deck.id) is None
     assert enabled.approve(deck.id, staged.id).status is TemplateStatus.APPROVED
     assert enabled.active(deck.id).id == staged.id
@@ -565,7 +645,8 @@ def test_trusted_service_flag_must_be_boolean(sqlite_repo):
 def test_print_job_snapshot_is_one_consistent_deck_style_template_read(
     sqlite_repo,
 ):
-    deck = sqlite_repo.create_deck('Snapshot')
+    settings = DeckRenderSettings(authoring_mode='advanced')
+    deck = sqlite_repo.create_deck('Snapshot', render_settings=settings)
     card = Card(front='Q', back='A')
     sqlite_repo.save_cards(deck.id, CardDeck([card]))
     template = sqlite_repo.quarantine_trusted_template(
@@ -578,7 +659,7 @@ def test_print_job_snapshot_is_one_consistent_deck_style_template_read(
     assert snapshot.deck_id == deck.id
     assert snapshot.deck_version == sqlite_repo.get_deck(deck.id).version
     assert [item.id for item in snapshot.cards] == [card.id]
-    assert snapshot.render_settings == DeckRenderSettings.centered()
+    assert snapshot.render_settings == settings
     assert snapshot.trusted_template.id == template.id
     assert snapshot.trusted_template.back_content_mode.value == 'raw'
 

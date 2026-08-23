@@ -10,7 +10,7 @@
     <title>{{ deck.name }} — Карточки</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
     <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
-    <script>
+    {% if not is_advanced %}<script>
     window.MathJax = {
         tex: {
             inlineMath:  [['$', '$'], ['\$', '\$']],
@@ -20,8 +20,10 @@
     };
     </script>
     <script id="MathJax-script" src="{{ url_for('cards.static', filename='vendor/mathjax/tex-mml-chtml.js') }}" async></script>
+    {% endif %}
 </head>
 <body data-deck-id="{{ deck.id }}" data-deck-version="{{ deck.version }}" data-cards-per-page="{{ cards_per_page }}"
+      data-authoring-mode="{{ deck.render_settings.authoring_mode.value }}"
       data-horizontal-alignment="{{ deck.render_settings.horizontal_alignment.value }}"
       data-vertical-alignment="{{ deck.render_settings.vertical_alignment.value }}"
       data-header-visibility="{{ deck.render_settings.header_visibility.value }}"
@@ -36,7 +38,7 @@
       data-secondary-header-source="{{ deck.render_settings.secondary_header_source.value }}"
       data-secondary-header-text="{{ deck.render_settings.secondary_header_text }}"
       data-section-break="{{ deck.render_settings.section_break.value }}"
-      class="align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }} secondary-header-align-{{ deck.render_settings.secondary_header_alignment.value }}{% if typography %} typography-enabled body-family-{{ typography.body.family.value }} body-size-{{ typography.body.size.value }} body-weight-{{ typography.body.weight.value }} body-style-{{ typography.body.style.value }} line-spacing-{{ typography.line_spacing.value }} primary-family-{{ typography.primary_header.family.value }} primary-size-{{ typography.primary_header.size.value }} primary-weight-{{ typography.primary_header.weight.value }} primary-style-{{ typography.primary_header.style.value }} secondary-family-{{ typography.secondary_header.family.value }} secondary-size-{{ typography.secondary_header.size.value }} secondary-weight-{{ typography.secondary_header.weight.value }} secondary-style-{{ typography.secondary_header.style.value }}{% endif %}">
+      class="{% if not is_advanced %}align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }} secondary-header-align-{{ deck.render_settings.secondary_header_alignment.value }}{% if typography %} typography-enabled body-family-{{ typography.body.family.value }} body-size-{{ typography.body.size.value }} body-weight-{{ typography.body.weight.value }} body-style-{{ typography.body.style.value }} line-spacing-{{ typography.line_spacing.value }} primary-family-{{ typography.primary_header.family.value }} primary-size-{{ typography.primary_header.size.value }} primary-weight-{{ typography.primary_header.weight.value }} primary-style-{{ typography.primary_header.style.value }} secondary-family-{{ typography.secondary_header.family.value }} secondary-size-{{ typography.secondary_header.size.value }} secondary-weight-{{ typography.secondary_header.weight.value }} secondary-style-{{ typography.secondary_header.style.value }}{% endif %}{% endif %}">
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> → {{ deck.name }}
     </div>
@@ -48,7 +50,7 @@
     <nav class="app-navigation" aria-label="Инструменты колоды">
         <a href="{{ url_for('cards.edit_deck', deck_id=deck.id) }}">Редактировать название и описание</a>
         <a href="{{ url_for('cards.printer_profiles') }}">Профили принтеров</a>
-        <a href="#advanced-mode">Advanced LaTeX: {{ 'включён' if trusted_enabled else 'выключен' }}</a>
+        <span class="feature-status {% if is_advanced %}feature-disabled{% else %}feature-enabled{% endif %}">{{ 'Advanced-колода' if is_advanced else 'Обычная колода' }}</span>
     </nav>
 
     {% if error %}
@@ -56,7 +58,7 @@
     {% endif %}
 
     <div class="success-message" id="success-msg"></div>
-    <div id="math-status" class="status-message" role="status" aria-live="polite">Загрузка формул…</div>
+    <div id="math-status" class="status-message" role="status" aria-live="polite">{{ 'HTML-превью показывает TeX-исходник' if is_advanced else 'Загрузка формул…' }}</div>
 
     <!-- Информационная панель -->
     <div class="info-panel">
@@ -68,7 +70,8 @@
         <span id="empty-count">{{ empty_slots }}</span>
     </div>
 
-    <h2>Оформление карточек</h2>
+    {% if not is_advanced %}
+    <h2>Оформление обычной колоды</h2>
     <div class="card-form render-settings-panel">
         <form action="{{ url_for('cards.update_render_settings', deck_id=deck.id) }}" method="post" id="render-settings-form">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -99,36 +102,6 @@
                     </select>
                 </div>
                 <div>
-                    <label for="header-visibility">Колонтитул 1:</label>
-                    <select name="header_visibility" id="header-visibility">
-                        {% for value, label in [('none', 'Не показывать'), ('front', 'Только на лицах'), ('back', 'Только на оборотах'), ('both', 'На обеих сторонах')] %}
-                        <option value="{{ value }}" {% if deck.render_settings.header_visibility.value == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div>
-                    <label for="header-position">Колонтитул 1 — положение:</label>
-                    <select name="header_position" id="header-position">
-                        <option value="top" {% if deck.render_settings.header_position.value == 'top' %}selected{% endif %}>Сверху</option>
-                        <option value="bottom" {% if deck.render_settings.header_position.value == 'bottom' %}selected{% endif %}>Снизу</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="header-alignment">Колонтитул 1 — выравнивание:</label>
-                    <select name="header_alignment" id="header-alignment">
-                        {% for value, label in [('left', 'Слева'), ('center', 'По центру'), ('right', 'Справа')] %}
-                        <option value="{{ value }}" {% if deck.render_settings.header_alignment.value == value %}selected{% endif %}>{{ label }}</option>
-                        {% endfor %}
-                    </select>
-                </div>
-                <div>
-                    <label for="header-repeat">Колонтитул 1 — повтор:</label>
-                    <select name="header_repeat" id="header-repeat">
-                        <option value="every-card" {% if deck.render_settings.header_repeat.value == 'every-card' %}selected{% endif %}>На каждой карточке</option>
-                        <option value="section-start" {% if deck.render_settings.header_repeat.value == 'section-start' %}selected{% endif %}>Только в начале секции</option>
-                    </select>
-                </div>
-                <div>
                     <label for="section-break">Новая секция начинается:</label>
                     <select name="section_break" id="section-break">
                         <option value="continuous" {% if deck.render_settings.section_break.value == 'continuous' %}selected{% endif %}>Со следующей карточки</option>
@@ -137,7 +110,7 @@
                     </select>
                 </div>
             </div>
-            <details class="typography-settings" open>
+            <details class="typography-settings">
                 <summary><strong>Шрифты и типографика (безопасный слой)</strong></summary>
                 <p class="preview-notice">Профиль «Выключено» сохраняет прежние команды LaTeX. Готовые профили задают шрифты целиком; «Настроить вручную» открывает отдельные параметры. Содержимое карточки не становится LaTeX-кодом.</p>
                 <div class="settings-grid">
@@ -182,8 +155,11 @@
                 </div>
             </details>
             <details class="typography-settings">
-                <summary><strong>Колонтитул 1: содержимое и шрифт</strong></summary>
+                <summary><strong>Верхний колонтитул: содержимое и шрифт</strong></summary>
                 <div class="settings-grid">
+                    <div><label for="header-visibility">Показывать:</label><select name="header_visibility" id="header-visibility">{% for value, label in [('none', 'Не показывать'), ('front', 'Только на лицах'), ('back', 'Только на оборотах'), ('both', 'На обеих сторонах')] %}<option value="{{ value }}" {% if deck.render_settings.header_visibility.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+                    <div><label for="header-alignment">Выравнивание:</label><select name="header_alignment" id="header-alignment">{% for value, label in [('left', 'Слева'), ('center', 'По центру'), ('right', 'Справа')] %}<option value="{{ value }}" {% if deck.render_settings.header_alignment.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+                    <div><label for="header-repeat">Повтор:</label><select name="header_repeat" id="header-repeat"><option value="every-card" {% if deck.render_settings.header_repeat.value == 'every-card' %}selected{% endif %}>На каждой карточке</option><option value="section-start" {% if deck.render_settings.header_repeat.value == 'section-start' %}selected{% endif %}>Только в начале секции</option></select></div>
                     <div><label for="header-source">Источник:</label><select name="header_source" id="header-source">{% for value, label in [('section', 'Секция карточки'), ('card-number', 'Номер карточки'), ('custom', 'Постоянный текст')] %}<option value="{{ value }}" {% if deck.render_settings.header_source.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
                     <div><label for="header-text">Постоянный текст:</label><input type="text" maxlength="200" name="header_text" id="header-text" value="{{ deck.render_settings.header_text }}"></div>
                     <div><label for="header-font-family">Шрифт:</label><select name="header_font_family" id="header-font-family">{% for value, label in [('serif', 'С засечками'), ('sans', 'Без засечек'), ('mono', 'Моноширинный')] %}<option value="{{ value }}" {% if deck.render_settings.header_font_family.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
@@ -193,10 +169,9 @@
                 </div>
             </details>
             <details class="typography-settings">
-                <summary><strong>Колонтитул 2</strong></summary>
+                <summary><strong>Нижний колонтитул</strong></summary>
                 <div class="settings-grid">
                     <div><label for="secondary-header-visibility">Показывать:</label><select name="secondary_header_visibility" id="secondary-header-visibility">{% for value, label in [('none', 'Не показывать'), ('front', 'Только на лицах'), ('back', 'Только на оборотах'), ('both', 'На обеих сторонах')] %}<option value="{{ value }}" {% if deck.render_settings.secondary_header_visibility.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
-                    <div><label for="secondary-header-position">Положение:</label><select name="secondary_header_position" id="secondary-header-position"><option value="top" {% if deck.render_settings.secondary_header_position.value == 'top' %}selected{% endif %}>Сверху</option><option value="bottom" {% if deck.render_settings.secondary_header_position.value == 'bottom' %}selected{% endif %}>Снизу</option></select></div>
                     <div><label for="secondary-header-alignment">Выравнивание:</label><select name="secondary_header_alignment" id="secondary-header-alignment">{% for value, label in [('left', 'Слева'), ('center', 'По центру'), ('right', 'Справа')] %}<option value="{{ value }}" {% if deck.render_settings.secondary_header_alignment.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
                     <div><label for="secondary-header-repeat">Повтор:</label><select name="secondary_header_repeat" id="secondary-header-repeat"><option value="every-card" {% if deck.render_settings.secondary_header_repeat.value == 'every-card' %}selected{% endif %}>На каждой карточке</option><option value="section-start" {% if deck.render_settings.secondary_header_repeat.value == 'section-start' %}selected{% endif %}>Только в начале секции</option></select></div>
                     <div><label for="secondary-header-source">Источник:</label><select name="secondary_header_source" id="secondary-header-source">{% for value, label in [('section', 'Секция карточки'), ('card-number', 'Номер карточки'), ('custom', 'Постоянный текст')] %}<option value="{{ value }}" {% if deck.render_settings.secondary_header_source.value == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
@@ -211,26 +186,29 @@
             <button type="submit" class="btn-primary">Сохранить оформление</button>
         </form>
     </div>
+    {% endif %}
 
-    <h2 id="advanced-mode">Advanced / trusted LaTeX</h2>
+    {% if is_advanced %}
+    <h2 id="advanced-mode">Advanced-колода</h2>
     <div class="card-form advanced-entry {% if trusted_enabled %}feature-enabled-panel{% else %}feature-disabled-panel{% endif %}">
         {% if trusted_enabled %}
         <p>
-            Режим разрешён при запуске сервера.
+            Содержимое лицевой и оборотной стороны печатается как доверенный TeX-код без встроенной типографики и колонтитулов.
             {% if trusted_active %}
-            Сейчас печать использует approved-шаблон v{{ trusted_active.version }}.
+            Дополнительно применяется общая оболочка v{{ trusted_active.version }}.
             {% else %}
-            Сейчас используется обычное built-in оформление; сохранение шаблона само по себе его не активирует.
+            Общая оболочка не задана: код каждой стороны вставляется напрямую.
             {% endif %}
         </p>
-        <a href="{{ url_for('cards.trusted_latex_editor', deck_id=deck.id) }}" class="btn-warning">Открыть редактор Advanced LaTeX</a>
+        <a href="{{ url_for('cards.trusted_latex_editor', deck_id=deck.id) }}" class="btn-warning">Настроить необязательную общую оболочку</a>
         {% else %}
-        <p><strong>Режим выключен при запуске сервера.</strong> Это не переключатель колоды: браузер намеренно не может включить исполнение доверенного TeX-кода.</p>
+        <p><strong>Печать этой Advanced-колоды заблокирована:</strong> trusted LaTeX выключен при запуске сервера.</p>
         <p>Для локального запуска установите <code>bubblewrap</code> и перезапустите приложение:</p>
         <pre><code>DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true python app/run.py</code></pre>
         <p class="preview-notice">Для Gunicorn задайте ту же переменную перед командой запуска. После этого здесь появится ссылка на versioned editor с test compile, quarantine и approval.</p>
         {% endif %}
     </div>
+    {% endif %}
 
     <!-- Добавление одной карточки -->
     <h2>Добавить карточку</h2>
@@ -242,12 +220,12 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label for="front">Лицевая сторона (задание):</label>
-                    <textarea name="front" id="front" placeholder="Текст задания..."></textarea>
+                <label for="front">Лицевая сторона ({{ 'trusted TeX' if is_advanced else 'задание' }}):</label>
+                    <textarea name="front" id="front" placeholder="{{ 'TeX-код лицевой стороны...' if is_advanced else 'Текст задания...' }}"></textarea>
                 </div>
                 <div class="form-group">
-                    <label for="back">Оборотная сторона (решение):</label>
-                    <textarea name="back" id="back" placeholder="Текст решения..."></textarea>
+                    <label for="back">Оборотная сторона ({{ 'trusted TeX' if is_advanced else 'решение' }}):</label>
+                    <textarea name="back" id="back" placeholder="{{ 'TeX-код оборотной стороны...' if is_advanced else 'Текст решения...' }}"></textarea>
                 </div>
             </div>
             <button type="submit" class="btn-primary">➕ Добавить карточку</button>
@@ -296,6 +274,7 @@
     <!-- Карточки -->
     {% if cards %}
     <h2>Добавленные карточки</h2>
+    {% if is_advanced %}<p class="preview-notice">Визуальное HTML-превью показывает исходный TeX как текст. Результат Advanced-кода проверяйте через PDF-превью.</p>{% endif %}
 
     <div class="view-toggle">
         <button id="btn-view-table" class="active" aria-pressed="true" onclick="switchView('table')">📋 Таблица</button>
@@ -345,19 +324,19 @@
                 </span>
                 <div class="preview-card-inner">
                     <div class="preview-side preview-front">
-                        {% if deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
-                        {% if deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
-                        <div class="preview-content">{{ card.front }}</div>
-                        {% if deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
-                        {% if deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
+                        {% if not is_advanced and deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
+                        {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
+                        <div class="preview-content{% if is_advanced %} advanced-source-preview{% endif %}">{{ card.front }}</div>
+                        {% if not is_advanced and deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
+                        {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
                         <span class="preview-side-label">задание</span>
                     </div>
                     <div class="preview-side preview-back">
-                        {% if deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
-                        {% if deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
-                        <div class="preview-content">{{ card.back }}</div>
-                        {% if deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
-                        {% if deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
+                        {% if not is_advanced and deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
+                        {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
+                        <div class="preview-content{% if is_advanced %} advanced-source-preview{% endif %}">{{ card.back }}</div>
+                        {% if not is_advanced and deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
+                        {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
                         <span class="preview-side-label">решение</span>
                     </div>
                 </div>

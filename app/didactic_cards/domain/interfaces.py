@@ -55,7 +55,12 @@ class DeckRepository(ABC):
         ...
 
     @abstractmethod
-    def create_deck(self, name: str, description: str = '') -> Deck:
+    def create_deck(
+        self,
+        name: str,
+        description: str = '',
+        render_settings: DeckRenderSettings | None = None,
+    ) -> Deck:
         ...
 
     @abstractmethod

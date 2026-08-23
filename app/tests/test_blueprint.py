@@ -43,7 +43,10 @@ def _enable_trusted(app, tmp_path, *, compiler=None):
     app.config['REPO'] = repository
     app.config['TRUSTED_LATEX_ENABLED'] = True
     app.config['TRUSTED_COMPILER'] = compiler or RecordingTrustedCompiler()
-    deck = repository.create_deck('Advanced')
+    deck = repository.create_deck(
+        'Advanced',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
     repository.save_cards(
         deck.id, CardDeck([Card(front='10% safe', back=r'\textbf{raw}')])
     )
@@ -79,7 +82,7 @@ def test_deck_crud_pages(client, repo):
     assert repo.get_deck(deck.id) is None
 
 
-def test_empty_deck_ui_exposes_data_export_and_advanced_discovery(
+def test_empty_safe_deck_ui_exposes_data_export_without_advanced_controls(
     client, deck_id
 ):
     page = client.get(f'/deck/{deck_id}')
@@ -87,9 +90,8 @@ def test_empty_deck_ui_exposes_data_export_and_advanced_discovery(
     assert page.status_code == 200
     assert f'/deck/{deck_id}/export.json' in page.text
     assert f'/deck/{deck_id}/export.csv' in page.text
-    assert 'Advanced / trusted LaTeX' in page.text
-    assert 'Режим выключен при запуске сервера' in page.text
-    assert 'DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true' in page.text
+    assert 'Обычная колода' in page.text
+    assert 'Advanced-колода' not in page.text
 
 
 def test_home_explains_disabled_advanced_mode(client):
@@ -98,6 +100,81 @@ def test_home_explains_disabled_advanced_mode(client):
     assert page.status_code == 200
     assert 'Advanced LaTeX выключен — как включить' in page.text
     assert 'DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true' in page.text
+    assert 'value="advanced" disabled' in page.text
+
+
+def test_create_deck_rejects_unknown_authoring_mode(client, repo):
+    response = client.post(
+        '/create_deck', data={'name': 'Wrong', 'authoring_mode': 'mixed'}
+    )
+
+    assert response.status_code == 400
+    assert 'Неизвестный тип колоды' in response.text
+    assert repo.list_decks() == []
+
+
+def test_deck_type_is_chosen_at_creation_and_not_mixed_in_ui(
+    client, app, tmp_path
+):
+    repository = SqliteRepository(tmp_path / 'deck-types')
+    app.config['REPO'] = repository
+    blocked = client.post(
+        '/create_deck',
+        data={'name': 'Blocked advanced', 'authoring_mode': 'advanced'},
+    )
+    assert blocked.status_code == 503
+    assert repository.list_decks() == []
+
+    app.config['TRUSTED_LATEX_ENABLED'] = True
+    app.config['TRUSTED_COMPILER'] = RecordingTrustedCompiler()
+    created = client.post(
+        '/create_deck',
+        data={'name': 'Raw cards', 'authoring_mode': 'advanced'},
+    )
+    assert created.status_code == 302
+    deck = repository.list_decks()[0]
+    assert deck.render_settings.authoring_mode.value == 'advanced'
+
+    page = client.get(f'/deck/{deck.id}')
+    assert 'Advanced-колода' in page.text
+    assert 'Оформление обычной колоды' not in page.text
+    assert 'Сохранить оформление' not in page.text
+    assert 'необязательную общую оболочку' in page.text
+    assert 'MathJax-script' not in page.text
+    assert 'preview-header' not in page.text
+
+
+def test_advanced_without_wrapper_prints_raw_only_in_sandbox(
+    client, app, tmp_path
+):
+    compiler = RecordingTrustedCompiler()
+    repository, deck = _enable_trusted(app, tmp_path, compiler=compiler)
+    app.config['RENDERER'] = LatexRenderer()
+
+    generated = client.post(f'/deck/{deck.id}/generate')
+
+    assert generated.status_code == 200
+    assert generated.data == b'%PDF trusted'
+    assert compiler.sources
+    assert r'\textbf{raw}' in compiler.sources[-1]
+    assert r'\textbackslash{}textbf' not in compiler.sources[-1]
+    assert app.config['COMPILER'].sources == []
+
+
+def test_advanced_deck_rejects_builtin_render_settings_form(
+    client, app, tmp_path
+):
+    repository, deck = _enable_trusted(app, tmp_path)
+
+    response = client.post(
+        f'/deck/{deck.id}/render_settings',
+        data={'version': deck.version, 'preset': 'legacy-top-left'},
+    )
+
+    assert response.status_code == 409
+    assert repository.get_render_settings(deck.id).authoring_mode.value == (
+        'advanced'
+    )
 
 
 def test_deck_page_exposes_all_user_facing_workflows(client, app, deck_id):
@@ -112,7 +189,6 @@ def test_deck_page_exposes_all_user_facing_workflows(client, app, deck_id):
 
     expected_controls = (
         'Сохранить оформление',
-        'Advanced / trusted LaTeX',
         'Добавить карточку',
         'Пакетное добавление',
         'Проверить файл',
@@ -388,7 +464,7 @@ def test_render_settings_form_is_versioned_and_updates_preview_contract(
     assert repo.get_deck(deck_id).version == initial.version + 1
     updated_page = client.get(f'/deck/{deck_id}')
     assert 'data-horizontal-alignment="right"' in updated_page.text
-    assert 'data-header-position="bottom"' in updated_page.text
+    assert 'data-header-position="top"' in updated_page.text
     assert 'data-header-repeat="section-start"' in updated_page.text
     assert 'data-section-break="new-sheet"' in updated_page.text
 
@@ -1271,9 +1347,35 @@ def test_advanced_routes_stay_locked_but_ui_explains_deployment_flag(
     deck_page = client.get(f'/deck/{deck_id}')
 
     assert response.status_code == 404
-    assert 'Advanced / trusted LaTeX' in deck_page.text
-    assert 'Режим выключен при запуске сервера' in deck_page.text
+    assert 'Обычная колода' in deck_page.text
+    assert 'Advanced-колода' not in deck_page.text
     assert f'href="/deck/{deck_id}/advanced"' not in deck_page.text
+
+
+def test_safe_deck_rejects_every_direct_advanced_post(client, app, tmp_path):
+    repository = SqliteRepository(tmp_path / 'safe-route-boundary')
+    app.config.update(
+        REPO=repository,
+        TRUSTED_LATEX_ENABLED=True,
+        TRUSTED_COMPILER=RecordingTrustedCompiler(),
+    )
+    deck = repository.create_deck('Safe')
+
+    tested = client.post(
+        f'/deck/{deck.id}/advanced/test', data={'source': '{{ content }}'}
+    )
+    staged = client.post(
+        f'/deck/{deck.id}/advanced/stage', data={'source': '{{ content }}'}
+    )
+    approved = client.post(
+        f'/deck/{deck.id}/advanced/missing/approve',
+        data={'confirm_trusted': 'yes'},
+    )
+    reset = client.post(f'/deck/{deck.id}/advanced/reset')
+
+    assert {tested.status_code, staged.status_code, approved.status_code,
+            reset.status_code} == {404}
+    assert repository.list_trusted_templates(deck.id) == []
 
 
 def test_trusted_editor_stages_modes_without_activation(
@@ -1283,10 +1385,11 @@ def test_trusted_editor_stages_modes_without_activation(
 
     page = client.get(f'/deck/{deck.id}')
     assert page.status_code == 200
-    assert 'Advanced / trusted LaTeX' in page.text
+    assert 'Advanced-колода' in page.text
+    assert 'Оформление обычной колоды' not in page.text
     assert f'href="/deck/{deck.id}/advanced"' in page.text
     home = client.get('/')
-    assert 'Advanced LaTeX включён' in home.text
+    assert 'Можно создавать отдельные Advanced-колоды' in home.text
     assert f'href="/deck/{deck.id}/advanced"' in home.text
 
     staged = client.post(
@@ -1302,7 +1405,7 @@ def test_trusted_editor_stages_modes_without_activation(
     history = repository.list_trusted_templates(deck.id)
     assert len(history) == 1
     assert history[0].status is TemplateStatus.QUARANTINED
-    assert history[0].front_content_mode.value == 'escaped'
+    assert history[0].front_content_mode.value == 'raw'
     assert history[0].back_content_mode.value == 'raw'
     assert repository.get_approved_trusted_template(deck.id) is None
 

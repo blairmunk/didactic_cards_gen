@@ -1,6 +1,7 @@
 document.addEventListener('DOMContentLoaded', function() {
 
     const DECK_ID = document.body.dataset.deckId;
+    const IS_ADVANCED = document.body.dataset.authoringMode === 'advanced';
     let deckVersion = parseInt(document.body.dataset.deckVersion, 10);
     const CARDS_PER_PAGE = parseInt(document.body.dataset.cardsPerPage) || 8;
     const API = {
@@ -28,7 +29,7 @@ document.addEventListener('DOMContentLoaded', function() {
         document.getElementById('btn-view-table').setAttribute('aria-pressed', view === 'table');
         document.getElementById('btn-view-preview').setAttribute('aria-pressed', view === 'preview');
 
-        if (view === 'preview' && !mathjaxRendered) {
+        if (!IS_ADVANCED && view === 'preview' && !mathjaxRendered) {
             mathjaxRendered = true;
             if (window.MathJax && MathJax.typesetPromise) {
                 MathJax.typesetPromise([document.getElementById('preview-grid')]);
@@ -206,6 +207,7 @@ document.addEventListener('DOMContentLoaded', function() {
             return customText || '';
         }
         function headerHtml(prefix, side, position) {
+            if (IS_ADVANCED) return '';
             const dataPrefix = prefix === 'primary' ? 'header' : 'secondaryHeader';
             const visibility = document.body.dataset[dataPrefix + 'Visibility'];
             const configuredPosition = document.body.dataset[dataPrefix + 'Position'];
@@ -223,7 +225,9 @@ document.addEventListener('DOMContentLoaded', function() {
             return '<div class="preview-side preview-' + side + '">' +
                 headerHtml('primary', side, 'top') +
                 headerHtml('secondary', side, 'top') +
-                '<div class="preview-content">' + escapeHtml(content) + '</div>' +
+                '<div class="preview-content' +
+                (IS_ADVANCED ? ' advanced-source-preview' : '') +
+                '">' + escapeHtml(content) + '</div>' +
                 headerHtml('primary', side, 'bottom') +
                 headerHtml('secondary', side, 'bottom') +
                 '<span class="preview-side-label">' + label + '</span>' +
@@ -243,7 +247,7 @@ document.addEventListener('DOMContentLoaded', function() {
         attachDeleteEvent(div.querySelector('.delete-btn'));
         renumberPreviews();
 
-        if (mathjaxRendered && window.MathJax && MathJax.typesetPromise) {
+        if (!IS_ADVANCED && mathjaxRendered && window.MathJax && MathJax.typesetPromise) {
             MathJax.typesetPromise([div]);
         }
     }

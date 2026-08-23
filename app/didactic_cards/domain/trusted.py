@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from enum import Enum
 
 from .entities import Card
-from .rendering import DeckRenderSettings
+from .rendering import AuthoringMode, DeckRenderSettings
 
 
 MAX_TRUSTED_TEMPLATE_BYTES = 64 * 1024
@@ -221,3 +221,10 @@ class PrintJobSnapshot:
             or self.trusted_template.status is not TemplateStatus.APPROVED
         ):
             raise ValueError('print snapshot template must be approved for deck')
+        if (
+            self.trusted_template is not None
+            and self.render_settings.authoring_mode is not AuthoringMode.ADVANCED
+        ):
+            raise ValueError(
+                'print snapshot template requires an advanced deck'
+            )

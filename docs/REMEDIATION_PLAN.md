@@ -34,7 +34,7 @@
   - [x] Corrupt/missing/invalid JSON останавливает запись и даёт безопасную HTTP-ошибку.
   - [x] Устранены stale `card_ids`, orphan writes и потеря ancestry при clone.
   - [x] Добавлены schema version 1, read-only startup integrity report и управляемое CLI-восстановление backup с сохранением `.broken-*`.
-  - [x] Активное хранилище мигрировано в SQLite schema 8 с FK, WAL, транзакциями, одноразовым backup/import legacy JSON, профилями принтера, секциями, presentation/typography settings и trusted template quarantine/content modes.
+  - [x] Активное хранилище мигрировано в SQLite schema 9 с FK, WAL, транзакциями, одноразовым backup/import legacy JSON, профилями принтера, секциями, authoring mode, presentation/typography settings и trusted template quarantine.
   - [x] Карточные HTML/API операции переведены с индексов на UUID; deck version даёт HTTP 409 при stale mutation.
 - [ ] Этап 4: импорт и web UX.
   - [x] Bulk использует exact `||` и документированное escaping.
@@ -66,6 +66,7 @@
   - [x] Добавлены повтор колонтитула на каждой карточке/только при смене секции и физические section breaks: continuous/new row/new sheet до duplex permutation.
   - [x] Добавлен закрытый по умолчанию trusted foundation: feature flag, schema 6 quarantine/provenance, строгий job protocol и изолированный bubblewrap compiler worker.
   - [x] Этап 6.5: advanced UI, escaped/raw для каждой стороны, test compile, история/approval/reset, schema 7, JSON export schema 4 и immutable print snapshot подключены к sandbox-печати.
+  - [x] Этап 6.8: колоды жёстко разделены на safe/advanced; Advanced всегда печатает raw в sandbox, а versioned-оболочка необязательна. Safe UI содержит только верхний/нижний колонтитулы и allowlisted-оформление; schema 9/export schema 6 сохраняют тип.
   - [x] Программная подготовка 6.6: UI-калькулятор учитывает знаки long-edge/short-edge, опубликованы измеримые критерии и протокол automatic/manual прогонов.
   - [ ] Физическая часть 6.6: заполнить `PHYSICAL_PRINT_ACCEPTANCE.md` по реальным отпечаткам и записать модель принтера/остаточные отклонения.
 - [x] Production runtime.
@@ -96,7 +97,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 541 проходящий тест, 0 `xfail`, включая browser E2E; общий branch coverage составляет 98,61% при обязательном CI-пороге 98%. Chromium-сценарий проверяет навигацию, настройки оформления/секционирования, focus/scroll preflight, trusted quarantine/approval/PDF и calibration UI. Физический прогон на реальном принтере ещё обязателен: PDF/raster-проверка и калькулятор не моделируют driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 554 проходящих теста, 0 `xfail`, включая browser E2E; branch coverage 98,38% при обязательном CI-пороге 98%. Chromium-сценарий проверяет раздельные safe/Advanced-колоды, direct raw-печать, оболочку, focus/scroll preflight и calibration UI. Физический прогон на реальном принтере ещё обязателен: PDF/raster-проверка и калькулятор не моделируют driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -231,7 +232,7 @@
 1. [x] Config-defined и сохраняемые SQLite-профили, выбор на print job, двухстраничный калибровочный PDF и web workflow с X/Y offsets. Фактические значения пользователь получает по пяти парам мишеней и контрольному отрезку 100 мм.
 2. Выбор формата A4/Letter, ориентации, сетки, внешнего размера карточки, margins/gaps/bleed/safe area.
 3. [x] Двусторонний PDF и два отдельных файла front/back для принтеров без duplex. Раздельные документы сохраняют одинаковую нумерацию физических листов, back permutation и калибровочные offsets; unit, HTTP и реальный `pdflatex` page-count test проходят.
-4. [x] Импорт/экспорт колоды обновлён до versioned JSON schema 4 и UTF-8-BOM CSV с секцией; schema 1–3 и двухколоночный CSV обратно совместимы. Schema 4 переносит trusted source/history без статуса approval: импорт создаёт `imported/quarantined` версии в той же SQLite-транзакции, что deck/cards. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
+4. [x] Импорт/экспорт колоды обновлён до versioned JSON schema 6 и UTF-8-BOM CSV с секцией; schema 1–5 и двухколоночный CSV обратно совместимы. Schema 6 сохраняет authoring mode; trusted history всегда импортируется как Advanced + `imported/quarantined`, без approval. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
 5. 🟡 Шаблоны оформления: ✅ безопасные профили шрифта/размера/начертания/интервалов и два колонтитула выполнены; фон, изображения и QR остаются после отдельной security-модели.
 6. [x] Auto-fit и preflight: 12pt → small → footnotesize → scriptsize, адресный vertical/horizontal overflow, missing glyphs, unsupported formulas и printable-area warning. Результат получает focus и прокручивается в видимую область; layout-only `Overfull hbox` игнорируется. Silent clipping отклонён как риск потери текста.
 7. Поиск, теги, массовое редактирование, undo/trash вместо немедленного удаления.
@@ -292,8 +293,9 @@ Definition of Done для релиза двусторонней печати:
 | ~~**P1 `FEAT-SECTION-001`**~~ ✅ | Одного поля `Card.section` было недостаточно для реального секционирования печатной колоды: название всегда повторялось, а новая тема не могла начаться с физической строки или листа. | Выполнено: `header_repeat=every-card/section-start` и `section_break=continuous/new-row/new-sheet` сохранены в schema 5/export schema 3. Пустые slots добавляются в доменной физической раскладке до duplex permutation. | Unit-матрица проверяет row/sheet padding и оба flip modes; реальный четырёхстраничный PDF сохраняет пары `front-1/back-1/front-2/back-2`; E2E проверяет сохранение настроек и скрытие повторного header. |
 | **P2 `BUG-OBS-002`** | Калибровочный route вызывает compiler напрямую и не пишет унифицированное структурированное событие `pdf_compilation` с duration/result, используемое для обычной печати. | Провести calibration job через общий сервис/observability wrapper без логирования содержимого или внутренних путей. | Success, validation, timeout и compiler failure дают одинаково коррелируемые безопасные события. |
 | ~~**P2 `BUG-DATA-006`**~~ ✅ | У доменной модели и SQLite schema 3 не было секции карточки и versioned render settings колоды. JSON schema 1 и CSV сохраняли только прежнее представление. | Выполнено: schema 4 хранит `Card.section` и отдельные safe `DeckRenderSettings`; JSON schema 2 и CSV с `section;front;back` сохраняют их, а schema 1/две колонки остаются совместимыми. Каждая запись настроек увеличивает `deck.version`. | Migration 3→4 назначает существующим колодам `legacy-top-left`; новые получают `centered`; SQLite/JSON clone, JSON round-trip, CSV и stale-version tests проходят. |
-| ~~**P1 `BUG-SEC-004` при наивной реализации**~~ ✅ | Простое отключение escaping для advanced возвращает возможность `\input`, `\openout`, закрытия app-owned environments, бесконечных макросов и resource exhaustion. | Выполнено: raw/escaped выбираются только в feature-gated versioned template; approval требует успешный sandbox test compile и согласие. Bubblewrap исключает сеть, secrets и host/project mounts; действуют resource/output limits. | Hostile fixtures и реальный trusted PDF проходят; при недоступном namespace/readiness activation и печать fail closed; built-in не изменён. |
-| ~~**P1 `FEAT-TYPOGRAPHY-001`**~~ ✅ | Обычный режим не позволял выбрать шрифт, размер, начертание и интервалы; был только один колонтитул из секции. Наивное оборачивание содержимого пользовательской TeX-директивой могло бы смешать safe и trusted semantics. | Выполнено: отдельный allowlisted typography profile (`off/book/sans-large/compact/custom`), renderer-owned локальные font-команды и два независимых fixed bands. У каждого колонтитула есть side/position/alignment/repeat/source/style; custom text экранируется. Approved Advanced полностью обходит built-in слой. SQLite schema 8/JSON schema 5 сохраняют настройки с legacy default `off`. | Unit/domain/web/storage/export tests проверяют allowlist и round-trip; реальный `pdflatex` собирает custom body + обе полосы без overflow; padding не получает номер; UI показывает все controls. |
+| ~~**P1 `BUG-SEC-004` при наивной реализации**~~ ✅ | Простое отключение escaping для advanced возвращает возможность `\input`, `\openout`, закрытия app-owned environments, бесконечных макросов и resource exhaustion. | Выполнено: raw доступен только в отдельной feature-gated Advanced-колоде, которая всегда компилируется sandbox worker и fail closed. Bubblewrap исключает сеть, secrets и host/project mounts; действуют resource/output limits. Общая оболочка дополнительно требует quarantine/test/approval. | Hostile fixtures, direct raw и raw с оболочкой проходят в sandbox; при недоступном namespace/readiness Advanced-печать блокируется. |
+| ~~**P1 `FEAT-TYPOGRAPHY-001`**~~ ✅ | Обычный режим не позволял выбрать шрифт, размер, начертание и интервалы; был только один колонтитул из секции. Наивное оборачивание содержимого пользовательской TeX-директивой могло бы смешать safe и trusted semantics. | Выполнено: allowlisted-профили `off/book/sans-large/compact/custom`, renderer-owned font-команды и две фиксированные семантические полосы: верхняя и нижняя. У каждой есть side/alignment/repeat/source/style; custom text экранируется. Любая Advanced-колода обходит built-in слой независимо от наличия оболочки. SQLite schema 9/JSON schema 6 сохраняют тип и настройки. | Unit/domain/web/storage/export tests проверяют allowlist, fixed positions, жёсткую границу режимов и round-trip; реальный `pdflatex` собирает custom body + обе полосы без overflow. |
+| ~~**P1 `BUG-UX-ADV-001`**~~ ✅ | Safe/Advanced были переключателем одной колоды; built-in controls оставались рядом, а raw зависел от approved-шаблона. | Выполнено: immutable `authoring_mode` выбирается при создании; Advanced raw-содержимое не требует оболочки, а safe-слой не попадает в UI/HTML/PDF. Advanced всегда маршрутизируется в sandbox и fail closed. | Миграция 8→9, export/import/clone, route boundary, renderer source, immutable snapshot и Chromium E2E покрывают оба типа и direct raw-печать. |
 
 Дополнительный долг, который следует закрыть вместе с этапом:
 
@@ -319,14 +321,13 @@ Definition of Done для релиза двусторонней печати:
 - trusted template source/version/hash хранится отдельно от безопасных полей, чтобы его нельзя было случайно активировать обычным импортом;
 - существующие колоды получают явный preset `legacy-top-left`, чтобы миграция не изменила уже отлаженную печать; для новых колод рекомендуемый default — `centered`.
 
-JSON export schema 5 сохраняет section, safe render settings, типографику, оба колонтитула и trusted source/history без approval; schema 1–4 импортируются с совместимыми defaults. SQLite schema 8 хранит расширение оформления в валидируемом JSON-поле, не смешивая его с trusted source. Импортированный trusted-код всегда получает `imported/quarantined` и требует локального test compile + approval. CSV совместим с `front;back` и дополнительно принимает/выдаёт `section;front;back`, но никогда не содержит исполняемый шаблон.
+JSON export schema 6 сохраняет `authoring_mode`, section, safe render settings и trusted source/history без approval; schema 1–5 импортируются с совместимыми defaults. SQLite schema 9 хранит тип в валидируемом JSON-поле и не смешивает safe settings с trusted source. Импортированный trusted-код делает колоду Advanced, всегда получает `imported/quarantined` и требует локального approval только для оболочки. CSV переносит `section;front;back`, но не тип или оболочку.
 
 ### 7.4. Фича: колонтитулы и секционирование
 
-✅ Реализованы два независимых колонтитула. Каждый строится из семантического `Card.section`, логического номера или экранированного постоянного текста, но не из произвольного TeX. Базовые настройки:
+✅ Реализованы верхний и нижний колонтитулы. Каждый строится из семантического `Card.section`, логического номера или экранированного постоянного текста, но не из произвольного TeX. Положение не выбирается: верхний всегда сверху, нижний всегда снизу. Остальные настройки:
 
 - показывать: нигде / только front / только back / с обеих сторон;
-- положение: верх или низ;
 - независимые выравнивание, семейство/размер/начертание шрифта;
 - повторять значение на каждой карточке либо показывать только при смене секции;
 - ✅ `section_break`: без разрыва / с новой строки сетки / с нового листа.
@@ -347,17 +348,17 @@ JSON export schema 5 сохраняет section, safe render settings, типо�
 
 ### 7.6. Фича: advanced / trusted LaTeX
 
-Рекомендуются два явно разных режима, а не одна настройка «экранировать / не экранировать»:
+Реализованы два явно разных и неизменяемых типа колоды, а не одна настройка «экранировать / не экранировать»:
 
 1. `built_in` — обычный безопасный текст, allowlisted math, семантические колонтитулы и настройки оформления. Это default и единственный режим для неавторизованного/network deployment.
-2. `trusted_template` — для локального доверенного автора. Приложение всё ещё владеет документом, страницей, внешним cut box и duplex geometry, а пользователь управляет только внутренним фрагментом карточки.
+2. `advanced` — для локального доверенного автора. Front/back всегда вставляются как raw TeX в app-owned область карточки. Приложение владеет документом, A4-страницей, cut box и duplex geometry.
 
-Чтобы восстановить возможности первой версии без копирования оформления в каждую карточку, trusted mode включает:
+Чтобы не копировать одинаковое оформление в каждую карточку, Advanced дополнительно предлагает необязательную общую оболочку:
 
 - шаблон внутренней области колоды с точными placeholders `{{ content }}`, `{{ section }}`, `{{ card_number }}`, `{{ side }}`;
-- отдельный выбор интерпретации front/back как escaped text или raw trusted fragment;
+- raw-интерпретацию `{{ content }}` без escaped/raw selector;
 - test compile на примерной карточке, PDF-preview, понятную привязку TeX error к card/side;
-- историю версий, reset к built-in preset и показ hash активного шаблона.
+- историю версий, отключение оболочки с возвратом к direct raw и показ hash активной версии.
 
 Placeholder substitution выполняется собственным строгим заменителем, а не полноценным Jinja внутри TeX. На первом этапе запрещены custom document class, preamble и произвольное подключение пакетов. Raw preview в HTML всегда экранирует исходник; MathJax не выдаётся за preview произвольного TeX — эталоном служит только PDF из sandbox.
 
@@ -366,6 +367,8 @@ Sandbox-контракт: отдельный непривилегированн�
 **Выполнено в 6.4.** Deployment flag закрыт по умолчанию и не создаёт UI/routes. SQLite schema 6 хранит source/hash/provenance/status отдельно от безопасного JSON export; каждое новое значение сначала `quarantined`, approval явный, предыдущая активная версия отзывается, а clone никогда не наследует trust. Placeholder-язык допускает только точные `{{ content }}`, `{{ section }}`, `{{ card_number }}`, `{{ side }}` и требует ровно один `content`. Immutable job protocol фиксирует schema, UUID, source и SHA-256. Dedicated compiler запускает TeX через `bubblewrap --unshare-all --clearenv` с единственным writable job-dir, tmpfs `/tmp`, read-only runtime, `-no-shell-escape` и resource limits; readiness выполняет реальную namespace-пробу и закрывается при отказе. Hostile tests проверяют чтение `/etc`/проекта, host-write, `\write18`, рекурсию/timeout, output cap и очистку. CI устанавливает `bubblewrap` для обязательного интеграционного прогона.
 
 **Выполнено в 6.5.** Feature-gated UI редактирует внутренний fragment с точными placeholders и независимыми escaped/raw front/back. Test compile не пишет данные; сохранение создаёт quarantined version; approval требует checkbox, повторную успешную sandbox-компиляцию и readiness. История показывает status/provenance/hash, reset отзывает active. Print/preflight/LaTeX preview используют один SQLite snapshot карточек, настроек, deck version и approved template; ошибка привязана к card/side без log leak. JSON schema 4 переносит source/provenance только в карантин. Chromium E2E проходит полный UI-путь.
+
+**Исправлено в 6.8.** Модель 6.5 с escaped/raw selector внутри одной колоды признана смешанной и заменена на immutable `safe|advanced`. Advanced печатает raw и без approved-оболочки; оболочка осталась необязательным versioned-удобством. UI, renderer, compiler routing и snapshot invariant не допускают смешивания. Schema 8→9 бережно классифицирует существующие колоды.
 
 ### 7.7. Обязательная тестовая матрица
 
@@ -407,8 +410,9 @@ Sandbox-контракт: отдельный непривилегированн�
 3. **6.2 — built-in presentation:** ✅ безопасные presets, 3×3 alignment, header/footer band, раздельный overflow и единый HTML/PDF semantic contract выполнены.
 4. **6.3 — секционирование:** ✅ bulk section, повтор колонтитула на каждой карточке/только при смене и физические row/sheet breaks выполнены; preflight показывает добавленные пустые slots, а schema 4→5 сохраняет прежнее поведение.
 5. **6.4 — trusted infrastructure:** ✅ feature flag, schema 6 quarantine/provenance, job protocol, namespace readiness и sandbox worker с hostile test suite выполнены без выпуска UI.
-6. **6.5 — advanced UX:** ✅ редактор шаблона, raw/escaped content switch, test compile/PDF, history/approval/reset, immutable print snapshot, quarantined JSON schema 4 и документация рисков выполнены.
+6. **6.5 — advanced UX (исторический этап):** ✅ редактор, test compile/PDF, history/approval/reset, immutable print snapshot и карантин выполнены; смешанный raw/escaped selector затем удалён в 6.8.
 7. **6.6 — физическая приёмка:** 🟡 калькулятор компенсации, критерии и воспроизводимый акт подготовлены; остаётся минимум один реальный duplex-принтер в обоих flip modes и ручная подача с измерением пяти мишеней после калибровки.
-8. **6.7 — safe typography:** ✅ профили `off/book/sans-large/compact/custom`, ручные font/size/weight/style/line/paragraph controls, два independently configured header/footer bands, HTML-preview, schema 8 и JSON schema 5 выполнены. Настройки являются allowlisted значениями; custom text экранируется; approved Advanced не получает ни одной built-in оболочки.
+8. **6.7 — safe typography:** ✅ профили `off/book/sans-large/compact/custom`, ручные font/size/weight/style/line/paragraph controls и две фиксированные полосы колонтитулов выполнены. Настройки allowlisted, custom text экранируется; hard split итогово сохраняется в schema 9/JSON schema 6.
+9. **6.8 — hard mode split:** ✅ `authoring_mode`, direct raw Advanced, optional shared wrapper, fixed upper/lower headers, schema 9/JSON schema 6, safe/advanced UI separation, migration и sandbox-only compiler routing выполнены.
 
-Программные критерии этапов 6.0–6.5 и 6.7 выполнены. Следующий обязательный печатный инкремент — 6.6: физическая приёмка на реальном duplex-принтере в обоих flip modes и при ручной подаче; это нельзя достоверно заменить программным тестом.
+Программные критерии этапов 6.0–6.5, 6.7 и 6.8 выполнены. Следующий обязательный печатный инкремент — 6.6: физическая приёмка на реальном duplex-принтере в обоих flip modes и при ручной подаче; это нельзя достоверно заменить программным тестом.

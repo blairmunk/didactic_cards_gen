@@ -1,6 +1,6 @@
 from ..domain.interfaces import DeckRepository
 from ..domain.entities import Deck
-from ..domain.rendering import DeckRenderSettings
+from ..domain.rendering import AuthoringMode, DeckRenderSettings
 
 from typing import Optional
 
@@ -25,9 +25,15 @@ class CreateDeck:
     def __init__(self, repo: DeckRepository):
         self.repo = repo
 
-    def execute(self, name: str, description: str = '') -> Deck:
+    def execute(
+        self,
+        name: str,
+        description: str = '',
+        authoring_mode: AuthoringMode | str = AuthoringMode.SAFE,
+    ) -> Deck:
         name = name.strip() or 'Новая колода'
-        return self.repo.create_deck(name, description)
+        settings = DeckRenderSettings(authoring_mode=authoring_mode)
+        return self.repo.create_deck(name, description, settings)
 
 
 class UpdateDeck:

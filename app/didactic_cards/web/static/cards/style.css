@@ -193,6 +193,28 @@ button:hover, .btn:hover,
     background: #eee;
 }
 
+.deck-mode-choice {
+    margin: 0 0 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid #d8dde3;
+    border-radius: 6px;
+}
+
+.deck-mode-choice label {
+    margin: 0.4rem 0;
+}
+
+.advanced-source-preview {
+    align-items: flex-start !important;
+    justify-content: flex-start !important;
+    overflow: auto;
+    white-space: pre-wrap;
+    text-align: left !important;
+    font-family: monospace !important;
+    font-style: normal !important;
+    font-weight: normal !important;
+}
+
 .preview-notice {
     color: #555;
     font-size: 0.9rem;

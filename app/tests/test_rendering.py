@@ -21,6 +21,17 @@ def test_render_settings_centered_and_legacy_presets_are_explicit():
     assert legacy.preset.value == 'legacy-top-left'
     assert legacy.horizontal_alignment.value == 'left'
     assert legacy.vertical_alignment.value == 'top'
+    assert centered.authoring_mode.value == 'safe'
+
+
+def test_header_slots_are_always_top_and_bottom():
+    settings = DeckRenderSettings(
+        header_position='bottom',
+        secondary_header_position='top',
+    )
+
+    assert settings.header_position.value == 'top'
+    assert settings.secondary_header_position.value == 'bottom'
 
 
 def test_render_settings_round_trip_preserves_safe_header_options():
@@ -85,6 +96,7 @@ def test_two_headers_and_typography_round_trip_as_allowlisted_values():
     'kwargs',
     [
         {'preset': 'unknown'},
+        {'authoring_mode': 'mixed'},
         {'horizontal_alignment': 'justify'},
         {'vertical_alignment': 'middle-ish'},
         {'header_visibility': 'sometimes'},

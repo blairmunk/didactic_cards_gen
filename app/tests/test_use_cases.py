@@ -420,7 +420,7 @@ def test_generate_uses_immutable_snapshot_without_rereading_repository(
         deck_id=deck_id,
         deck_version=7,
         cards=(Card(front='snapshot Q', back='snapshot A'),),
-        render_settings=DeckRenderSettings.centered(),
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
         trusted_template=template,
     )
 

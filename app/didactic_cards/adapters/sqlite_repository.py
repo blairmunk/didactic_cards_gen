@@ -14,7 +14,7 @@ from ..domain.interfaces import (
     DeckRepository,
 )
 from ..domain.printing import PrinterProfile
-from ..domain.rendering import DeckRenderSettings
+from ..domain.rendering import AuthoringMode, DeckRenderSettings
 from ..domain.trusted import (
     ContentMode,
     PrintJobSnapshot,
@@ -26,7 +26,7 @@ from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 8
+SQLITE_SCHEMA_VERSION = 9
 
 
 class LegacyMigrationError(ValueError):
@@ -74,7 +74,9 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _initialize_database(self) -> None:
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {0, 1, 2, 3, 4, 5, 6, 7, SQLITE_SCHEMA_VERSION}:
+            if version not in {
+                0, 1, 2, 3, 4, 5, 6, 7, 8, SQLITE_SCHEMA_VERSION
+            }:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
@@ -274,6 +276,36 @@ class SqliteRepository(DeckRepository, CardRepository):
                         ADD COLUMN {column} TEXT NOT NULL DEFAULT 'escaped'
                             CHECK ({column} IN ('escaped', 'raw'))
                         """
+                    )
+            if 0 < version < 9:
+                approved_deck_ids = {
+                    row['deck_id'] for row in connection.execute(
+                        "SELECT deck_id FROM trusted_templates "
+                        "WHERE status = 'approved'"
+                    )
+                }
+                rows = connection.execute(
+                    'SELECT deck_id, typography_json '
+                    'FROM deck_render_settings'
+                ).fetchall()
+                for row in rows:
+                    typography_data = json.loads(row['typography_json'])
+                    typography_data['authoring_mode'] = (
+                        'advanced'
+                        if row['deck_id'] in approved_deck_ids
+                        else 'safe'
+                    )
+                    typography_data['secondary_header_position'] = 'bottom'
+                    connection.execute(
+                        '''
+                        UPDATE deck_render_settings
+                        SET header_position = 'top', typography_json = ?
+                        WHERE deck_id = ?
+                        ''',
+                        (
+                            json.dumps(typography_data, ensure_ascii=False),
+                            row['deck_id'],
+                        ),
                     )
             if version < SQLITE_SCHEMA_VERSION:
                 connection.execute(f'PRAGMA user_version = {SQLITE_SCHEMA_VERSION}')
@@ -653,8 +685,17 @@ class SqliteRepository(DeckRepository, CardRepository):
         with self._transaction() as connection:
             return self._get_deck(connection, deck_id)
 
-    def create_deck(self, name: str, description: str = '') -> Deck:
-        deck = Deck(name=name, description=description)
+    def create_deck(
+        self,
+        name: str,
+        description: str = '',
+        render_settings: DeckRenderSettings | None = None,
+    ) -> Deck:
+        deck = Deck(
+            name=name,
+            description=description,
+            render_settings=render_settings or DeckRenderSettings.centered(),
+        )
         with self._transaction(write=True) as connection:
             self._insert_deck(connection, deck)
         return deck
@@ -706,13 +747,18 @@ class SqliteRepository(DeckRepository, CardRepository):
             )
             self._insert_deck(connection, clone)
             self._replace_cards(connection, clone.id, cloned_cards)
-            template_rows = connection.execute(
-                '''
-                SELECT * FROM trusted_templates
-                WHERE deck_id = ? ORDER BY version
-                ''',
-                (source.id,),
-            ).fetchall()
+            template_rows = (
+                connection.execute(
+                    '''
+                    SELECT * FROM trusted_templates
+                    WHERE deck_id = ? ORDER BY version
+                    ''',
+                    (source.id,),
+                ).fetchall()
+                if source.render_settings.authoring_mode
+                is AuthoringMode.ADVANCED
+                else []
+            )
             for version, row in enumerate(template_rows, start=1):
                 self._insert_trusted_template(
                     connection,
@@ -761,6 +807,10 @@ class SqliteRepository(DeckRepository, CardRepository):
         render_settings: DeckRenderSettings,
         trusted_templates: tuple[TrustedTemplateVersion, ...],
     ) -> Deck:
+        if render_settings.authoring_mode is not AuthoringMode.ADVANCED:
+            raise ValueError(
+                'trusted template import requires an advanced deck'
+            )
         deck = Deck(
             name=name,
             description=description,
@@ -1079,7 +1129,12 @@ class SqliteRepository(DeckRepository, CardRepository):
                 render_settings=deck.render_settings,
                 trusted_template=(
                     self._trusted_template_from_row(template_row)
-                    if template_row else None
+                    if (
+                        template_row
+                        and deck.render_settings.authoring_mode
+                        is AuthoringMode.ADVANCED
+                    )
+                    else None
                 ),
             )
 

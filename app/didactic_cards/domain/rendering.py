@@ -10,6 +10,11 @@ class StylePreset(str, Enum):
     CUSTOM = 'custom'
 
 
+class AuthoringMode(str, Enum):
+    SAFE = 'safe'
+    ADVANCED = 'advanced'
+
+
 class HorizontalAlignment(str, Enum):
     LEFT = 'left'
     CENTER = 'center'
@@ -158,10 +163,12 @@ class DeckRenderSettings:
     """Safe, serializable presentation choices owned by one deck.
 
     Every value is an allow-listed token. No field accepts a LaTeX command.
-    Typography is a separate layer: ``off`` preserves the historic renderer,
-    while an approved trusted template bypasses this object in the renderer.
+    Typography is a separate layer: ``off`` preserves the historic renderer.
+    ``advanced`` keeps the physical deck geometry but bypasses every built-in
+    presentation choice, with or without an approved shared wrapper.
     """
 
+    authoring_mode: AuthoringMode | str = AuthoringMode.SAFE
     preset: StylePreset | str = StylePreset.CENTERED
     horizontal_alignment: HorizontalAlignment | str = HorizontalAlignment.CENTER
     vertical_alignment: VerticalAlignment | str = VerticalAlignment.CENTER
@@ -196,6 +203,7 @@ class DeckRenderSettings:
 
     def __post_init__(self) -> None:
         enum_fields = {
+            'authoring_mode': AuthoringMode,
             'preset': StylePreset,
             'horizontal_alignment': HorizontalAlignment,
             'vertical_alignment': VerticalAlignment,
@@ -233,6 +241,11 @@ class DeckRenderSettings:
                 )
         except ValueError as error:
             raise ValueError(f'unsupported deck render setting: {error}') from error
+        # These are semantic slots, not freely movable numbered bands.
+        object.__setattr__(self, 'header_position', HeaderPosition.TOP)
+        object.__setattr__(
+            self, 'secondary_header_position', HeaderPosition.BOTTOM
+        )
         for field_name in ('header_text', 'secondary_header_text'):
             value = getattr(self, field_name)
             if not isinstance(value, str):

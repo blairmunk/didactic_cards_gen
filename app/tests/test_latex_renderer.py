@@ -30,16 +30,18 @@ def test_trusted_template_replaces_builtin_body_and_keeps_context_typed():
         back_content_mode='raw',
     )
     renderer = LatexRenderer(
-        cards_per_row=1, rows_per_page=1
+        cards_per_row=1,
+        rows_per_page=1,
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
     ).with_trusted_template(template)
 
     latex = renderer.render(CardDeck([Card(
-        front='Цена 10% & итог',
+        front=r'\textit{RAW FRONT}',
         back=r'\textbf{RAW}',
         section='A&B',
     )]))
 
-    assert r'A\&B / 1 / front: Цена 10\% \& итог' in latex
+    assert r'A\&B / 1 / front: \textit{RAW FRONT}' in latex
     assert r'A\&B / 1 / back: \textbf{RAW}' in latex
     assert r'\checkedcardheader{1}' not in latex
     assert 'DIDACTIC-CARDS-HBOX-BEGIN:1:front:body' in latex
@@ -47,7 +49,11 @@ def test_trusted_template_replaces_builtin_body_and_keeps_context_typed():
 
 
 def test_trusted_template_is_copy_configured_and_padding_stays_blank():
-    base = LatexRenderer(cards_per_row=2, rows_per_page=1)
+    base = LatexRenderer(
+        cards_per_row=2,
+        rows_per_page=1,
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
     template = TrustedTemplateVersion(
         deck_id='deck', version=1, source='MARK {{ content }}'
     )
@@ -63,6 +69,36 @@ def test_trusted_template_is_copy_configured_and_padding_stays_blank():
         LatexRenderer(trusted_template='bad')
     with pytest.raises(TypeError, match='TrustedTemplateVersion'):
         base.with_trusted_template('bad')
+
+
+def test_advanced_deck_renders_raw_content_without_optional_wrapper():
+    source = LatexRenderer(
+        cards_per_row=1,
+        rows_per_page=1,
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    ).render(CardDeck([Card(
+        front=r'\vfill\centering RAW \textbf{front}\vfill',
+        back=r'\hfill RAW BACK',
+    )]))
+
+    assert r'\vfill\centering RAW \textbf{front}\vfill' in source
+    assert r'\hfill RAW BACK' in source
+    assert r'\textbackslash{}vfill' not in source
+
+
+def test_safe_deck_ignores_trusted_wrapper_even_if_passed_by_caller():
+    template = TrustedTemplateVersion(
+        deck_id='deck', version=1, source='WRAPPER {{ content }}'
+    )
+    source = LatexRenderer(
+        cards_per_row=1,
+        rows_per_page=1,
+        render_settings=DeckRenderSettings(authoring_mode='safe'),
+        trusted_template=template,
+    ).render_fronts(CardDeck([Card(front=r'\input{/etc/passwd}')]))
+
+    assert 'WRAPPER' not in source
+    assert r'\textbackslash{}input' in source
 
 
 def _card_measurement_log(log: str) -> str:
@@ -299,14 +335,16 @@ class TestLatexRenderer:
             render_settings=DeckRenderSettings(
                 preset='custom',
                 header_visibility='both',
-                header_position='bottom',
+                secondary_header_visibility='both',
+                secondary_header_position='bottom',
+                secondary_header_source='section',
             ),
             cards_per_row=1,
             rows_per_page=1,
         ).render_fronts(deck)
         card_source = bottom.split(r'\begin{document}', 1)[1]
         assert card_source.index(r'\checkedcardcontent') < card_source.index(
-            r'\checkedcardheader'
+            r'\checkedcardsecondaryheader'
         )
 
     def test_header_can_be_rendered_only_at_each_section_start(self):

@@ -2,6 +2,7 @@
     {%- if source.value == 'section' -%}{{ card.section }}{%- elif source.value == 'card-number' -%}№ {{ number }}{%- else -%}{{ custom_text }}{%- endif -%}
 {%- endmacro %}
 {% set typography = deck.render_settings.typography %}
+{% set is_advanced = deck.render_settings.authoring_mode.value == 'advanced' %}
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -10,7 +11,7 @@
     <title>Редактирование карточки</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
     <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
-    <script>
+    {% if not is_advanced %}<script>
     window.MathJax = {
         tex: {
             inlineMath:  [['$', '$'], ['\$', '\$']],
@@ -20,6 +21,7 @@
     };
     </script>
     <script id="MathJax-script" src="{{ url_for('cards.static', filename='vendor/mathjax/tex-mml-chtml.js') }}" async></script>
+    {% endif %}
 </head>
 <body data-horizontal-alignment="{{ deck.render_settings.horizontal_alignment.value }}"
       data-vertical-alignment="{{ deck.render_settings.vertical_alignment.value }}"
@@ -31,8 +33,8 @@
       data-section-break="{{ deck.render_settings.section_break.value }}"
       data-previous-section="{{ previous_section if previous_section is not none else '' }}"
       data-first-card="{{ 'true' if previous_section is none else 'false' }}"
-      class="align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }} secondary-header-align-{{ deck.render_settings.secondary_header_alignment.value }}{% if typography %} typography-enabled body-family-{{ typography.body.family.value }} body-size-{{ typography.body.size.value }} body-weight-{{ typography.body.weight.value }} body-style-{{ typography.body.style.value }} line-spacing-{{ typography.line_spacing.value }} primary-family-{{ typography.primary_header.family.value }} primary-size-{{ typography.primary_header.size.value }} primary-weight-{{ typography.primary_header.weight.value }} primary-style-{{ typography.primary_header.style.value }} secondary-family-{{ typography.secondary_header.family.value }} secondary-size-{{ typography.secondary_header.size.value }} secondary-weight-{{ typography.secondary_header.weight.value }} secondary-style-{{ typography.secondary_header.style.value }}{% endif %}">
-    <div id="math-status" class="status-message" role="status" aria-live="polite">Загрузка формул…</div>
+      class="{% if not is_advanced %}align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }} secondary-header-align-{{ deck.render_settings.secondary_header_alignment.value }}{% if typography %} typography-enabled body-family-{{ typography.body.family.value }} body-size-{{ typography.body.size.value }} body-weight-{{ typography.body.weight.value }} body-style-{{ typography.body.style.value }} line-spacing-{{ typography.line_spacing.value }} primary-family-{{ typography.primary_header.family.value }} primary-size-{{ typography.primary_header.size.value }} primary-weight-{{ typography.primary_header.weight.value }} primary-style-{{ typography.primary_header.style.value }} secondary-family-{{ typography.secondary_header.family.value }} secondary-size-{{ typography.secondary_header.size.value }} secondary-weight-{{ typography.secondary_header.weight.value }} secondary-style-{{ typography.secondary_header.style.value }}{% endif %}{% endif %}">
+    <div id="math-status" class="status-message" role="status" aria-live="polite">{{ 'HTML-превью показывает TeX-исходник' if is_advanced else 'Загрузка формул…' }}</div>
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> →
         <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}">{{ deck.name }}</a> →
@@ -40,6 +42,8 @@
     </div>
 
     <h1>✏️ Редактирование карточки #{{ index + 1 }}</h1>
+
+    {% if is_advanced %}<div class="warning-panel">Это Advanced-колода: обе стороны являются доверенным TeX-кодом. HTML ниже показывает исходник; точный результат смотрите в PDF-превью.</div>{% endif %}
 
     <div class="card-form">
         <form method="post">
@@ -51,11 +55,11 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
-                    <label for="front">Лицевая сторона:</label>
+                    <label for="front">Лицевая сторона{{ ' — trusted TeX' if is_advanced else '' }}:</label>
                     <textarea id="front" name="front">{{ card.front }}</textarea>
                 </div>
                 <div class="form-group">
-                    <label for="back">Обратная сторона:</label>
+                    <label for="back">Обратная сторона{{ ' — trusted TeX' if is_advanced else '' }}:</label>
                     <textarea id="back" name="back">{{ card.back }}</textarea>
                 </div>
             </div>
@@ -72,19 +76,19 @@
         <div class="preview-card">
             <div class="preview-card-inner">
                 <div class="preview-side preview-front">
-                    {% if deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
-                    {% if deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
-                    <div class="preview-content mathjax-content" id="previewFront">{{ card.front }}</div>
-                    {% if deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
-                    {% if deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
+                    {% if not is_advanced and deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
+                    {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
+                    <div class="preview-content {% if is_advanced %}advanced-source-preview{% else %}mathjax-content{% endif %}" id="previewFront">{{ card.front }}</div>
+                    {% if not is_advanced and deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
+                    {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
                     <span class="preview-side-label">задание</span>
                 </div>
                 <div class="preview-side preview-back">
-                    {% if deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
-                    {% if deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
-                    <div class="preview-content mathjax-content" id="previewBack">{{ card.back }}</div>
-                    {% if deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
-                    {% if deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
+                    {% if not is_advanced and deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
+                    {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
+                    <div class="preview-content {% if is_advanced %}advanced-source-preview{% else %}mathjax-content{% endif %}" id="previewBack">{{ card.back }}</div>
+                    {% if not is_advanced and deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
+                    {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
                     <span class="preview-side-label">решение</span>
                 </div>
             </div>
@@ -116,7 +120,7 @@
                 previewFront.textContent = frontInput.value;
                 previewBack.textContent = backInput.value;
                 refreshHeaders();
-                if (window.MathJax && MathJax.typesetPromise) {
+                if (!{{ 'true' if is_advanced else 'false' }} && window.MathJax && MathJax.typesetPromise) {
                     MathJax.typesetPromise([previewFront, previewBack]);
                 }
             }, 300);
@@ -125,7 +129,7 @@
         backInput.addEventListener('input', updatePreview);
         sectionInput.addEventListener('input', updatePreview);
         refreshHeaders();
-        const mathStatus = document.getElementById('math-status');
+        {% if not is_advanced %}const mathStatus = document.getElementById('math-status');
         const mathScript = document.getElementById('MathJax-script');
         function reportMathReady() {
             if (window.MathJax && MathJax.startup && MathJax.startup.promise) {
@@ -141,6 +145,7 @@
             mathStatus.textContent = 'Не удалось загрузить локальный MathJax';
         });
         reportMathReady();
+        {% endif %}
     </script>
 </body>
 </html>

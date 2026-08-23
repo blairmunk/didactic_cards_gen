@@ -10,7 +10,12 @@ from pathlib import Path
 from pyppeteer import launch
 
 
-async def capture(base_url: str, deck_id: str, output_dir: Path) -> None:
+async def capture(
+    base_url: str,
+    deck_id: str,
+    output_dir: Path,
+    advanced_deck_id: str | None = None,
+) -> None:
     executable = shutil.which("chromium") or shutil.which("chromium-browser")
     if not executable:
         raise RuntimeError("Chromium executable was not found")
@@ -31,10 +36,9 @@ async def capture(base_url: str, deck_id: str, output_dir: Path) -> None:
         await page.goto(f"{base_url}/deck/{deck_id}", {"waitUntil": "domcontentloaded"})
         await page.screenshot({"path": str(output_dir / "deck-editor.png"), "fullPage": True})
 
-        advanced_link = await page.querySelector('a[href$="advanced"]')
-        if advanced_link is not None:
+        if advanced_deck_id is not None:
             await page.goto(
-                f"{base_url}/deck/{deck_id}/advanced",
+                f"{base_url}/deck/{advanced_deck_id}/advanced",
                 {"waitUntil": "domcontentloaded"},
             )
             await page.screenshot({
@@ -83,9 +87,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:5055")
     parser.add_argument("--deck-id", required=True)
+    parser.add_argument("--advanced-deck-id")
     parser.add_argument("--output-dir", type=Path, default=Path("docs/images"))
     args = parser.parse_args()
-    asyncio.run(capture(args.base_url.rstrip("/"), args.deck_id, args.output_dir))
+    asyncio.run(capture(
+        args.base_url.rstrip("/"),
+        args.deck_id,
+        args.output_dir,
+        args.advanced_deck_id,
+    ))
 
 
 if __name__ == "__main__":

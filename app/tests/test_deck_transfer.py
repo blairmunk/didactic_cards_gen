@@ -68,7 +68,10 @@ def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
 
 def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
     repo = SqliteRepository(tmp_path / 'sqlite-transfer')
-    source = repo.create_deck('Trusted export')
+    source = repo.create_deck(
+        'Trusted export',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
     repo.save_cards(source.id, CardDeck([Card(front='Q', back='A')]))
     template = repo.quarantine_trusted_template(
         source.id,
@@ -96,6 +99,21 @@ def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
     assert imported_history[0].status is TemplateStatus.QUARANTINED
     assert imported_history[0].back_content_mode.value == 'raw'
     assert repo.get_approved_trusted_template(imported.id) is None
+    assert (
+        repo.get_render_settings(imported.id).authoring_mode.value
+        == 'advanced'
+    )
+
+
+def test_safe_export_never_carries_stale_trusted_history(tmp_path):
+    repo = SqliteRepository(tmp_path / 'safe-transfer')
+    source = repo.create_deck('Safe')
+    repo.quarantine_trusted_template(source.id, '{{ content }}')
+
+    payload = json.loads(export_deck_json(repo, source.id))
+
+    assert payload['deck']['render_settings']['authoring_mode'] == 'safe'
+    assert payload['trusted_templates'] == []
 
 
 def test_invalid_trusted_import_is_rejected_before_any_write(tmp_path):

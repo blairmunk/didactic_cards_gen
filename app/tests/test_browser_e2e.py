@@ -43,10 +43,9 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('form[action$="create_deck"] button[type="submit"]'),
         )
-        assert 'Advanced LaTeX включён' in await page.Jeval(
+        assert 'Можно создавать отдельные Advanced-колоды' in await page.Jeval(
             '.app-navigation', 'element => element.textContent'
         )
-        assert await page.querySelector('a[aria-label^="Advanced LaTeX"]')
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('.deck-name-link'),
@@ -145,36 +144,8 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             page.click('#csv-import-form button[type="submit"]'),
         )
         assert await page.Jeval('#cards-count', 'element => element.textContent') == '3'
-
-        await asyncio.gather(
-            page.waitForNavigation({'waitUntil': 'networkidle2'}),
-            page.click('a.btn-warning[href$="advanced"]'),
-        )
-        await page.evaluate(
-            "document.getElementById('trusted-source').value = "
-            "'\\\\centering {{ content }}'"
-        )
-        await page.select('#front-content-mode', 'escaped')
-        await page.select('#back-content-mode', 'raw')
-        await asyncio.gather(
-            page.waitForNavigation({'waitUntil': 'networkidle2'}),
-            page.click('button[formaction$="advanced/stage"]'),
-        )
-        await page.click('input[name="confirm_trusted"]')
-        await asyncio.gather(
-            page.waitForNavigation({'waitUntil': 'networkidle2'}),
-            page.click('.trusted-version form button[type="submit"]'),
-        )
-        assert 'Активная версия' in await page.Jeval(
-            '.trusted-version', 'element => element.textContent'
-        )
-        await asyncio.gather(
-            page.waitForNavigation({'waitUntil': 'networkidle2'}),
-            page.click('.breadcrumb a:nth-of-type(2)'),
-        )
-        assert 'approved-шаблон v1' in await page.Jeval(
-            '.advanced-entry', 'element => element.textContent'
-        )
+        assert not await page.querySelector('#advanced-mode')
+        assert await page.querySelector('#render-settings-form')
 
         pdf_result = await page.evaluate(
             '''async () => {
@@ -232,6 +203,66 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
         )
         assert '«Оборот X» = -1.2 мм' in calculation
         assert '«Оборот Y» = -0.4 мм' in calculation
+
+        # Advanced is a separate deck type: raw TeX works without a wrapper,
+        # while the safe typography form is absent altogether.
+        await page.goto(base_url, {'waitUntil': 'networkidle2'})
+        await page.type('#name', 'Browser Advanced')
+        await page.click('input[name="authoring_mode"][value="advanced"]')
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('form[action$="create_deck"] button[type="submit"]'),
+        )
+        await page.evaluate(
+            '''() => {
+                const link = [...document.querySelectorAll('.deck-name-link')]
+                    .find(item => item.textContent === 'Browser Advanced');
+                link.click();
+            }'''
+        )
+        await page.waitForNavigation({'waitUntil': 'networkidle2'})
+        assert await page.Jeval('body', 'element => element.dataset.authoringMode') == 'advanced'
+        assert not await page.querySelector('#render-settings-form')
+        assert await page.querySelector('#advanced-mode')
+
+        await page.type('#front', r'\centering Сырой \TeX')
+        await page.type('#back', r'\vfill Ответ \vfill')
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('#single-card-form button[type="submit"]'),
+        )
+
+        direct_pdf = await page.evaluate(
+            '''async () => {
+                const form = document.querySelector('form[action$="generate"]');
+                const response = await fetch(form.action, {
+                    method: 'POST', body: new FormData(form)
+                });
+                return response.status;
+            }'''
+        )
+        assert direct_pdf == 200
+
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('.advanced-entry a.btn-warning'),
+        )
+        await page.evaluate(
+            "value => document.getElementById('trusted-source').value = value",
+            r'\begin{center}{{ content }}\end{center}',
+        )
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('button[formaction$="advanced/stage"]'),
+        )
+        await page.click('input[name="confirm_trusted"]')
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('.trusted-version form button[type="submit"]'),
+        )
+        assert 'Активная версия' in await page.Jeval(
+            '.trusted-version', 'element => element.textContent'
+        )
 
         resource_urls = await page.evaluate(
             "() => performance.getEntriesByType('resource').map(entry => entry.name)"

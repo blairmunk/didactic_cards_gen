@@ -14,6 +14,7 @@ from ..domain.printing import (
     build_sheets,
 )
 from ..domain.rendering import (
+    AuthoringMode,
     DeckRenderSettings,
     FontFamily,
     FontSize,
@@ -30,11 +31,7 @@ from ..domain.rendering import (
     TextStyle,
     VerticalAlignment,
 )
-from ..domain.trusted import (
-    ContentMode,
-    TrustedTemplateVersion,
-    render_trusted_template,
-)
+from ..domain.trusted import TrustedTemplateVersion, render_trusted_template
 
 
 PT_TO_CM = 2.54 / 72.27
@@ -717,20 +714,20 @@ class LatexRenderer(DocumentRenderer):
         text: str,
         is_section_start: bool,
     ) -> str:
-        if self.trusted_template is not None and card_number:
-            mode = (
-                self.trusted_template.front_content_mode
-                if side == 'front'
-                else self.trusted_template.back_content_mode
-            )
-            content = text if mode is ContentMode.RAW else _card_content(text)
-            fragment = render_trusted_template(
-                self.trusted_template.source,
-                content=content,
-                section=_card_content(card.section),
-                card_number=card_number,
-                side=side,
-            )
+        if (
+            self.render_settings.authoring_mode is AuthoringMode.ADVANCED
+            and card_number
+        ):
+            content = text if text.strip() else r'\mbox{}'
+            fragment = content
+            if self.trusted_template is not None:
+                fragment = render_trusted_template(
+                    self.trusted_template.source,
+                    content=content,
+                    section=_card_content(card.section),
+                    card_number=card_number,
+                    side=side,
+                )
             return (
                 f'\\typeout{{DIDACTIC-CARDS-HBOX-BEGIN:{card_number}:{side}:body}}%\n'
                 + fragment

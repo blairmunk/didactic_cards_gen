@@ -433,9 +433,20 @@ class JsonRepository(DeckRepository, CardRepository):
         with self._transaction():
             return self._get_deck_unlocked(deck_id)
 
-    def create_deck(self, name: str, description: str = '') -> Deck:
+    def create_deck(
+        self,
+        name: str,
+        description: str = '',
+        render_settings: DeckRenderSettings | None = None,
+    ) -> Deck:
         with self._transaction():
-            deck = Deck(name=name, description=description)
+            deck = Deck(
+                name=name,
+                description=description,
+                render_settings=(
+                    render_settings or DeckRenderSettings.centered()
+                ),
+            )
             self._write_json(self._cards_path(deck.id), [])
             try:
                 self._save_deck_meta_unlocked(deck)

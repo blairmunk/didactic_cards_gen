@@ -7,15 +7,15 @@ from datetime import datetime, timezone
 
 from ..domain.entities import Card, CardDeck, Deck
 from ..domain.interfaces import DeckRepository
-from ..domain.rendering import DeckRenderSettings
+from ..domain.rendering import AuthoringMode, DeckRenderSettings
 from ..domain.trusted import (
     TemplateProvenance,
     TrustedTemplateVersion,
 )
 
 
-DECK_EXPORT_SCHEMA_VERSION = 5
-SUPPORTED_DECK_EXPORT_SCHEMAS = {1, 2, 3, 4, DECK_EXPORT_SCHEMA_VERSION}
+DECK_EXPORT_SCHEMA_VERSION = 6
+SUPPORTED_DECK_EXPORT_SCHEMAS = {1, 2, 3, 4, 5, DECK_EXPORT_SCHEMA_VERSION}
 
 
 class DeckTransferError(ValueError):
@@ -47,7 +47,11 @@ def export_deck_json(repo: DeckRepository, deck_id: str) -> bytes:
             }
             for template in list_templates(deck_id)
         ]
-        if list_templates is not None else []
+        if (
+            list_templates is not None
+            and deck.render_settings.authoring_mode is AuthoringMode.ADVANCED
+        )
+        else []
     )
     return json.dumps(payload, ensure_ascii=False, indent=2).encode('utf-8')
 
@@ -176,6 +180,10 @@ def import_deck_json(
             trusted_templates.append(template)
 
     if trusted_templates:
+        render_settings = DeckRenderSettings.from_dict({
+            **render_settings.to_dict(),
+            'authoring_mode': 'advanced',
+        })
         create_with_trusted = getattr(
             repo, 'create_deck_with_cards_and_trusted', None
         )
