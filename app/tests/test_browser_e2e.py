@@ -43,6 +43,10 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('form[action$="create_deck"] button[type="submit"]'),
         )
+        assert 'Advanced LaTeX включён' in await page.Jeval(
+            '.app-navigation', 'element => element.textContent'
+        )
+        assert await page.querySelector('a[aria-label^="Advanced LaTeX"]')
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('.deck-name-link'),
@@ -168,8 +172,8 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('.breadcrumb a:nth-of-type(2)'),
         )
-        assert 'Advanced / trusted LaTeX — активен' in await page.Jeval(
-            '#render-settings-form', 'element => element.textContent'
+        assert 'approved-шаблон v1' in await page.Jeval(
+            '.advanced-entry', 'element => element.textContent'
         )
 
         pdf_result = await page.evaluate(

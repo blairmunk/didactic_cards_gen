@@ -251,6 +251,7 @@ def _render_printer_profiles(
     *,
     calibration_result: dict | None = None,
     calibration_form: dict | None = None,
+    edit_profile: PrinterProfile | None = None,
 ):
     return render_template(
         'cards/printer_profiles.html',
@@ -262,6 +263,7 @@ def _render_printer_profiles(
         error=error,
         calibration_result=calibration_result,
         calibration_form=calibration_form or {},
+        edit_profile=edit_profile,
     ), status
 
 
@@ -322,6 +324,7 @@ def inject_csrf_token():
     return {
         'csrf_token': _csrf_token,
         'print_profiles': _print_profiles(),
+        'trusted_enabled': _trusted_enabled(),
         'request_id': getattr(g, 'request_id', None),
     }
 
@@ -434,7 +437,21 @@ def decks_list():
 
 @cards_bp.route('/printer_profiles', methods=['GET'])
 def printer_profiles():
-    return _render_printer_profiles()
+    edit_key = request.args.get('edit', '').strip()
+    if not edit_key:
+        return _render_printer_profiles()
+    edit_profile = next(
+        (
+            profile for profile in _saved_print_profiles()
+            if profile.key == edit_key
+        ),
+        None,
+    )
+    if edit_profile is None:
+        return _render_printer_profiles(
+            'Сохранённый профиль для редактирования не найден.', 404
+        )
+    return _render_printer_profiles(edit_profile=edit_profile)
 
 
 @cards_bp.route('/printer_profiles/calibration-sheet', methods=['POST'])

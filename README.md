@@ -39,7 +39,7 @@ export DIDACTIC_CARDS_DATA_DIR='/srv/didactic-cards/data'
 
 `GET /health/live` проверяет процесс, `GET /health/ready` — целостность/доступность SQLite write-транзакции и наличие TeX executable. Debug по умолчанию выключен; `DIDACTIC_CARDS_DEBUG=true` предназначен только для локальной диагностики. Ответы получают `X-Request-ID`, а HTTP и PDF timing пишутся однострочными JSON-событиями без текста карточек и внутренних путей.
 
-Advanced/trusted LaTeX на Linux требует `bubblewrap` (`sudo apt install bubblewrap`) и включается только явной переменной `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true`. После этого в оформлении колоды появляется отдельный редактор. Без сохранения в карантин, успешного test compile и явного approval обычная печать не меняется. Если namespaces или TeX runtime недоступны, активация запрещена, а `/health/ready` закрыто возвращает 503. Для сетевого deployment обязательно закройте приложение аутентификацией reverse proxy: встроенной модели пользователей пока нет.
+Advanced/trusted LaTeX на Linux требует `bubblewrap` (`sudo apt install bubblewrap`) и включается только явной переменной `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true`. Главная и каждая колода всегда показывают состояние режима и команду включения; при enabled у каждой колоды появляется прямой вход в редактор. Browser toggle намеренно отсутствует. Без сохранения в карантин, успешного test compile и явного approval обычная печать не меняется. Если namespaces или TeX runtime недоступны, активация запрещена, а `/health/ready` закрыто возвращает 503. Для сетевого deployment обязательно закройте приложение аутентификацией reverse proxy: встроенной модели пользователей пока нет. Полная карта доступных controls приведена в [аудите UI](docs/UI_FUNCTIONALITY_AUDIT.md).
 
 Если существующий `venv` не запускается с `Exec format error`, не переиспользуйте его: это непереносимый Windows/WSL link-файл. Создайте `.venv` командами выше.
 
@@ -51,7 +51,7 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 515 основных тестов и отдельный проходящий Chromium E2E без `xfail`; branch coverage выше обязательного порога 98%. Реальные PDF также проходят vector geometry, матрицу выравнивания 3×3, section sheet-break, raster golden diff, overflow, A4-калибровку и hostile-набор изолированного trusted compiler. E2E проходит карантин, approval и trusted PDF. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает TeX/bubblewrap-интеграцию.
+Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 519 основных тестов и отдельный проходящий Chromium E2E без `xfail`; branch coverage выше обязательного порога 98%. Реальные PDF также проходят vector geometry, матрицу выравнивания 3×3, section sheet-break, raster golden diff, overflow, A4-калибровку и hostile-набор изолированного trusted compiler. E2E проходит quarantine/approval, trusted PDF и calibration UI. GitHub Actions проверяет Python 3.11–3.13 и отдельно запускает TeX/bubblewrap-интеграцию.
 
 Проверить целостность хранилища без автоматического исправления:
 

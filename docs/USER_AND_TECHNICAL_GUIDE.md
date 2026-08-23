@@ -119,7 +119,7 @@ HTML-сетка использует те же семантические нас
 
 ### Advanced / trusted LaTeX
 
-Этот режим предназначен только для локального доверенного автора, которому недостаточно встроенных выравниваний и колонтитулов. После установки `bubblewrap` запустите приложение с `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true` и откройте «Advanced / trusted LaTeX» в панели оформления.
+Этот режим предназначен только для локального доверенного автора, которому недостаточно встроенных выравниваний и колонтитулов. Главная и страница колоды всегда показывают, включён ли режим. После установки `bubblewrap` запустите приложение с `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true`: на главной появится прямое действие Advanced у каждой колоды, а внутри колоды — ссылка на редактор. Если flag выключен, вместо исчезнувшей функции UI показывает команду перезапуска. Включить исполнение trusted-кода browser toggle нельзя намеренно.
 
 ![Редактор trusted LaTeX](images/trusted-latex.png)
 
@@ -286,7 +286,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние основного набора: 515 проходящих тестов, 0 `xfail`, branch coverage выше обязательного порога 98%. В него входят migrations до schema 7, JSON schema 1–3→4, физические row/sheet breaks, PDF-геометрия, оформление, calibration calculator и production health. Hostile-набор проверяет namespaces, отсутствие host/project mounts и сети, запрет host-записи/shell escape, timeout, лимиты и очистку. Отдельный Chromium E2E проходит offline workflow, включая presentation/sections, preflight, trusted quarantine/approval и sandbox-routed PDF.
+Текущее состояние основного набора: 519 проходящих тестов, 0 `xfail`, branch coverage выше обязательного порога 98%. В него входят migrations до schema 7, JSON schema 1–3→4, физические row/sheet breaks, PDF-геометрия, оформление, UI-inventory, calibration calculator и production health. Hostile-набор проверяет namespaces, отсутствие host/project mounts и сети, запрет host-записи/shell escape, timeout, лимиты и очистку. Отдельный Chromium E2E проходит offline workflow, включая presentation/sections, preflight, trusted quarantine/approval, sandbox-routed PDF и calibration UI.
 
 Golden fixtures обновляются осознанной отдельной командой после визуальной проверки изменения раскладки:
 

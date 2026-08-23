@@ -48,6 +48,55 @@ button:hover, .btn:hover,
     margin-top: 10px;
 }
 
+.app-navigation {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem 1rem;
+    flex-wrap: wrap;
+    margin: 0.5rem 0 1rem;
+}
+
+.feature-status {
+    padding: 0.35rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.9rem;
+}
+
+.feature-enabled {
+    color: #176b2c;
+    background: #e8f7ec;
+}
+
+.feature-disabled {
+    color: #875900;
+    background: #fff4d6;
+}
+
+.feature-help summary {
+    cursor: pointer;
+}
+
+.feature-help pre,
+.advanced-entry pre {
+    max-width: 100%;
+    padding: 0.75rem;
+    overflow-x: auto;
+    background: #f1f3f5;
+    border-radius: 5px;
+}
+
+.feature-enabled-panel {
+    border-left: 5px solid #4caf50;
+}
+
+.feature-disabled-panel {
+    border-left: 5px solid #f39c12;
+}
+
+.deck-data-actions {
+    margin-bottom: 1.5rem;
+}
+
 .print-profile-control {
     display: flex;
     align-items: center;

@@ -9,7 +9,24 @@
 </head>
 <body>
     <h1>📚 Мои колоды</h1>
-    <p><a href="{{ url_for('cards.printer_profiles') }}">Профили принтеров и калибровка</a></p>
+    <nav class="app-navigation" aria-label="Инструменты приложения">
+        <a href="{{ url_for('cards.printer_profiles') }}">Профили принтеров и калибровка</a>
+        {% if trusted_enabled %}
+        <span class="feature-status feature-enabled">Advanced LaTeX включён — редактор открывается для конкретной колоды</span>
+        {% else %}
+        <a href="#advanced-mode-help" class="feature-status feature-disabled">Advanced LaTeX выключен — как включить</a>
+        {% endif %}
+    </nav>
+
+    {% if not trusted_enabled %}
+    <details id="advanced-mode-help" class="info-panel feature-help">
+        <summary><strong>Как включить Advanced / trusted LaTeX</strong></summary>
+        <p>Это параметр запуска сервера, а не настройка колоды. Он намеренно не переключается из браузера, потому что разрешает доверенный исполняемый TeX-код.</p>
+        <pre><code>sudo apt install bubblewrap
+DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true python app/run.py</code></pre>
+        <p>После перезапуска у каждой колоды появится отдельная кнопка Advanced. Для Gunicorn задайте ту же переменную перед командой запуска.</p>
+    </details>
+    {% endif %}
 
     {% if error %}
     <div class="error-message">{{ error }}</div>
@@ -70,15 +87,18 @@
                 <td>{{ deck.card_ids | length }}</td>
                 <td>{{ deck.updated_at.strftime('%d.%m.%Y %H:%M') }}</td>
                 <td class="actions">
-                    <a href="{{ url_for('cards.edit_deck', deck_id=deck.id) }}" aria-label="Редактировать колоду {{ deck.name }}" title="Редактировать">✏️</a>
+                    <a href="{{ url_for('cards.edit_deck', deck_id=deck.id) }}" class="btn-small btn-secondary" aria-label="Редактировать колоду {{ deck.name }}">✏️ Редактировать</a>
+                    {% if trusted_enabled %}
+                    <a href="{{ url_for('cards.trusted_latex_editor', deck_id=deck.id) }}" class="btn-small btn-warning" aria-label="Advanced LaTeX для колоды {{ deck.name }}">Advanced</a>
+                    {% endif %}
                     <form method="post" action="{{ url_for('cards.clone_deck', deck_id=deck.id) }}">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn-small btn-secondary" aria-label="Копировать колоду {{ deck.name }}" title="Копировать">📋</button>
+                        <button type="submit" class="btn-small btn-secondary" aria-label="Копировать колоду {{ deck.name }}">📋 Копировать</button>
                     </form>
                     <form method="post" action="{{ url_for('cards.delete_deck', deck_id=deck.id) }}"
                           onsubmit="return confirm('Удалить колоду «{{ deck.name }}»?')">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn-small btn-danger" aria-label="Удалить колоду {{ deck.name }}" title="Удалить">🗑️</button>
+                        <button type="submit" class="btn-small btn-danger" aria-label="Удалить колоду {{ deck.name }}">🗑️ Удалить</button>
                     </form>
                 </td>
             </tr>

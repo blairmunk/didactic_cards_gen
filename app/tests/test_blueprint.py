@@ -79,6 +79,62 @@ def test_deck_crud_pages(client, repo):
     assert repo.get_deck(deck.id) is None
 
 
+def test_empty_deck_ui_exposes_data_export_and_advanced_discovery(
+    client, deck_id
+):
+    page = client.get(f'/deck/{deck_id}')
+
+    assert page.status_code == 200
+    assert f'/deck/{deck_id}/export.json' in page.text
+    assert f'/deck/{deck_id}/export.csv' in page.text
+    assert 'Advanced / trusted LaTeX' in page.text
+    assert 'Режим выключен при запуске сервера' in page.text
+    assert 'DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true' in page.text
+
+
+def test_home_explains_disabled_advanced_mode(client):
+    page = client.get('/')
+
+    assert page.status_code == 200
+    assert 'Advanced LaTeX выключен — как включить' in page.text
+    assert 'DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true' in page.text
+
+
+def test_deck_page_exposes_all_user_facing_workflows(client, app, deck_id):
+    app.config['PRINT_PROFILES'] = {
+        'standard': PrinterProfile('standard', 'Standard')
+    }
+    client.post(
+        f'/api/deck/{deck_id}/add_card',
+        json={'front': 'Q', 'back': 'A', 'section': 'Topic'},
+    )
+    page = client.get(f'/deck/{deck_id}')
+
+    expected_controls = (
+        'Сохранить оформление',
+        'Advanced / trusted LaTeX',
+        'Добавить карточку',
+        'Пакетное добавление',
+        'Проверить файл',
+        'Импортировать',
+        'Переместить карточку 1',
+        'Редактировать карточку 1',
+        'Удалить карточку 1',
+        'Экспорт JSON',
+        'Экспорт CSV',
+        'Предпросмотр LaTeX',
+        'Сгенерировать PDF',
+        'PDF: только лица',
+        'PDF: только обороты',
+        'PDF-превью',
+        'Проверить перед печатью',
+        'Очистить всё',
+        'Профиль принтера',
+    )
+    for control in expected_controls:
+        assert control in page.text
+
+
 def test_deck_json_csv_export_and_import(client, repo, deck_id):
     card = Card(front='Q; quoted', back='A')
     repo.save_cards(deck_id, CardDeck([card]))
@@ -787,6 +843,16 @@ def test_persistent_printer_profile_web_crud_and_print_job(tmp_path):
     page = profile_client.get('/printer_profiles')
     assert 'Office &lt;printer&gt;' in page.text
     assert '0°' in page.text
+    assert f'/printer_profiles?edit={saved.key}' in page.text
+    edit_page = profile_client.get(
+        '/printer_profiles', query_string={'edit': saved.key}
+    )
+    assert edit_page.status_code == 200
+    assert 'Редактировать профиль' in edit_page.text
+    assert 'value="office-printer" readonly' in edit_page.text
+    assert 'value="Office &lt;printer&gt;"' in edit_page.text
+    assert 'name="back_offset_x_mm"' in edit_page.text
+    assert 'value="-1.5"' in edit_page.text
     deck = profile_app.config['REPO'].create_deck('Profile deck')
     profile_app.config['REPO'].save_cards(
         deck.id, CardDeck([Card(front='Q', back='A')])
@@ -801,6 +867,13 @@ def test_persistent_printer_profile_web_crud_and_print_job(tmp_path):
     deleted = profile_client.post(f'/printer_profiles/{saved.key}/delete')
     assert deleted.status_code == 302
     assert profile_app.config['REPO'].list_printer_profiles() == []
+
+
+def test_unknown_saved_profile_edit_is_reported(client):
+    response = client.get('/printer_profiles', query_string={'edit': 'missing'})
+
+    assert response.status_code == 404
+    assert 'профиль для редактирования не найден' in response.text
 
 
 def test_calibration_sheet_download_uses_selected_profile(tmp_path):
@@ -1124,13 +1197,16 @@ def test_unsafe_math_preview_is_rejected(client, app, deck_id):
     assert response.status_code == 422
 
 
-def test_advanced_routes_are_invisible_until_deployment_flag(client, deck_id):
+def test_advanced_routes_stay_locked_but_ui_explains_deployment_flag(
+    client, deck_id
+):
     response = client.get(f'/deck/{deck_id}/advanced')
+    deck_page = client.get(f'/deck/{deck_id}')
 
     assert response.status_code == 404
-    assert 'Advanced / trusted LaTeX' not in client.get(
-        f'/deck/{deck_id}'
-    ).text
+    assert 'Advanced / trusted LaTeX' in deck_page.text
+    assert 'Режим выключен при запуске сервера' in deck_page.text
+    assert f'href="/deck/{deck_id}/advanced"' not in deck_page.text
 
 
 def test_trusted_editor_stages_modes_without_activation(
@@ -1141,6 +1217,10 @@ def test_trusted_editor_stages_modes_without_activation(
     page = client.get(f'/deck/{deck.id}')
     assert page.status_code == 200
     assert 'Advanced / trusted LaTeX' in page.text
+    assert f'href="/deck/{deck.id}/advanced"' in page.text
+    home = client.get('/')
+    assert 'Advanced LaTeX включён' in home.text
+    assert f'href="/deck/{deck.id}/advanced"' in home.text
 
     staged = client.post(
         f'/deck/{deck.id}/advanced/stage',

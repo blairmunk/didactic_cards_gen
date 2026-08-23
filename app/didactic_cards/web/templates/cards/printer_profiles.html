@@ -154,6 +154,7 @@
             <td>F: {{ profile.front_offset_x_mm }}, {{ profile.front_offset_y_mm }}<br>B: {{ profile.back_offset_x_mm }}, {{ profile.back_offset_y_mm }}</td>
             <td>{{ 'да' if profile.registration_marks else 'нет' }}</td>
             <td>
+                <a href="{{ url_for('cards.printer_profiles', edit=profile.key) }}" class="btn-secondary btn-small">Редактировать</a>
                 <form method="post" action="{{ url_for('cards.delete_printer_profile', key=profile.key) }}" onsubmit="return confirm('Удалить профиль?')">
                     <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                     <button class="btn-danger btn-small" type="submit">Удалить</button>
@@ -165,22 +166,22 @@
     </table>
     {% else %}<p>Пользовательских профилей пока нет.</p>{% endif %}
 
-    <h2>Создать или обновить профиль</h2>
+    <h2 id="profile-editor">{% if edit_profile %}Редактировать профиль{% else %}Создать профиль{% endif %}</h2>
     <form class="card-form profile-form" method="post" action="{{ url_for('cards.save_printer_profile') }}">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
         <label for="key">Ключ (lowercase slug)</label>
-        <input id="key" name="key" type="text" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="office-hp">
+        <input id="key" name="key" type="text" required pattern="[a-z0-9][a-z0-9-]{0,63}" placeholder="office-hp" value="{{ edit_profile.key if edit_profile else '' }}" {% if edit_profile %}readonly{% endif %}>
         <label for="profile-name">Название</label>
-        <input id="profile-name" name="name" type="text" maxlength="100" required placeholder="HP в кабинете 12">
+        <input id="profile-name" name="name" type="text" maxlength="100" required placeholder="HP в кабинете 12" value="{{ edit_profile.name if edit_profile else '' }}">
         <label for="profile-duplex">Переворот</label>
         <select id="profile-duplex" name="duplex_mode">
-            <option value="long-edge">long-edge</option>
-            <option value="short-edge">short-edge</option>
+            <option value="long-edge" {% if not edit_profile or edit_profile.duplex_mode.value == 'long-edge' %}selected{% endif %}>long-edge</option>
+            <option value="short-edge" {% if edit_profile and edit_profile.duplex_mode.value == 'short-edge' %}selected{% endif %}>short-edge</option>
         </select>
         <label for="profile-back-rotation">Поворот содержимого оборота</label>
         <select id="profile-back-rotation" name="back_rotation_deg">
-            <option value="180" selected>180° — legacy long-edge</option>
-            <option value="0">0° — без поворота</option>
+            <option value="180" {% if not edit_profile or edit_profile.back_rotation_deg == 180 %}selected{% endif %}>180° — legacy long-edge</option>
+            <option value="0" {% if edit_profile and edit_profile.back_rotation_deg == 0 %}selected{% endif %}>0° — без поворота</option>
         </select>
         <small>
             Duplex-режим переставляет карточки по ячейкам листа, а эта настройка отдельно
@@ -192,13 +193,14 @@
                 ('back_offset_x_mm', 'Оборот X'), ('back_offset_y_mm', 'Оборот Y')
             ) %}
             <label>{{ label }}, мм
-                <input name="{{ field }}" type="number" min="-10" max="10" step="0.05" value="0" required>
+                <input name="{{ field }}" type="number" min="-10" max="10" step="0.05" value="{{ edit_profile|attr(field) if edit_profile else 0 }}" required>
             </label>
             {% endfor %}
         </div>
-        <label><input type="checkbox" name="back_border"> Видимая рамка оборота</label>
-        <label><input type="checkbox" name="registration_marks"> Registration marks</label>
-        <button class="btn-primary" type="submit">Сохранить профиль</button>
+        <label><input type="checkbox" name="back_border" {% if edit_profile and edit_profile.back_border %}checked{% endif %}> Видимая рамка оборота</label>
+        <label><input type="checkbox" name="registration_marks" {% if edit_profile and edit_profile.registration_marks %}checked{% endif %}> Registration marks</label>
+        <button class="btn-primary" type="submit">{% if edit_profile %}Обновить профиль{% else %}Сохранить профиль{% endif %}</button>
+        {% if edit_profile %}<a href="{{ url_for('cards.printer_profiles') }}" class="btn-secondary">Отменить редактирование</a>{% endif %}
     </form>
 </body>
 </html>

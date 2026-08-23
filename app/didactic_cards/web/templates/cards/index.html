@@ -34,6 +34,11 @@
     {% if deck.description %}
     <p style="color:#777;">{{ deck.description }}</p>
     {% endif %}
+    <nav class="app-navigation" aria-label="Инструменты колоды">
+        <a href="{{ url_for('cards.edit_deck', deck_id=deck.id) }}">Редактировать название и описание</a>
+        <a href="{{ url_for('cards.printer_profiles') }}">Профили принтеров</a>
+        <a href="#advanced-mode">Advanced LaTeX: {{ 'включён' if trusted_enabled else 'выключен' }}</a>
+    </nav>
 
     {% if error %}
     <div class="error-message">{{ error }}</div>
@@ -123,10 +128,27 @@
             </div>
             <p class="preview-notice">Разрыв применяется при изменении значения секции и добавляет пустые физические ячейки до duplex-перестановки. HTML-превью приблизительно передаёт оформление; PDF-превью является точным предпечатным результатом и показывает реальные разрывы и обороты.</p>
             <button type="submit" class="btn-primary">Сохранить оформление</button>
-            {% if trusted_enabled %}
-            <a href="{{ url_for('cards.trusted_latex_editor', deck_id=deck.id) }}" class="btn-warning">Advanced / trusted LaTeX{% if trusted_active %} — активен{% endif %}</a>
-            {% endif %}
         </form>
+    </div>
+
+    <h2 id="advanced-mode">Advanced / trusted LaTeX</h2>
+    <div class="card-form advanced-entry {% if trusted_enabled %}feature-enabled-panel{% else %}feature-disabled-panel{% endif %}">
+        {% if trusted_enabled %}
+        <p>
+            Режим разрешён при запуске сервера.
+            {% if trusted_active %}
+            Сейчас печать использует approved-шаблон v{{ trusted_active.version }}.
+            {% else %}
+            Сейчас используется обычное built-in оформление; сохранение шаблона само по себе его не активирует.
+            {% endif %}
+        </p>
+        <a href="{{ url_for('cards.trusted_latex_editor', deck_id=deck.id) }}" class="btn-warning">Открыть редактор Advanced LaTeX</a>
+        {% else %}
+        <p><strong>Режим выключен при запуске сервера.</strong> Это не переключатель колоды: браузер намеренно не может включить исполнение доверенного TeX-кода.</p>
+        <p>Для локального запуска установите <code>bubblewrap</code> и перезапустите приложение:</p>
+        <pre><code>DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true python app/run.py</code></pre>
+        <p class="preview-notice">Для Gunicorn задайте ту же переменную перед командой запуска. После этого здесь появится ссылка на versioned editor с test compile, quarantine и approval.</p>
+        {% endif %}
     </div>
 
     <!-- Добавление одной карточки -->
@@ -260,6 +282,12 @@
     </div>
     {% endif %}
 
+    <h2>Данные колоды</h2>
+    <div id="deck-data-actions" class="buttons deck-data-actions">
+        <a href="{{ url_for('cards.export_deck_as_json', deck_id=deck.id) }}" class="btn-secondary" download>Экспорт JSON</a>
+        <a href="{{ url_for('cards.export_deck_as_csv', deck_id=deck.id) }}" class="btn-secondary" download>Экспорт CSV</a>
+    </div>
+
     <!-- Генерация -->
     <div id="generate-buttons" {% if not cards %}style="display:none"{% endif %}>
         <h2>Генерация</h2>
@@ -276,8 +304,6 @@
         </div>
         {% endif %}
         <div class="buttons">
-            <a href="{{ url_for('cards.export_deck_as_json', deck_id=deck.id) }}" class="btn-secondary" download>Экспорт JSON</a>
-            <a href="{{ url_for('cards.export_deck_as_csv', deck_id=deck.id) }}" class="btn-secondary" download>Экспорт CSV</a>
             <form class="print-form" action="{{ url_for('cards.preview_latex', deck_id=deck.id) }}" method="post" style="display:inline">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="profile_id" value="">
