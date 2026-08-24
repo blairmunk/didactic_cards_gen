@@ -299,6 +299,78 @@ class TestLatexRenderer:
         assert 'A1' in result
         assert 'A2' in result
 
+    def test_safe_newlines_have_explicit_line_and_paragraph_semantics(self):
+        source = LatexRenderer(
+            cards_per_row=1,
+            rows_per_page=1,
+            render_settings=DeckRenderSettings(
+                typography_profile='custom',
+                paragraph_spacing='medium',
+            ),
+        ).render_fronts(CardDeck([
+            Card(front='Первая\r\nВторая\n\nТретья')
+        ]))
+
+        assert (
+            r'Первая\cardsafelinebreak Вторая'
+            r'\cardsafeparagraphbreak Третья'
+        ) in source
+        assert r'\newcommand{\cardparagraphspacing}{4pt}' in source
+
+    def test_display_math_owns_a_paragraph_without_forced_line_breaks(self):
+        source = LatexRenderer(
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render_fronts(CardDeck([Card(front='До\n$$x^2$$\nПосле')]))
+
+        assert (
+            r'До\cardsafeparagraphbreak $$x^2$$'
+            r'\cardsafeparagraphbreak После'
+        ) in source
+        assert r'\cardsafelinebreak $$x^2$$' not in source
+        assert r'$$x^2$$\cardsafelinebreak' not in source
+
+    def test_safe_newline_commands_are_injected_only_after_escaping(self):
+        source = LatexRenderer(
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render_fronts(CardDeck([
+            Card(front='100%\n$x = 1$\n\n\\input{/etc/passwd}')
+        ]))
+
+        assert (
+            r'100\%\cardsafelinebreak $x = 1$'
+            r'\cardsafeparagraphbreak \textbackslash{}input\{/etc/passwd\}'
+        ) in source
+        assert r'\newcommand{\cardsafelinebreak}{\\{}}' in source
+
+    @pytest.mark.parametrize('next_line', ('[30mm]B', '*B', '[', ']'))
+    def test_safe_line_cannot_supply_an_optional_argument_to_latex(
+        self, next_line
+    ):
+        source = LatexRenderer(
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render_fronts(CardDeck([Card(front=f'A\n{next_line}')]))
+
+        assert rf'A\cardsafelinebreak {next_line}' in source
+        assert r'\newcommand{\cardsafelinebreak}{\\{}}' in source
+
+    def test_advanced_newlines_remain_raw_and_uninterpreted(self):
+        raw = '  \\vfill\r\nRAW\n\nCONTENT  '
+        source = LatexRenderer(
+            cards_per_row=1,
+            rows_per_page=1,
+            render_settings=DeckRenderSettings(authoring_mode='advanced'),
+        ).render_fronts(CardDeck([Card(front=raw)]))
+
+        assert raw in source
+        card_fragment = source.split(
+            'DIDACTIC-CARDS-HBOX-BEGIN:1:front:body', 1
+        )[1]
+        assert r'\cardsafelinebreak' not in card_fragment
+        assert r'\cardsafeparagraphbreak' not in card_fragment
+
     @pytest.mark.parametrize(
         ('horizontal', 'command'),
         [
@@ -401,6 +473,23 @@ class TestLatexRenderer:
 
         assert source.count('HEADER-ALPHA') == 1
         assert source.count('HEADER-BETA') == 1
+
+    def test_safe_header_and_section_comparison_share_single_line_semantics(self):
+        settings = DeckRenderSettings(
+            header_visibility='front',
+            header_repeat='section-start',
+        )
+        source = LatexRenderer(
+            render_settings=settings,
+            cards_per_row=1,
+            rows_per_page=2,
+        ).render_fronts(CardDeck([
+            Card(front='Q1', section='Тема\r\nодин'),
+            Card(front='Q2', section='Тема\nодин'),
+        ]))
+
+        assert source.count('Тема один') == 1
+        assert 'Тема\nодин' not in source
 
     def test_safe_typography_emits_only_renderer_owned_font_commands(self):
         source = LatexRenderer(
@@ -900,6 +989,103 @@ def test_real_latex_marks_only_card_scoped_horizontal_overflow():
     assert short.success and long.success
     assert 'Overfull \\hbox' not in _card_measurement_log(short.log)
     assert 'Overfull \\hbox' in _card_measurement_log(long.log)
+
+
+@pytest.mark.integration
+def test_real_pdf_distinguishes_safe_lines_and_paragraph_spacing(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdftotext'):
+        pytest.skip('pdflatex/pdftotext are required for safe newline test')
+
+    settings = DeckRenderSettings(
+        typography_profile='custom',
+        paragraph_spacing='medium',
+    )
+    source = LatexRenderer(
+        cards_per_row=1,
+        rows_per_page=1,
+        render_settings=settings,
+    ).render_fronts(CardDeck([
+        Card(front='LINEALPHA\r\nLINEBETA\n\nLINEGAMMA')
+    ]))
+    result = PdfLatexCompiler().compile(source)
+
+    assert result.success, result.log
+    pdf_path = tmp_path / 'safe-newlines.pdf'
+    pdf_path.write_bytes(result.pdf_data)
+    bbox = subprocess.run(
+        ['pdftotext', '-bbox', str(pdf_path), '-'],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    positions = {}
+    for marker in ('LINEALPHA', 'LINEBETA', 'LINEGAMMA'):
+        match = re.search(
+            rf'<word [^>]*yMin="([0-9.]+)"[^>]*>{marker}</word>',
+            bbox,
+        )
+        assert match, bbox
+        positions[marker] = float(match.group(1))
+
+    line_gap = positions['LINEBETA'] - positions['LINEALPHA']
+    paragraph_gap = positions['LINEGAMMA'] - positions['LINEBETA']
+    assert line_gap > 0
+    assert paragraph_gap > line_gap + 2
+
+
+@pytest.mark.integration
+def test_real_pdf_safe_line_cannot_apply_latex_optional_spacing(tmp_path):
+    if not shutil.which('pdflatex') or not shutil.which('pdftotext'):
+        pytest.skip('pdflatex/pdftotext are required for safe newline test')
+
+    def positions(front: str, name: str) -> tuple[float, float]:
+        result = PdfLatexCompiler().compile(
+            LatexRenderer(cards_per_row=1, rows_per_page=1).render_fronts(
+                CardDeck([Card(front=front)])
+            )
+        )
+        assert result.success, result.log
+        path = tmp_path / name
+        path.write_bytes(result.pdf_data)
+        bbox = subprocess.run(
+            ['pdftotext', '-bbox', str(path), '-'],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        found = {}
+        for marker in ('LINETOP', 'LINEBOTTOM'):
+            match = re.search(
+                rf'<word [^>]*yMin="([0-9.]+)"[^>]*>{marker}</word>',
+                bbox,
+            )
+            assert match, bbox
+            found[marker] = float(match.group(1))
+        return found['LINETOP'], found['LINEBOTTOM']
+
+    baseline = positions('LINETOP\nLINEBOTTOM', 'baseline.pdf')
+    bracket = positions('LINETOP\n[30mm] LINEBOTTOM', 'bracket.pdf')
+
+    assert bracket[1] - bracket[0] == pytest.approx(
+        baseline[1] - baseline[0], abs=0.5
+    )
+
+
+@pytest.mark.integration
+def test_real_pdf_compiles_display_math_between_safe_text_paragraphs():
+    if not shutil.which('pdflatex'):
+        pytest.skip('pdflatex is required for safe display math test')
+
+    source = LatexRenderer(
+        cards_per_row=1,
+        rows_per_page=1,
+    ).render_fronts(CardDeck([
+        Card(front='BEFOREMATH\n$$x^2 + y^2$$\nAFTERMATH')
+    ]))
+    result = PdfLatexCompiler().compile(source)
+
+    assert result.success, result.log
+    assert 'DIDACTIC-CARDS-OVERFLOW' not in result.log
 
 
 @pytest.mark.integration

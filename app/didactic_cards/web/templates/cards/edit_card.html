@@ -1,6 +1,7 @@
 {% macro header_value(source, custom_text, card, number) -%}
-    {%- if source.value == 'section' -%}{{ card.section }}{%- elif source.value == 'card-number' -%}№ {{ number }}{%- else -%}{{ custom_text|replace('{{ card_number }}', number|string)|replace('{{ card_count }}', cards_count|string) }}{%- endif -%}
+    {%- if source.value == 'section' -%}{{ safe_single_line(card.section) }}{%- elif source.value == 'card-number' -%}№ {{ number }}{%- else -%}{{ safe_single_line(custom_text)|replace('{{ card_number }}', number|string)|replace('{{ card_count }}', cards_count|string) }}{%- endif -%}
 {%- endmacro %}
+{% from 'cards/_safe_text.html' import render_safe_text with context %}
 {% set typography = deck.render_settings.typography %}
 {% set is_advanced = deck.render_settings.authoring_mode.value == 'advanced' %}
 <!DOCTYPE html>
@@ -31,9 +32,9 @@
       data-header-repeat="{{ deck.render_settings.header_repeat.value }}"
       data-secondary-header-repeat="{{ deck.render_settings.secondary_header_repeat.value }}"
       data-section-break="{{ deck.render_settings.section_break.value }}"
-      data-previous-section="{{ previous_section if previous_section is not none else '' }}"
+      data-previous-section="{{ safe_single_line(previous_section) if previous_section is not none else '' }}"
       data-first-card="{{ 'true' if previous_section is none else 'false' }}"
-      class="{% if not is_advanced %}align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }} secondary-header-align-{{ deck.render_settings.secondary_header_alignment.value }} header-rule-{{ deck.render_settings.header_rule.value }} header-rule-spacing-{{ deck.render_settings.header_rule_spacing.value }} secondary-header-rule-{{ deck.render_settings.secondary_header_rule.value }} secondary-header-rule-spacing-{{ deck.render_settings.secondary_header_rule_spacing.value }}{% if typography %} typography-enabled body-family-{{ typography.body.family.value }} body-size-{{ typography.body.size.value }} body-weight-{{ typography.body.weight.value }} body-style-{{ typography.body.style.value }} line-spacing-{{ typography.line_spacing.value }} primary-family-{{ typography.primary_header.family.value }} primary-size-{{ typography.primary_header.size.value }} primary-weight-{{ typography.primary_header.weight.value }} primary-style-{{ typography.primary_header.style.value }} secondary-family-{{ typography.secondary_header.family.value }} secondary-size-{{ typography.secondary_header.size.value }} secondary-weight-{{ typography.secondary_header.weight.value }} secondary-style-{{ typography.secondary_header.style.value }}{% endif %}{% endif %}">
+      class="{% if not is_advanced %}align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }} secondary-header-align-{{ deck.render_settings.secondary_header_alignment.value }} header-rule-{{ deck.render_settings.header_rule.value }} header-rule-spacing-{{ deck.render_settings.header_rule_spacing.value }} secondary-header-rule-{{ deck.render_settings.secondary_header_rule.value }} secondary-header-rule-spacing-{{ deck.render_settings.secondary_header_rule_spacing.value }}{% if typography %} typography-enabled body-family-{{ typography.body.family.value }} body-size-{{ typography.body.size.value }} body-weight-{{ typography.body.weight.value }} body-style-{{ typography.body.style.value }} line-spacing-{{ typography.line_spacing.value }} paragraph-spacing-{{ typography.paragraph_spacing.value }} primary-family-{{ typography.primary_header.family.value }} primary-size-{{ typography.primary_header.size.value }} primary-weight-{{ typography.primary_header.weight.value }} primary-style-{{ typography.primary_header.style.value }} secondary-family-{{ typography.secondary_header.family.value }} secondary-size-{{ typography.secondary_header.size.value }} secondary-weight-{{ typography.secondary_header.weight.value }} secondary-style-{{ typography.secondary_header.style.value }}{% endif %}{% endif %}">
     <div id="math-status" class="status-message" role="status" aria-live="polite">{{ 'HTML-превью показывает TeX-исходник' if is_advanced else 'Загрузка формул…' }}</div>
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> →
@@ -46,7 +47,9 @@
     {% if is_advanced %}<div class="warning-panel">Это Advanced-колода: обе стороны являются доверенным TeX-кодом. HTML ниже показывает исходник; точный результат смотрите в PDF-превью.</div>{% endif %}
 
     <div class="card-form">
-        <form method="post">
+        <form method="post" id="edit-card-form"
+              data-api-url="{{ url_for('cards.api_edit_card', deck_id=deck.id, card_id=card.id) }}"
+              data-success-url="{{ url_for('cards.deck_view', deck_id=deck.id) }}">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="version" value="{{ deck.version }}">
             <div class="form-group section-field">
@@ -72,17 +75,19 @@
             <div class="form-row">
                 <div class="form-group">
                     <label for="front">Лицевая сторона{{ ' — trusted TeX' if is_advanced else '' }}:</label>
-                    <textarea id="front" name="front">{{ card.front }}</textarea>
+                    <textarea id="front" name="front"{% if not is_advanced %} aria-describedby="safe-text-help"{% endif %}>{{ card.front }}</textarea>
                 </div>
                 <div class="form-group">
                     <label for="back">Обратная сторона{{ ' — trusted TeX' if is_advanced else '' }}:</label>
-                    <textarea id="back" name="back">{{ card.back }}</textarea>
+                    <textarea id="back" name="back"{% if not is_advanced %} aria-describedby="safe-text-help"{% endif %}>{{ card.back }}</textarea>
                 </div>
             </div>
+            {% if not is_advanced %}<p id="safe-text-help" class="preview-notice">Один Enter переносит строку; пустая строка начинает новый абзац. Интервал между абзацами задаётся в типографике.</p>{% endif %}
             <div class="buttons">
                 <button type="submit" class="btn-primary">💾 Сохранить</button>
                 <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}" class="btn-secondary" style="text-decoration:none;">← Назад</a>
             </div>
+            <div id="edit-save-error" class="error-message" role="alert" tabindex="-1" hidden></div>
         </form>
     </div>
 
@@ -94,7 +99,7 @@
                 <div class="preview-side preview-front">
                     {% if not is_advanced and deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
                     {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
-                    <div class="preview-content {% if is_advanced %}advanced-source-preview{% else %}mathjax-content{% endif %}" id="previewFront">{{ card.front }}</div>
+                    <div class="preview-content {% if is_advanced %}advanced-source-preview{% else %}mathjax-content{% endif %}" id="previewFront">{% if is_advanced %}{{ card.front }}{% else %}{{ render_safe_text(card.front) }}{% endif %}</div>
                     {% if not is_advanced and deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
                     {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
                     <span class="preview-side-label">задание</span>
@@ -102,7 +107,7 @@
                 <div class="preview-side preview-back">
                     {% if not is_advanced and deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
                     {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
-                    <div class="preview-content {% if is_advanced %}advanced-source-preview{% else %}mathjax-content{% endif %}" id="previewBack">{{ card.back }}</div>
+                    <div class="preview-content {% if is_advanced %}advanced-source-preview{% else %}mathjax-content{% endif %}" id="previewBack">{% if is_advanced %}{{ card.back }}{% else %}{{ render_safe_text(card.back) }}{% endif %}</div>
                     {% if not is_advanced and deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-source="{{ deck.render_settings.header_source.value }}" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, index + 1) }}</div>{% endif %}
                     {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-source="{{ deck.render_settings.secondary_header_source.value }}" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, index + 1) }}</div>{% endif %}
                     <span class="preview-side-label">решение</span>
@@ -111,19 +116,29 @@
         </div>
     </div>
 
+    <script id="card-original-data" type="application/json">{{ card|tojson }}</script>
+    <script src="{{ url_for('cards.static', filename='cards/safe-text.js') }}"></script>
     <script>
+        const editForm = document.getElementById('edit-card-form');
+        const originalCard = JSON.parse(
+            document.getElementById('card-original-data').textContent
+        );
         const frontInput = document.getElementById('front');
         const backInput = document.getElementById('back');
         const sectionInput = document.getElementById('section');
+        const initialSectionValue = sectionInput.value;
         const previewFront = document.getElementById('previewFront');
         const previewBack = document.getElementById('previewBack');
         const previewHeaders = document.querySelectorAll('.preview-header');
         function refreshHeaders() {
             const sectionChanged = document.body.dataset.firstCard === 'true' ||
-                sectionInput.value !== document.body.dataset.previousSection;
+                DidacticCardsSafeText.singleLine(sectionInput.value) !==
+                    document.body.dataset.previousSection;
             previewHeaders.forEach((header) => {
                 if (header.dataset.source === 'section') {
-                    header.textContent = sectionInput.value;
+                    header.textContent = DidacticCardsSafeText.singleLine(
+                        sectionInput.value
+                    );
                 }
                 const visible = header.dataset.repeat !== 'section-start' || sectionChanged;
                 header.classList.toggle('section-header-suppressed', !visible);
@@ -133,8 +148,16 @@
         function updatePreview() {
             clearTimeout(timeout);
             timeout = setTimeout(() => {
-                previewFront.textContent = frontInput.value;
-                previewBack.textContent = backInput.value;
+                if ({{ 'true' if is_advanced else 'false' }}) {
+                    previewFront.textContent = frontInput.value;
+                    previewBack.textContent = backInput.value;
+                } else {
+                    if (window.MathJax && MathJax.typesetClear) {
+                        MathJax.typesetClear([previewFront, previewBack]);
+                    }
+                    DidacticCardsSafeText.render(previewFront, frontInput.value);
+                    DidacticCardsSafeText.render(previewBack, backInput.value);
+                }
                 refreshHeaders();
                 if (!{{ 'true' if is_advanced else 'false' }} && window.MathJax && MathJax.typesetPromise) {
                     MathJax.typesetPromise([previewFront, previewBack]);
@@ -145,6 +168,45 @@
         backInput.addEventListener('input', updatePreview);
         sectionInput.addEventListener('input', updatePreview);
         refreshHeaders();
+        editForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const saveButton = editForm.querySelector('button[type="submit"]');
+            const errorBox = document.getElementById('edit-save-error');
+            const exactValue = (input, field) => {
+                const original = originalCard[field] || '';
+                return input.value === DidacticCardsSafeText.normaliseNewlines(original)
+                    ? original : input.value;
+            };
+            const payload = {
+                front: exactValue(frontInput, 'front'),
+                back: exactValue(backInput, 'back'),
+                version: Number(editForm.elements.version.value),
+            };
+            if (sectionInput.value !== initialSectionValue) {
+                payload.section = sectionInput.value;
+            }
+            const upperHeader = document.getElementById('upper-header');
+            const lowerHeader = document.getElementById('lower-header');
+            if (upperHeader) payload.upper_header = exactValue(upperHeader, 'upper_header');
+            if (lowerHeader) payload.lower_header = exactValue(lowerHeader, 'lower_header');
+            saveButton.disabled = true;
+            errorBox.hidden = true;
+            try {
+                const response = await fetch(editForm.dataset.apiUrl, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(payload),
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error || 'Не удалось сохранить карточку');
+                window.location.assign(editForm.dataset.successUrl);
+            } catch (error) {
+                errorBox.textContent = error.message || 'Не удалось сохранить карточку';
+                errorBox.hidden = false;
+                errorBox.focus();
+                saveButton.disabled = false;
+            }
+        });
         {% if not is_advanced %}const mathStatus = document.getElementById('math-status');
         const mathScript = document.getElementById('MathJax-script');
         function reportMathReady() {

@@ -25,6 +25,7 @@ async def capture(
     browser = await launch(
         executablePath=executable,
         headless=True,
+        autoClose=False,
         args=["--no-sandbox", "--disable-dev-shm-usage"],
     )
     try:
@@ -87,7 +88,10 @@ async def capture(
         )
 
         await page.click("#btn-view-preview")
-        await asyncio.sleep(1)
+        await page.waitForSelector("#view-preview .safe-text-flow")
+        await page.waitForFunction(
+            "document.getElementById('math-status').textContent !== 'Загрузка формул…'"
+        )
         preview = await page.querySelector("#view-preview")
         await preview.screenshot({"path": str(output_dir / "card-preview.png")})
 
@@ -95,7 +99,10 @@ async def capture(
             f"{base_url}/deck/{deck_id}/edit_card/{first_card_id}",
             {"waitUntil": "domcontentloaded"},
         )
-        await asyncio.sleep(1)
+        await page.waitForSelector("#previewFront .safe-text-flow")
+        await page.waitForFunction(
+            "document.getElementById('math-status').textContent !== 'Загрузка формул…'"
+        )
         await page.screenshot({"path": str(output_dir / "edit-card.png"), "fullPage": True})
         await page.goto(
             f"{base_url}/printer_profiles", {"waitUntil": "domcontentloaded"}

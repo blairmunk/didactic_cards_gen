@@ -36,6 +36,7 @@ async def _exercise_browser(
     browser = await launch(
         executablePath=CHROMIUM,
         headless=True,
+        autoClose=False,
         args=['--no-sandbox', '--disable-dev-shm-usage'],
     )
     try:
@@ -68,6 +69,8 @@ async def _exercise_browser(
             "() => { document.querySelectorAll('details.typography-settings')"
             ".forEach(details => { details.open = true; }); }"
         )
+        await page.select('#typography-profile', 'custom')
+        await page.select('#paragraph-spacing', 'medium')
         await page.select('#secondary-header-visibility', 'both')
         await page.select('#secondary-header-source', 'custom')
         await page.evaluate(
@@ -105,9 +108,14 @@ async def _exercise_browser(
         async def add_card(
             front: str, back: str, expected_count: int, section: str = ''
         ) -> None:
-            await page.type('#section', section)
-            await page.type('#front', front)
-            await page.type('#back', back)
+            await page.evaluate(
+                '''values => {
+                    document.getElementById('section').value = values.section;
+                    document.getElementById('front').value = values.front;
+                    document.getElementById('back').value = values.back;
+                }''',
+                {'section': section, 'front': front, 'back': back},
+            )
             table = await page.querySelector('#cards-tbody')
             if table is None:
                 await asyncio.gather(
@@ -120,12 +128,36 @@ async def _exercise_browser(
                 f"document.getElementById('cards-count').textContent === '{expected_count}'"
             )
 
-        await add_card('$x^2$', 'first', 1, 'Алгебра')
+        await add_card(
+            '$x^2$\nВторая строка\n\nНовый абзац\n',
+            'first <img src=x onerror="window.__unsafePreview = true">',
+            1,
+            'Алгебра',
+        )
         await add_card('second', 'answer', 2, 'Алгебра')
         await page.waitForFunction(
             "document.getElementById('math-status').textContent === 'Формулы готовы'"
         )
         await page.click('#btn-view-preview')
+        safe_layout = await page.Jeval(
+            '.preview-card:first-child .preview-front .safe-text-flow',
+            '''element => {
+                const paragraphs = [...element.querySelectorAll('.safe-text-paragraph')];
+                const lines = [...element.querySelectorAll('.safe-text-line')];
+                const first = paragraphs[0].getBoundingClientRect();
+                const second = paragraphs[1].getBoundingClientRect();
+                return {
+                    paragraphs: paragraphs.length,
+                    lines: lines.length,
+                    paragraphGap: second.top - first.bottom,
+                };
+            }''',
+        )
+        assert safe_layout['paragraphs'] == 2
+        assert safe_layout['lines'] == 3
+        assert safe_layout['paragraphGap'] > 4
+        assert not await page.querySelector('.preview-card:first-child img')
+        assert not await page.evaluate('Boolean(window.__unsafePreview)')
         assert await page.Jeval(
             '.preview-card:first-child .preview-section',
             'element => element.textContent',
@@ -160,7 +192,17 @@ async def _exercise_browser(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('#cards-tbody tr:first-child a[aria-label^="Редактировать"]'),
         )
-        await page.evaluate("document.getElementById('front').value = 'second edited'")
+        await page.evaluate(
+            '''value => {
+                const input = document.getElementById('front');
+                input.value = value;
+                input.dispatchEvent(new Event('input', {bubbles: true}));
+            }''',
+            'second edited\nline 2\n\nparagraph',
+        )
+        await page.waitForFunction(
+            "document.querySelectorAll('#previewFront .safe-text-paragraph').length === 2"
+        )
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('form button[type="submit"]'),
@@ -168,7 +210,7 @@ async def _exercise_browser(
         edited = await page.Jeval(
             '#cards-tbody tr:first-child td.card-text', 'element => element.textContent'
         )
-        assert edited == 'second edited'
+        assert edited == 'second edited\nline 2\n\nparagraph'
 
         upload = await page.querySelector('#csv_file')
         await upload.uploadFile(csv_path)
@@ -182,6 +224,14 @@ async def _exercise_browser(
             page.click('#csv-import-form button[type="submit"]'),
         )
         assert await page.Jeval('#cards-count', 'element => element.textContent') == '3'
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('#cards-tbody tr:nth-child(3) a[aria-label^="Редактировать"]'),
+        )
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('#edit-card-form button[type="submit"]'),
+        )
         assert not await page.querySelector('#advanced-mode')
         assert await page.querySelector('#render-settings-form')
 
@@ -349,9 +399,8 @@ async def _exercise_browser(
 @pytest.mark.filterwarnings('ignore:remove loop argument:DeprecationWarning')
 def test_complete_browser_workflow_is_offline_and_persistent(tmp_path):
     csv_path = tmp_path / 'cards.csv'
-    csv_path.write_text(
-        'front;back\ncsv question;csv answer\n',
-        encoding='utf-8',
+    csv_path.write_bytes(
+        b'front;back\r\n"csv line 1\r\ncsv line 2";csv answer\r\n'
     )
     advanced_csv_path = tmp_path / 'advanced-cards.csv'
     advanced_csv_path.write_text(
@@ -383,6 +432,12 @@ def test_complete_browser_workflow_is_offline_and_persistent(tmp_path):
                 str(advanced_csv_path),
             )
         )
+        csv_card = next(
+            card for card in app.config['REPO'].list_decks()
+            if card.name == 'Browser E2E'
+        )
+        imported = app.config['REPO'].load_cards(csv_card.id).cards[-1]
+        assert imported.front == 'csv line 1\r\ncsv line 2'
     finally:
         server.shutdown()
         thread.join(timeout=5)

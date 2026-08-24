@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,9 @@ from didactic_cards.use_cases.card_import import (
     preview_bulk_import,
     preview_csv_import,
 )
+
+
+PROJECT_ROOT = Path(__file__).parents[2]
 
 
 def test_csv_rejects_unsupported_encoding_delimiter_and_ambiguous_dialect():
@@ -194,6 +198,37 @@ def test_unclosed_multiline_quote_is_rejected_atomically():
     assert preview.errors[0].code == 'malformed_csv'
 
 
+@pytest.mark.parametrize('newline', ('\n', '\r\n', '\r'))
+def test_bulk_uses_only_ascii_physical_line_endings(newline):
+    preview = preview_bulk_import(f'Q1||A1{newline}Q2||A2{newline}')
+
+    assert preview.errors == ()
+    assert [(row.front, row.back) for row in preview.rows] == [
+        ('Q1', 'A1'),
+        ('Q2', 'A2'),
+    ]
+    assert preview.skipped_count == 0
+
+
+@pytest.mark.parametrize('separator', ('\u0085', '\u2028', '\u2029'))
+def test_bulk_does_not_treat_unicode_text_separators_as_card_boundaries(
+    separator
+):
+    preview = preview_bulk_import(f'Q{separator}continued||A')
+
+    assert preview.errors == ()
+    assert preview.accepted_count == 1
+    assert preview.rows[0].front == f'Q{separator}continued'
+
+
+def test_bulk_quoted_multiline_keeps_error_even_with_later_valid_row():
+    preview = preview_bulk_import('"Q\ncontinued"||A\nvalid||answer')
+
+    assert preview.errors
+    assert any(issue.code == 'malformed_bulk' for issue in preview.errors)
+    assert 'valid' in [row.front for row in preview.rows]
+
+
 def test_header_contract_rejects_unknown_duplicate_and_advanced_columns():
     duplicate = preview_csv_import(
         b'front;front;back\nA;B;C\n',
@@ -212,3 +247,24 @@ def test_header_contract_rejects_unknown_duplicate_and_advanced_columns():
         'unknown_column', 'missing_column'
     }
     assert advanced_only.errors[0].code == 'unknown_column'
+
+
+def test_documented_csv_examples_follow_current_mode_contracts():
+    safe = preview_csv_import(
+        (PROJECT_ROOT / 'docs/examples/safe-cards.csv').read_bytes(),
+        delimiter='semicolon',
+    )
+    advanced = preview_csv_import(
+        (PROJECT_ROOT / 'docs/examples/advanced-cards.csv').read_bytes(),
+        delimiter='semicolon',
+        authoring_mode=AuthoringMode.ADVANCED,
+    )
+
+    assert safe.errors == () and safe.accepted_count == 2
+    assert safe.rows[0].front == (
+        'Найдите ускорение тела.\nИспользуйте второй закон Ньютона.'
+    )
+    assert advanced.errors == () and advanced.accepted_count == 2
+    assert advanced.columns == (
+        'section', 'front', 'back', 'upper_header', 'lower_header'
+    )

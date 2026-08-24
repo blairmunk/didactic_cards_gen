@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -514,7 +515,14 @@ def preview_bulk_import(
     rows: list[CardImportRow] = []
     issues: list[ImportIssue] = []
     skipped = 0
-    for row_number, line in enumerate(bulk_text.splitlines(), start=1):
+    physical_lines = (
+        re.split(r'\r\n|\r|\n', bulk_text) if bulk_text else []
+    )
+    if physical_lines and physical_lines[-1] == '' and bulk_text.endswith(
+        ('\r', '\n')
+    ):
+        physical_lines.pop()
+    for row_number, line in enumerate(physical_lines, start=1):
         if not line.strip():
             skipped += 1
             continue

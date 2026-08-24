@@ -14,6 +14,7 @@ from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import CompileResult, ConcurrentModificationError
 from ..domain.printing import PrinterProfile, recommend_back_offsets
 from ..domain.rendering import AuthoringMode, DeckRenderSettings, StylePreset
+from ..domain.safe_text import safe_single_line, safe_text_paragraphs
 from ..domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
 
 from ..use_cases.card_use_cases import (
@@ -428,6 +429,8 @@ def _csrf_token() -> str:
 def inject_csrf_token():
     return {
         'csrf_token': _csrf_token,
+        'safe_text_paragraphs': safe_text_paragraphs,
+        'safe_single_line': safe_single_line,
         'print_profiles': _print_profiles(),
         'trusted_enabled': _trusted_enabled(),
         'request_id': getattr(g, 'request_id', None),
@@ -999,12 +1002,12 @@ def update_render_settings(deck_id):
 
 @cards_bp.route('/deck/<deck_id>/add_card', methods=['POST'])
 def add_card(deck_id):
-    front = request.form.get('front', '').strip()
-    back = request.form.get('back', '').strip()
+    front = request.form.get('front', '')
+    back = request.form.get('back', '')
     section = request.form.get('section', '').strip()
     upper_header = request.form.get('upper_header', '')
     lower_header = request.form.get('lower_header', '')
-    if front or back or upper_header.strip() or lower_header.strip():
+    if front.strip() or back.strip() or upper_header.strip() or lower_header.strip():
         try:
             AddCard(_repo(), _max_cards()).execute(
                 deck_id,
@@ -1205,8 +1208,8 @@ def edit_card(deck_id, card_id):
         front = request.form.get('front', '')
         back = request.form.get('back', '')
         section = request.form.get('section', '').strip()
-        upper_header = request.form.get('upper_header', '')
-        lower_header = request.form.get('lower_header', '')
+        upper_header = request.form.get('upper_header')
+        lower_header = request.form.get('lower_header')
         EditCard(_repo()).execute(
             deck_id, card_id, front, back,
             _optional_version(request.form.get('version')),
@@ -1450,12 +1453,12 @@ def api_add_card(deck_id):
         or not isinstance(lower_header_value, str)
     ):
         return jsonify({'error': 'Поля карточки должны быть строками'}), 400
-    front = front_value.strip()
-    back = back_value.strip()
+    front = front_value
+    back = back_value
     section = section_value.strip()
     if not any((
-        front,
-        back,
+        front.strip(),
+        back.strip(),
         upper_header_value.strip(),
         lower_header_value.strip(),
     )):

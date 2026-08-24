@@ -42,14 +42,15 @@
 | `LIMIT-002` | ✅ Выполнено | `CardDeck.padded()` отклоняет bool, нецелые и `cards_per_page <= 0` до арифметики; прямые domain/use-case regression-тесты не допускают частичного действия. |
 | `IMPORT-CSV-V2` | ✅ Выполнено | Canonical header, comma/semicolon/tab, BOM/кодировки, quoted delimiter/multiline/doubled quote, пять Advanced-полей, preview binding и atomic reject покрыты regression/E2E. |
 | `MODE-SPLIT-001` | ✅ Выполнено | Safe/Advanced разделены в domain, persistence, import/export, UI и renderer; built-in-оформление не влияет на Advanced. |
+| `TEXT-NEWLINE-001` | ✅ Выполнено | Safe front/back получили единые CRLF/LF/CR, line/paragraph/display-math semantics в HTML и PDF; SQLite/CSV/JSON остаются character-preserving, no-op browser edit не переписывает импортированный EOL, Advanced остаётся raw. Реальные Chromium, `pdflatex` и bbox regression проверяют layout и TeX-boundary. |
 | `PRINT-GEOMETRY-001` | ✅ Программная часть | PDF идёт `front-1/back-1/…`, long-edge/short-edge permutation отделена от поворота 0°/180°; cut size, offsets, мишени, calibration PDF и overflow покрыты PDF/raster/vector-тестами. |
 | `PRINT-PHYSICAL-001` | 🟡 Заблокировано вне кода | Нужен принтер и реальные измерения long-edge, short-edge и ручной подачи по [протоколу](PHYSICAL_PRINT_ACCEPTANCE.md). До этого нельзя обещать точность на любом принтере. |
 
 Статус storage-пунктов подтверждён обычными regression-тестами: проверены
 forensic API/CLI restore, отказ при publication `replace/fsync`, committed WAL,
 конкурентный no-clobber backup и повторное использование stable pre-migration backup.
-Последний полный локальный gate 24.08.2026: **688 passed**, statement coverage
-100%, общий branch coverage **99,88%**; в прогон вошли реальные Chromium,
+Последний полный локальный gate 24.08.2026: **727 passed**, statement coverage
+100%, общий branch coverage **99,44%**; в прогон вошли реальные Chromium,
 `pdflatex` и `bubblewrap` integration-тесты.
 
 ## 3. Ближайший backlog
@@ -59,19 +60,21 @@ forensic API/CLI restore, отказ при publication `replace/fsync`, committ
 
 ### P1 — надёжность и основной UX
 
-1. **`DATA-TRASH-001` — обратимое удаление колоды.**
+1. **`MODE-HIDDEN-FIELDS-001` — закрыть скрытые raw-поля в Safe.**
+   Сейчас API/JSON могут сохранить у Safe-карточки `upper_header/lower_header`, хотя
+   UI, renderer и Safe CSV их не показывают. Определить миграцию тестовых значений и
+   fail-closed отклонять новые non-empty raw headers во всех Safe ingress. Критерий:
+   API/JSON/import не создают скрытых данных, export не теряет их молча, Advanced
+   round-trip всех пяти полей остаётся посимвольным.
+2. **`DATA-TRASH-001` — обратимое удаление колоды.**
    Заменить мгновенный hard delete на trash/restore с явным сроком хранения и
    отдельным безвозвратным purge. Критерий: cards/settings/trusted history восстанавливаются
    атомарно; stale-version и quota semantics определены тестами.
-2. **`PREVIEW-OVERLAY-001` — точная сверка сторон.**
+3. **`PREVIEW-OVERLAY-001` — точная сверка сторон.**
    Добавить в preview управляемое наложение front/back с зеркалированием,
    прозрачностью, cut bounds, номерами slots и выбранным printer profile.
    Критерий: overlay и print PDF получают один immutable job и одинаковую
    transform-матрицу; E2E проходит оба duplex mode.
-3. **`TEXT-NEWLINE-001` — единая семантика переводов строк.**
-   Определить и зафиксировать safe-контракт для CRLF/LF, пустых строк и абзацев
-   в HTML preview и PDF, не меняя raw Advanced. Критерий: single/bulk/CSV/JSON round-trip
-   и PDF text/bbox fixtures совпадают по опубликованной семантике.
 
 ### P2 — эксплуатация и полировка
 
@@ -86,10 +89,13 @@ forensic API/CLI restore, отказ при publication `replace/fsync`, committ
    В CI оставить автоматический round-trip; для production регулярно выносить backup
    за пределы host и периодически проводить учебное восстановление в отдельный
    каталог. Критерий: зафиксированы RPO/RTO, retention и результат последней drill-проверки.
+4. **`IMPORT-ERROR-FOCUS-001` — единый error focus для preview импорта.**
+   HTTP/network ошибки bulk/CSV должны получать тот же focus/scroll, что успешный
+   preview и preflight; проверить keyboard/aria-live сценарием Chromium.
 
 ## 4. Порядок работ
 
-1. Закрыть оставшийся чисто программный `TEXT-NEWLINE-001`.
+1. Закрыть `MODE-HIDDEN-FIELDS-001` без изменения raw-контракта Advanced.
 2. Реализовать `DATA-TRASH-001` как отдельную migration + UI-фичу с полным
    restore/purge-контуром.
 3. Сделать `PREVIEW-OVERLAY-001`, не меняя print transform и не дублируя renderer.

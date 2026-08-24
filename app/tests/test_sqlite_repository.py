@@ -217,7 +217,11 @@ def test_deck_and_ordered_card_round_trip(sqlite_repo):
 
 def test_clone_lineage_and_delete(sqlite_repo):
     source = sqlite_repo.create_deck('Source')
-    original = Card(front='Q', back='A')
+    original = Card(
+        front=' Q\r\nline\rraw\n ',
+        back='\nA\n\n',
+        section=' Section\rlabel ',
+    )
     sqlite_repo.save_cards(source.id, CardDeck([original]))
 
     clone = sqlite_repo.clone_deck(source.id)
@@ -225,12 +229,43 @@ def test_clone_lineage_and_delete(sqlite_repo):
     assert clone.parent_id == source.id
     assert clone_card.id != original.id
     assert clone_card.parent_id == original.id
+    assert (
+        clone_card.section, clone_card.front, clone_card.back
+    ) == (
+        original.section, original.front, original.back
+    )
     assert sqlite_repo.clone_deck('missing') is None
 
     assert sqlite_repo.delete_deck(source.id) is True
     assert sqlite_repo.delete_deck(source.id) is False
     assert sqlite_repo.get_deck(source.id) is None
-    assert sqlite_repo.load_cards(clone.id).cards[0].front == 'Q'
+    assert sqlite_repo.load_cards(clone.id).cards[0].front == original.front
+
+
+def test_sqlite_reopen_preserves_mixed_newlines_in_all_card_fields(sqlite_repo):
+    deck = sqlite_repo.create_deck(
+        'Mixed newlines',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    expected = Card(
+        section=' S\r\nsection\r ',
+        front=' F\nfront\r\n ',
+        back=' B\rback\n ',
+        upper_header=' U\r\nupper\n ',
+        lower_header=' L\rlower\n ',
+    )
+    sqlite_repo.save_cards(deck.id, CardDeck([expected]))
+
+    reopened = SqliteRepository(sqlite_repo.data_dir)
+    actual = reopened.load_cards(deck.id).cards[0]
+
+    assert (
+        actual.section, actual.front, actual.back,
+        actual.upper_header, actual.lower_header,
+    ) == (
+        expected.section, expected.front, expected.back,
+        expected.upper_header, expected.lower_header,
+    )
 
 
 def test_render_settings_are_versioned_and_cloned(sqlite_repo):

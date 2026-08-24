@@ -1,6 +1,7 @@
 {% macro header_value(source, custom_text, card, number) -%}
-    {%- if source.value == 'section' -%}{{ card.section }}{%- elif source.value == 'card-number' -%}№ {{ number }}{%- else -%}{{ custom_text|replace('{{ card_number }}', number|string)|replace('{{ card_count }}', cards_count|string) }}{%- endif -%}
+    {%- if source.value == 'section' -%}{{ safe_single_line(card.section) }}{%- elif source.value == 'card-number' -%}№ {{ number }}{%- else -%}{{ safe_single_line(custom_text)|replace('{{ card_number }}', number|string)|replace('{{ card_count }}', cards_count|string) }}{%- endif -%}
 {%- endmacro %}
+{% from 'cards/_safe_text.html' import render_safe_text with context %}
 {% set typography = deck.render_settings.typography %}
 <!DOCTYPE html>
 <html lang="ru">
@@ -38,7 +39,7 @@
       data-secondary-header-source="{{ deck.render_settings.secondary_header_source.value }}"
       data-secondary-header-text="{{ deck.render_settings.secondary_header_text }}"
       data-section-break="{{ deck.render_settings.section_break.value }}"
-      class="{% if not is_advanced %}align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }} secondary-header-align-{{ deck.render_settings.secondary_header_alignment.value }} header-rule-{{ deck.render_settings.header_rule.value }} header-rule-spacing-{{ deck.render_settings.header_rule_spacing.value }} secondary-header-rule-{{ deck.render_settings.secondary_header_rule.value }} secondary-header-rule-spacing-{{ deck.render_settings.secondary_header_rule_spacing.value }}{% if typography %} typography-enabled body-family-{{ typography.body.family.value }} body-size-{{ typography.body.size.value }} body-weight-{{ typography.body.weight.value }} body-style-{{ typography.body.style.value }} line-spacing-{{ typography.line_spacing.value }} primary-family-{{ typography.primary_header.family.value }} primary-size-{{ typography.primary_header.size.value }} primary-weight-{{ typography.primary_header.weight.value }} primary-style-{{ typography.primary_header.style.value }} secondary-family-{{ typography.secondary_header.family.value }} secondary-size-{{ typography.secondary_header.size.value }} secondary-weight-{{ typography.secondary_header.weight.value }} secondary-style-{{ typography.secondary_header.style.value }}{% endif %}{% endif %}">
+      class="{% if not is_advanced %}align-h-{{ deck.render_settings.horizontal_alignment.value }} align-v-{{ deck.render_settings.vertical_alignment.value }} header-align-{{ deck.render_settings.header_alignment.value }} secondary-header-align-{{ deck.render_settings.secondary_header_alignment.value }} header-rule-{{ deck.render_settings.header_rule.value }} header-rule-spacing-{{ deck.render_settings.header_rule_spacing.value }} secondary-header-rule-{{ deck.render_settings.secondary_header_rule.value }} secondary-header-rule-spacing-{{ deck.render_settings.secondary_header_rule_spacing.value }}{% if typography %} typography-enabled body-family-{{ typography.body.family.value }} body-size-{{ typography.body.size.value }} body-weight-{{ typography.body.weight.value }} body-style-{{ typography.body.style.value }} line-spacing-{{ typography.line_spacing.value }} paragraph-spacing-{{ typography.paragraph_spacing.value }} primary-family-{{ typography.primary_header.family.value }} primary-size-{{ typography.primary_header.size.value }} primary-weight-{{ typography.primary_header.weight.value }} primary-style-{{ typography.primary_header.style.value }} secondary-family-{{ typography.secondary_header.family.value }} secondary-size-{{ typography.secondary_header.size.value }} secondary-weight-{{ typography.secondary_header.weight.value }} secondary-style-{{ typography.secondary_header.style.value }}{% endif %}{% endif %}">
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> → {{ deck.name }}
     </div>
@@ -241,13 +242,14 @@
             <div class="form-row">
                 <div class="form-group">
                 <label for="front">Лицевая сторона ({{ 'trusted TeX' if is_advanced else 'задание' }}):</label>
-                    <textarea name="front" id="front" placeholder="{{ 'TeX-код лицевой стороны...' if is_advanced else 'Текст задания...' }}"></textarea>
+                    <textarea name="front" id="front"{% if not is_advanced %} aria-describedby="safe-text-help"{% endif %} placeholder="{{ 'TeX-код лицевой стороны...' if is_advanced else 'Текст задания...' }}"></textarea>
                 </div>
                 <div class="form-group">
                     <label for="back">Оборотная сторона ({{ 'trusted TeX' if is_advanced else 'решение' }}):</label>
-                    <textarea name="back" id="back" placeholder="{{ 'TeX-код оборотной стороны...' if is_advanced else 'Текст решения...' }}"></textarea>
+                    <textarea name="back" id="back"{% if not is_advanced %} aria-describedby="safe-text-help"{% endif %} placeholder="{{ 'TeX-код оборотной стороны...' if is_advanced else 'Текст решения...' }}"></textarea>
                 </div>
             </div>
+            {% if not is_advanced %}<p id="safe-text-help" class="preview-notice">Один Enter переносит строку; пустая строка начинает новый абзац. Интервал между абзацами задаётся в типографике.</p>{% endif %}
             <button type="submit" class="btn-primary">➕ Добавить карточку</button>
         </form>
     </div>
@@ -264,7 +266,7 @@
             {% if is_advanced %}
             <p class="preview-notice">Одна строка: <code>front||back||upper_header||lower_header</code>. Поле с буквальным <code>||</code> заключите в двойные кавычки. Для многострочного или сгенерированного TeX используйте CSV.</p>
             {% else %}
-            <p class="preview-notice">Одна строка: <code>front||back</code>. Поле с буквальным <code>||</code> заключите в двойные кавычки.</p>
+            <p class="preview-notice">Одна физическая строка: <code>front||back</code>. Enter здесь начинает следующую карточку; для многострочного текста используйте одиночное добавление или quoted-поле CSV. Поле с буквальным <code>||</code> заключите в двойные кавычки.</p>
             {% endif %}
             <label for="bulk">Каждая карточка с новой строки:</label>
             <textarea name="bulk" id="bulk" rows="8"
@@ -356,7 +358,7 @@
     <div id="view-preview" style="display:none">
         <div class="preview-grid" id="preview-grid">
             {% for card in cards %}
-            <div class="preview-card" data-card-id="{{ card.id }}" data-section="{{ card.section }}">
+            <div class="preview-card" data-card-id="{{ card.id }}" data-section="{{ safe_single_line(card.section) }}">
                 <span class="card-number">#{{ loop.index }}</span>
                 <span class="card-actions">
                     <a href="{{ url_for('cards.edit_card', deck_id=deck.id, card_id=card.id) }}" aria-label="Редактировать карточку {{ loop.index }}" title="Редактировать">✏️</a>
@@ -366,7 +368,7 @@
                     <div class="preview-side preview-front">
                         {% if not is_advanced and deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
                         {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
-                        <div class="preview-content{% if is_advanced %} advanced-source-preview{% endif %}">{{ card.front }}</div>
+                        <div class="preview-content{% if is_advanced %} advanced-source-preview{% endif %}">{% if is_advanced %}{{ card.front }}{% else %}{{ render_safe_text(card.front) }}{% endif %}</div>
                         {% if not is_advanced and deck.render_settings.header_visibility.value in ('front', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
                         {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('front', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
                         <span class="preview-side-label">задание</span>
@@ -374,7 +376,7 @@
                     <div class="preview-side preview-back">
                         {% if not is_advanced and deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'top' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
                         {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'top' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
-                        <div class="preview-content{% if is_advanced %} advanced-source-preview{% endif %}">{{ card.back }}</div>
+                        <div class="preview-content{% if is_advanced %} advanced-source-preview{% endif %}">{% if is_advanced %}{{ card.back }}{% else %}{{ render_safe_text(card.back) }}{% endif %}</div>
                         {% if not is_advanced and deck.render_settings.header_visibility.value in ('back', 'both') and deck.render_settings.header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-primary" data-repeat="{{ deck.render_settings.header_repeat.value }}">{{ header_value(deck.render_settings.header_source, deck.render_settings.header_text, card, loop.index) }}</div>{% endif %}
                         {% if not is_advanced and deck.render_settings.secondary_header_visibility.value in ('back', 'both') and deck.render_settings.secondary_header_position.value == 'bottom' %}<div class="preview-section preview-header preview-header-secondary" data-repeat="{{ deck.render_settings.secondary_header_repeat.value }}">{{ header_value(deck.render_settings.secondary_header_source, deck.render_settings.secondary_header_text, card, loop.index) }}</div>{% endif %}
                         <span class="preview-side-label">решение</span>
@@ -452,6 +454,7 @@
         <iframe id="pdf-preview-frame" title="Предпросмотр печатного PDF"></iframe>
     </dialog>
 
+    <script src="{{ url_for('cards.static', filename='cards/safe-text.js') }}"></script>
     <script src="{{ url_for('cards.static', filename='cards/deck.js') }}"></script>
 </body>
 </html>

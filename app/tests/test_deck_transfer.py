@@ -38,7 +38,11 @@ def _payload(*, name='Deck', cards=None, templates=None, settings=None):
 
 def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
     source = repo.create_deck('География', 'Столицы')
-    original = Card(front='Франция', back='Париж', section='Европа')
+    original = Card(
+        front='Франция\r\nСтолица?\n\nНазовите город',
+        back='\nПариж\n',
+        section='Европа',
+    )
     repo.save_cards(source.id, CardDeck([original]))
     settings = DeckRenderSettings(
         preset='custom',
@@ -65,7 +69,37 @@ def test_versioned_json_round_trip_creates_safe_copy_with_lineage(repo):
     assert imported.parent_id == source.id
     assert imported_card.parent_id == original.id
     assert imported_card.section == 'Европа'
+    assert imported_card.front == original.front
+    assert imported_card.back == original.back
     assert repo.get_render_settings(imported.id) == settings
+
+
+def test_advanced_json_round_trip_preserves_mixed_newlines_in_all_raw_fields(
+    repo
+):
+    source = repo.create_deck(
+        'Advanced mixed EOL',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    expected = Card(
+        section=' Section\r\nlabel ',
+        front=' \\vfill\r\nFront\rraw\n ',
+        back='Back\n\nraw\r',
+        upper_header='Top\r\n{{ card_number }}',
+        lower_header='Bottom\r{{ card_count }}\n',
+    )
+    repo.save_cards(source.id, CardDeck([expected]))
+
+    imported = import_deck_json(repo, export_deck_json(repo, source.id))
+    actual = repo.load_cards(imported.id).cards[0]
+
+    assert (
+        actual.section, actual.front, actual.back,
+        actual.upper_header, actual.lower_header,
+    ) == (
+        expected.section, expected.front, expected.back,
+        expected.upper_header, expected.lower_header,
+    )
 
 
 def test_trusted_export_import_preserves_wrappers_but_never_approval(tmp_path):
@@ -185,7 +219,11 @@ def test_current_schema_rejects_malformed_trusted_contract_atomically(
 def test_csv_export_is_bom_semicolon_and_quote_safe(repo):
     deck = repo.create_deck('CSV')
     repo.save_cards(deck.id, CardDeck([
-        Card(section='Тема', front='A;B', back='line\nvalue')
+        Card(
+            section='Тема',
+            front='A;B\r\nline\rvalue',
+            back='line\n\nvalue',
+        )
     ]))
     exported = export_deck_csv(repo, deck.id)
     assert exported.startswith(b'\xef\xbb\xbf')
@@ -196,7 +234,7 @@ def test_csv_export_is_bom_semicolon_and_quote_safe(repo):
     ))
     assert rows == [
         ['section', 'front', 'back'],
-        ['Тема', 'A;B', 'line\nvalue'],
+        ['Тема', 'A;B\r\nline\rvalue', 'line\n\nvalue'],
     ]
 
 
@@ -207,10 +245,10 @@ def test_advanced_csv_export_round_trips_all_raw_fields(repo):
     )
     expected = Card(
         section=' Raw ',
-        front='  \\vfill\nFront;value, pair  ',
-        back='Back "quoted"',
-        upper_header='{{ card_number }}',
-        lower_header=r'Foot\\line',
+        front='  \\vfill\r\nFront;value, pair\rRaw  ',
+        back='Back "quoted"\n\nline',
+        upper_header='{{ card_number }}\r\nTop',
+        lower_header='Foot\\line\rBottom',
     )
     repo.save_cards(deck.id, CardDeck([expected]))
 

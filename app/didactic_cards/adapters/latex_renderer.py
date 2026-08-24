@@ -6,6 +6,7 @@ from copy import copy
 
 from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import DocumentRenderer
+from ..domain.safe_text import safe_single_line, safe_text_paragraphs
 from ..domain.printing import (
     DuplexMode,
     PrintLayout,
@@ -147,6 +148,20 @@ def _card_content(text: str) -> str:
     """Возвращает экранированный текст или mbox для пустых карточек."""
     escaped = escape_latex(text) if text.strip() else ''
     return escaped if escaped else r'\mbox{}'
+
+
+def _safe_card_body_content(text: str) -> str:
+    """Wrap escaped Safe text in renderer-owned layout commands."""
+    if not text.strip():
+        return r'\mbox{}'
+    paragraphs = []
+    for paragraph in safe_text_paragraphs(text):
+        lines = [
+            escape_latex(line) if line else r'\mbox{}'
+            for line in paragraph
+        ]
+        paragraphs.append(r'\cardsafelinebreak '.join(lines))
+    return r'\cardsafeparagraphbreak '.join(paragraphs)
 
 
 def _font_command(
@@ -408,9 +423,10 @@ class LatexRenderer(DocumentRenderer):
         for card in deck.cards:
             if isinstance(card, PrintPaddingCard):
                 continue
-            if previous_section is None or card.section != previous_section:
+            section = safe_single_line(card.section)
+            if previous_section is None or section != previous_section:
                 section_start_ids.add(id(card))
-            previous_section = card.section
+            previous_section = section
         sheets = build_sheets(
             deck.cards,
             rows=self.rows_per_page,
@@ -546,6 +562,8 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\cardsecondaryheaderalign}}{{{secondary_header_alignment}}}
 \newcommand{{\cardbodyfont}}{{{body_fonts[0]}}}
 \newcommand{{\cardparagraphspacing}}{{{paragraph_spacing}}}
+\newcommand{{\cardsafelinebreak}}{{\\{{}}}}
+\newcommand{{\cardsafeparagraphbreak}}{{\par\noindent}}
 
 \setlength{{\fboxsep}}{{{self.fbox_sep}pt}}
 \setlength{{\fboxrule}}{{{self.fbox_rule}pt}}
@@ -713,11 +731,11 @@ class LatexRenderer(DocumentRenderer):
         card_count: int,
     ) -> str:
         if source is HeaderSource.SECTION:
-            return _card_content(card.section)
+            return _card_content(safe_single_line(card.section))
         if source is HeaderSource.CARD_NUMBER:
             return _card_content(f'№ {card_number}')
         return _card_content(render_safe_header_template(
-            custom_text,
+            safe_single_line(custom_text),
             card_number=card_number,
             card_count=card_count,
         ))
@@ -768,7 +786,7 @@ class LatexRenderer(DocumentRenderer):
                         else self.trusted_template.back_source
                     ),
                     content=content,
-                    section=_card_content(card.section),
+                    section=_card_content(safe_single_line(card.section)),
                     card_number=card_number,
                     card_count=card_count,
                     side=side,
@@ -781,7 +799,7 @@ class LatexRenderer(DocumentRenderer):
                 + f'\n\\typeout{{DIDACTIC-CARDS-HBOX-END:{card_number}:{side}:body}}'
             )
         settings = self.render_settings
-        content = _card_content(text)
+        content = _safe_card_body_content(text)
         header_visible = bool(card_number) and self._header_is_visible(
             side,
             visibility=settings.header_visibility,

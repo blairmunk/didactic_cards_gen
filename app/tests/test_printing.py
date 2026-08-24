@@ -102,6 +102,21 @@ def test_continuous_layout_only_pads_the_last_sheet():
     assert layout.trailing_padding == 5
 
 
+def test_visually_equal_section_line_endings_do_not_insert_physical_padding():
+    layout = build_print_layout(
+        [
+            Card(front='Q1', section='Тема\r\nодин'),
+            Card(front='Q2', section='Тема\nодин'),
+        ],
+        rows=2,
+        columns=2,
+        section_break='new-row',
+    )
+
+    assert [card.front for card in layout.cards[:2]] == ['Q1', 'Q2']
+    assert layout.section_padding == 0
+
+
 @pytest.mark.parametrize('rows, columns', [(0, 2), (4, 0)])
 def test_print_layout_rejects_invalid_grid(rows, columns):
     with pytest.raises(ValueError, match='positive'):

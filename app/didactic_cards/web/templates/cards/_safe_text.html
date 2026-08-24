@@ -1,0 +1,11 @@
+{% macro render_safe_text(value) -%}
+<div class="safe-text-flow">
+{%- for paragraph in safe_text_paragraphs(value) -%}
+<p class="safe-text-paragraph">
+{%- for line in paragraph -%}
+<span class="safe-text-line">{{ line }}</span>
+{%- endfor -%}
+</p>
+{%- endfor -%}
+</div>
+{%- endmacro %}

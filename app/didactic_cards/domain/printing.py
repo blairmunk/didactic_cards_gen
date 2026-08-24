@@ -7,6 +7,7 @@ import re
 from typing import Sequence
 
 from .entities import Card
+from .safe_text import safe_single_line
 from .rendering import SectionBreak
 
 
@@ -124,8 +125,9 @@ def build_print_layout(
     section_padding = 0
     previous_section: str | None = None
     for card in cards:
+        section = safe_single_line(card.section)
         section_changed = (
-            previous_section is not None and card.section != previous_section
+            previous_section is not None and section != previous_section
         )
         if section_changed and break_mode is not SectionBreak.CONTINUOUS:
             boundary = (
@@ -137,7 +139,7 @@ def build_print_layout(
             laid_out.extend(PrintPaddingCard() for _ in range(gap))
             section_padding += gap
         laid_out.append(card)
-        previous_section = card.section
+        previous_section = section
 
     trailing_padding = (-len(laid_out)) % capacity if laid_out else 0
     laid_out.extend(PrintPaddingCard() for _ in range(trailing_padding))

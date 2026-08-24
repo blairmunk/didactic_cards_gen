@@ -552,3 +552,22 @@ fallback теперь хранится в process-safe `app/data/.secret_key` с
 limit 10 секунд нестабилен на холодном TeX/font cache. При сохранённых ограничениях
 CPU, памяти, числа процессов и размера результата timeout приведён к обычному
 `pdflatex`-лимиту 30 секунд; превышение по-прежнему завершает sandbox fail-closed.
+
+### 7.13. ✅ Единая семантика Safe-переносов строк
+
+`TEXT-NEWLINE-001` закрыт 24.08.2026 после отдельного аудита renderer, ingress и UI.
+Один Enter в Safe front/back теперь является строкой, пустая/whitespace-only строка —
+абзацем, серии пустых строк схлопываются, внешние layout-разрывы игнорируются, а
+display math получает собственный блок. CRLF и lone CR нормализуются только при
+presentation; SQLite, clone, JSON и strict CSV сохраняют исходную строку. Advanced
+front/back/headers по-прежнему проходят raw без Safe-команд.
+
+HTML server render, AJAX add и live edit используют одну semantic DOM-модель через
+`textContent`; профильный `paragraph_spacing` совпадает с PDF. No-op browser edit
+сохраняет импортированные CRLF/CR, хотя изменённый textarea-текст естественно приходит
+как LF. Bulk делит карточки только по CRLF/LF/CR, а не по Unicode NEL/LS/PS.
+
+Security regression отдельно фиксирует строку `[30mm]` после Enter: owned TeX macro
+закрывает optional argument `\\`, поэтому Safe-текст не может навязать вертикальный
+отступ. Реальные `pdflatex`/bbox и Chromium-тесты проверяют строки, абзацный gap,
+MathJax, XSS boundary, CSV no-op edit и независимость Advanced/raw.

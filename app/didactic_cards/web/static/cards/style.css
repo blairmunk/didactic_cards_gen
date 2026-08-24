@@ -612,6 +612,33 @@ summary {
     min-height: 0;
 }
 
+.safe-text-flow {
+    display: block;
+    width: 100%;
+}
+
+.safe-text-paragraph,
+.safe-text-line {
+    display: block;
+}
+
+.safe-text-paragraph {
+    margin: 0;
+}
+
+.safe-text-line {
+    min-height: 1em;
+    min-height: 1lh;
+}
+
+.paragraph-spacing-small .safe-text-paragraph + .safe-text-paragraph {
+    margin-top: 2pt;
+}
+
+.paragraph-spacing-medium .safe-text-paragraph + .safe-text-paragraph {
+    margin-top: 4pt;
+}
+
 .align-h-left .preview-content { align-items: flex-start; text-align: left; }
 .align-h-center .preview-content { align-items: center; text-align: center; }
 .align-h-right .preview-content { align-items: flex-end; text-align: right; }

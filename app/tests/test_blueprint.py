@@ -294,7 +294,8 @@ def test_card_html_workflow(client, repo, deck_id):
         },
     )
     assert response.status_code == 302
-    assert repo.load_cards(deck_id).cards[0].front == "Question"
+    assert repo.load_cards(deck_id).cards[0].front == "  Question  "
+    assert repo.load_cards(deck_id).cards[0].back == "  Answer  "
     assert repo.load_cards(deck_id).cards[0].section == "Mechanics"
 
     bulk_preview, bulk_options = _preview_bulk(
@@ -632,6 +633,67 @@ def test_api_card_workflow(client, deck_id):
     deleted = client.delete(f"/api/deck/{deck_id}/delete_card/{first_id}")
     assert deleted.status_code == 200
     assert deleted.json["cards_count"] == 1
+
+
+def test_single_card_ingress_preserves_outer_whitespace_and_newline_bytes(
+    client, repo, deck_id
+):
+    api_front = '  API\r\nline\n\n  '
+    api_back = '\nanswer\n'
+    added = client.post(
+        f'/api/deck/{deck_id}/add_card',
+        json={'front': api_front, 'back': api_back},
+    )
+
+    assert added.status_code == 200
+    assert added.json['card']['front'] == api_front
+    assert added.json['card']['back'] == api_back
+    assert repo.load_cards(deck_id).cards[0].front == api_front
+
+    html_front = '\n  HTML\rline  \n'
+    response = client.post(
+        f'/deck/{deck_id}/add_card',
+        data={
+            'front': html_front,
+            'back': '',
+            'version': added.json['deck_version'],
+        },
+    )
+
+    assert response.status_code == 302
+    assert repo.load_cards(deck_id).cards[1].front == html_front
+
+
+def test_safe_preview_uses_semantic_lines_without_interpreting_html(
+    client, repo, deck_id
+):
+    repo.save_cards(deck_id, CardDeck([
+        Card(front='<img src=x onerror=alert(1)>\nLine 2\n\nParagraph')
+    ]))
+
+    page = client.get(f'/deck/{deck_id}')
+
+    assert page.status_code == 200
+    assert page.text.count('class="safe-text-paragraph"') == 3
+    assert page.text.count('class="safe-text-line"') == 4
+    assert '&lt;img src=x onerror=alert(1)&gt;' in page.text
+    assert '<img src=x onerror=alert(1)>' not in page.text
+
+
+def test_advanced_preview_keeps_raw_source_outside_safe_formatter(client, repo):
+    deck = repo.create_deck(
+        'Raw preview',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    repo.save_cards(deck.id, CardDeck([
+        Card(front='\\vfill\nRAW\n\nSOURCE')
+    ]))
+
+    page = client.get(f'/deck/{deck.id}')
+
+    assert page.status_code == 200
+    assert 'advanced-source-preview' in page.text
+    assert 'safe-text-flow' not in page.text
 
 
 @pytest.mark.parametrize(

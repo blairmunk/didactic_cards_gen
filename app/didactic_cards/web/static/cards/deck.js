@@ -122,7 +122,9 @@ document.addEventListener('DOMContentLoaded', function() {
     function refreshSectionHeaders() {
         let previousSection = null;
         document.querySelectorAll('#preview-grid .preview-card').forEach(function(card) {
-            const section = card.dataset.section || '';
+            const section = DidacticCardsSafeText.singleLine(
+                card.dataset.section || ''
+            );
             card.querySelectorAll('.preview-header').forEach(function(header) {
                 const sectionStartOnly = header.dataset.repeat === 'section-start';
                 const visible = !sectionStartOnly || previousSection === null || section !== previousSection;
@@ -139,9 +141,11 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     function safeHeaderValue(source, customText, section, number, count) {
-        if (source === 'section') return section || '';
+        if (source === 'section') {
+            return DidacticCardsSafeText.singleLine(section || '');
+        }
         if (source === 'card-number') return '№ ' + number;
-        return (customText || '')
+        return DidacticCardsSafeText.singleLine(customText || '')
             .replaceAll('{{ card_number }}', String(number))
             .replaceAll('{{ card_count }}', String(count));
     }
@@ -274,7 +278,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 headerHtml('secondary', side, 'top') +
                 '<div class="preview-content' +
                 (IS_ADVANCED ? ' advanced-source-preview' : '') +
-                '">' + escapeHtml(content) + '</div>' +
+                '"></div>' +
                 headerHtml('primary', side, 'bottom') +
                 headerHtml('secondary', side, 'bottom') +
                 '<span class="preview-side-label">' + label + '</span>' +
@@ -290,6 +294,14 @@ document.addEventListener('DOMContentLoaded', function() {
             sideHtml('front', cardData.front, 'задание') +
             sideHtml('back', cardData.back, 'решение') +
             '</div>';
+        const previewContents = div.querySelectorAll('.preview-content');
+        if (IS_ADVANCED) {
+            previewContents[0].textContent = cardData.front;
+            previewContents[1].textContent = cardData.back;
+        } else {
+            DidacticCardsSafeText.render(previewContents[0], cardData.front);
+            DidacticCardsSafeText.render(previewContents[1], cardData.back);
+        }
         grid.appendChild(div);
         attachDeleteEvent(div.querySelector('.delete-btn'));
         renumberPreviews();
@@ -311,13 +323,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const sectionEl = document.getElementById('section');
             const upperHeaderEl = document.getElementById('upper-header');
             const lowerHeaderEl = document.getElementById('lower-header');
-            const front = frontEl.value.trim();
-            const back = backEl.value.trim();
+            const front = frontEl.value;
+            const back = backEl.value;
             const section = sectionEl.value.trim();
             const upperHeader = upperHeaderEl ? upperHeaderEl.value : '';
             const lowerHeader = lowerHeaderEl ? lowerHeaderEl.value : '';
 
-            if (!front && !back && !upperHeader.trim() && !lowerHeader.trim()) {
+            if (!front.trim() && !back.trim() &&
+                    !upperHeader.trim() && !lowerHeader.trim()) {
                 alert('Заполните хотя бы одно поле');
                 return;
             }

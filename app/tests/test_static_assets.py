@@ -24,6 +24,8 @@ def test_keyboard_reorder_uses_the_same_persistent_uuid_path():
 
 def test_templates_have_no_content_after_closing_html():
     for template in (WEB_ROOT / 'templates').rglob('*.html'):
+        if template.name.startswith('_'):
+            continue
         source = template.read_text(encoding='utf-8').strip()
         assert source.endswith('</html>'), template
 
@@ -59,6 +61,23 @@ def test_mathjax_has_local_loading_status():
     script = (WEB_ROOT / 'static/cards/deck.js').read_text(encoding='utf-8')
     assert 'id="math-status"' in index
     assert 'Не удалось загрузить локальный MathJax' in script
+
+
+def test_safe_text_preview_builds_text_only_semantic_dom():
+    formatter = (WEB_ROOT / 'static/cards/safe-text.js').read_text(
+        encoding='utf-8'
+    )
+    templates = '\n'.join(
+        path.read_text(encoding='utf-8')
+        for path in (WEB_ROOT / 'templates/cards').glob('*.html')
+    )
+
+    assert 'createElement' in formatter
+    assert 'textContent = value' in formatter
+    assert 'replaceChildren(flow)' in formatter
+    assert 'innerHTML' not in formatter
+    assert "filename='cards/safe-text.js'" in templates
+    assert 'aria-describedby="safe-text-help"' in templates
 
 
 def test_pdf_preview_uses_generated_pdf_in_a_blob_dialog():
