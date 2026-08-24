@@ -160,6 +160,13 @@ Preview показывает mapping, encoding, номера строк, все 
 
 Поле «Секция / тема» сохраняется вместе с карточкой. В одиночной и пакетной формах его можно задать непосредственно; пакетная форма назначает одну секцию всей добавляемой пачке. При редактировании секция меняется вместе со сторонами карточки.
 
+Raw-поля карточки `upper_header/lower_header` принадлежат только Advanced-типу.
+Обычная колода не показывает их и принимает на API/JSON/storage boundary лишь точную
+пустую строку; пробел, tab или перевод строки уже считаются raw-содержимым и
+отклоняются атомарно. Это не те же поля, что встроенные верхний/нижний колонтитулы
+обычной колоды: Safe-колонтитулы являются настройками всей колоды и проходят
+экранированный allowlisted renderer.
+
 Пример bulk:
 
 ```text
@@ -228,7 +235,7 @@ HTML-сетка использует те же семантические нас
 - `{{ side }}` — `front` либо `back`;
 - `{{ upper_header }}` и `{{ lower_header }}` — raw TeX-значения верхнего и нижнего колонтитула конкретной карточки. Внутри них тоже разворачиваются `section`, `card_number`, `card_count` и `side`.
 
-При добавлении и редактировании Advanced-карточки поля колонтитулов необязательны. Приложение не резервирует под них место, не добавляет линию и не выбирает шрифт: если оболочка не содержит соответствующий плейсхолдер, значение вообще не печатается. Значение остаётся raw TeX: приложение заменяет в нём только известные точные контекстные маркеры, а остальные команды и группировки не интерпретирует. Например, код `\vfill\centering Вопрос\vfill` можно записать прямо в front. Если такое обрамление нужно всем лицам, его удобнее вынести в оболочку лица `\vfill\centering {{ content }}\vfill`, а обороту задать другую. Ни escaped/raw selector, ни built-in header/alignment/типографика на Advanced-экране не показываются. HTML-превью показывает исходник как текст; точный результат смотрите в PDF-preview.
+При добавлении и редактировании Advanced-карточки поля колонтитулов необязательны. Они недоступны у Safe-карточки не только визуально: HTML/API, use cases, JSON import и SQLite-запись отклоняют непустое значение. Приложение не резервирует под raw-поля место, не добавляет линию и не выбирает шрифт: если оболочка не содержит соответствующий плейсхолдер, значение вообще не печатается. Значение остаётся raw TeX: приложение заменяет в нём только известные точные контекстные маркеры, а остальные команды и группировки не интерпретирует. Например, код `\vfill\centering Вопрос\vfill` можно записать прямо в front. Если такое обрамление нужно всем лицам, его удобнее вынести в оболочку лица `\vfill\centering {{ content }}\vfill`, а обороту задать другую. Ни escaped/raw selector, ни built-in header/alignment/типографика на Advanced-экране не показываются. HTML-превью показывает исходник как текст; точный результат смотрите в PDF-preview.
 
 Рабочий порядок защищает от случайной активации:
 
@@ -298,7 +305,7 @@ MathJax 3.2.2 вместе с web fonts хранится локально в sta
 app/data/cards.sqlite3        # активная транзакционная база
 ```
 
-Активное хранилище — только SQLite schema 13: `decks`, `cards`,
+Активное хранилище — только SQLite schema 14: `decks`, `cards`,
 упорядоченная связь `deck_cards(position)`, `deck_render_settings`,
 `printer_profiles`, карантин `trusted_templates` и журнал
 `schema_migrations`. Схема помечена фиксированным SQLite `application_id`:
@@ -307,19 +314,22 @@ app/data/cards.sqlite3        # активная транзакционная б
 работает в WAL, а каждая серия чтений или записей имеет единый
 транзакционный snapshot.
 
-Пустой файл создаётся сразу в schema 13. Из старых баз автоматически
-поддерживается только точная schema 12. При первом старте приложение:
+Пустой файл создаётся сразу в schema 14. Из старых баз автоматически
+поддерживаются только точные schema 12 и 13. При первом старте приложение:
 
-1. проверит таблицы и колонки schema 12;
+1. проверит таблицы, индексы и metadata исходной schema;
 2. создаст в `app/data/backups` проверенный
-   `pre-migration-v12-stable.sqlite3` с manifest или проверит/повторно
+   `pre-migration-v12-stable.sqlite3` либо `pre-migration-v13-stable.sqlite3`
+   с manifest или проверит/повторно
    использует уже созданную копию после failed-start;
-3. выполнит единственную зарегистрированную миграцию 12→13 в одной
-   write-транзакции.
+3. выполнит цепочку 12→13→14 либо шаг 13→14 в одной write-транзакции;
+4. в шаге 13→14 приведёт `upper_header/lower_header` Safe-карточек к точной
+   пустой строке, не меняя body, секцию, порядок, версии/timestamps и все пять
+   полей Advanced-карточек. Исходные legacy-значения остаются в backup.
 
-Перед первым запуском schema-13 кода остановите **все** workers прежней
-schema-12 версии. Rolling upgrade со смешанными версиями небезопасен: старый
-процесс не знает о schema 13 и новом lease-протоколе. Только после успешного
+Перед первым запуском schema-14 кода остановите **все** workers прежней
+schema-12/13 версии. Rolling upgrade со смешанными версиями небезопасен: старый
+процесс не знает о schema 14 и новом mode-инварианте. Только после успешного
 однократного startup запускайте остальные workers новой версии.
 
 Базы ниже schema 12, будущие версии и неполные/неизвестные схемы
@@ -343,7 +353,7 @@ Trusted-шаблон хранится отдельно как неизменяе
 
 В редакторе доступны два download:
 
-- versioned JSON schema 8 содержит deck/card UUID, тип колоды, тексты, секции, значения колонтитулов карточек, safe-настройки и историю пар trusted-оболочек/provenance без approval; принимается только schema 8, а все импортированные оболочки получают provenance `imported` и `quarantined`;
+- versioned JSON schema 8 содержит deck/card UUID, тип колоды, тексты, секции, значения колонтитулов карточек, safe-настройки и историю пар trusted-оболочек/provenance без approval; принимается только schema 8, а все импортированные оболочки получают provenance `imported` и `quarantined`. Для Safe оба raw-поля карточки могут отсутствовать или быть только точной пустой строкой; любое содержимое отклоняет весь import до записи. Safe payload с `trusted_templates` также отклоняется и никогда автоматически не повышается до Advanced;
 - UTF-8-BOM CSV использует `;` и стандартное quoting для delimiter/multiline. Обычная колода экспортирует `section;front;back`, Advanced — `section;front;back;upper_header;lower_header`; повторный импорт в колоду того же типа сохраняет значения посимвольно. CSV остаётся форматом строк карточек, а не полным backup колоды;
 
 На странице списка колод JSON export можно импортировать обратно. Импорт никогда не перезаписывает существующую колоду: создаются новые UUID, `parent_id` новой колоды и карточек указывают на исходные UUID. Schema/type/quota/duplicate-ID validation выполняется до записи, а создание deck + cards проходит одной транзакцией; при ошибке не остаётся пустой или частично импортированной колоды. Секция и настройки оформления одинаково применяются в HTML и TeX после импорта.
@@ -416,9 +426,10 @@ python scripts/storage.py inspect
 live-базы; соседний manifest обязателен, а его hash/schema/size обязаны совпасть.
 Перед заменой создаётся проверенный `pre-restore-*` backup текущего состояния,
 кандидат ставится через staged-файл и повторно проверяется. `.secret_key` и другие
-файлы каталога данных restore не заменяет. Backup schema 12 с корректным
-manifest допустим: миграция 12→13 выполняется в staged-копии, а не в файле
-источника.
+файлы каталога данных restore не заменяет. Backup schema 12 или 13 с корректным
+manifest допустим: цепочка 12→13→14 либо шаг 13→14 выполняется в staged-копии,
+а не в файле источника. Поэтому restore не переписывает старый backup; при
+восстановлении schema 13 его legacy Safe-поля очищаются только в новой live-копии.
 
 Если `inspect` показывает, что live DB unhealthy, обычный restore намеренно
 откажется: это защита от неявной потери артефактов. После остановки всех
@@ -487,7 +498,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние полного набора фиксируется после каждого полного CI-прогона; `xfail` нет, branch coverage не ниже обязательного порога 98%. В storage-матрицу входят SQLite 12→13, stable migration retry, strict rejection неизвестных схем, WAL snapshot, concurrent hard-link no-clobber, manifest mismatch, inode leases, active-worker refusal, healthy/forensic restore и rollback при `replace/fsync` failure. Остальной набор покрывает JSON schema 8, hard split safe/Advanced, разные оболочки front/back, колонтитулы на уровне карточек, dynamic safe headers, линии, strict mode-aware CSV, explicit Safe newline/paragraph semantics, direct raw sandbox route, физические row/sheet breaks, PDF-геометрию, safe-типографику, UI-inventory, calibration calculator и production health. Hostile-набор проверяет namespaces, отсутствие host/project mounts и сети, запрет host-записи/shell escape, timeout, лимиты и очистку. Chromium E2E отдельно проходит Safe строки/абзацы и XSS boundary, safe-оформление, Advanced raw/оболочки и колонтитулы карточки, CSV no-op round-trip, preflight и calibration UI.
+Текущее состояние полного набора фиксируется после каждого полного CI-прогона; `xfail` нет, branch coverage не ниже обязательного порога 98%. В storage-матрицу входят SQLite 12→13→14 и 13→14, stable migration retry, mode-aware cleanup, staged restore старых backup, strict rejection неизвестных схем, WAL snapshot, concurrent hard-link no-clobber, manifest mismatch, inode leases, active-worker refusal, healthy/forensic restore и rollback при `replace/fsync` failure. Остальной набор покрывает JSON schema 8, hard split safe/Advanced на HTTP/use-case/storage boundaries, разные оболочки front/back, колонтитулы на уровне карточек, dynamic safe headers, линии, strict mode-aware CSV, explicit Safe newline/paragraph semantics, direct raw sandbox route, физические row/sheet breaks, PDF-геометрию, safe-типографику, UI-inventory, calibration calculator и production health. Hostile-набор проверяет namespaces, отсутствие host/project mounts и сети, запрет host-записи/shell escape, timeout, лимиты и очистку. Chromium E2E отдельно проходит forged Safe raw-field rejection, Safe строки/абзацы и XSS boundary, safe-оформление, Advanced raw/оболочки и колонтитулы карточки, CSV no-op round-trip, preflight и calibration UI.
 
 Golden fixtures обновляются осознанной отдельной командой после визуальной проверки изменения раскладки:
 

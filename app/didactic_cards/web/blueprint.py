@@ -10,7 +10,12 @@ from flask import (Blueprint, render_template, request, redirect,
 
 from ..adapters.latex_renderer import UnsafeLatexError
 from ..adapters.repository_errors import DeckNotFoundError
-from ..domain.entities import Card, CardDeck
+from ..domain.entities import (
+    Card,
+    CardDeck,
+    CardModeError,
+    validate_card_mode_fields,
+)
 from ..domain.interfaces import CompileResult, ConcurrentModificationError
 from ..domain.printing import PrinterProfile, recommend_back_offsets
 from ..domain.rendering import AuthoringMode, DeckRenderSettings, StylePreset
@@ -711,8 +716,15 @@ def export_deck_as_json(deck_id):
     deck = GetDeckInfo(_repo()).execute(deck_id)
     if deck is None:
         return redirect(url_for('cards.decks_list'))
+    try:
+        payload = export_deck_json(_repo(), deck_id)
+    except DeckTransferError as error:
+        return render_template(
+            'cards/error.html', deck=deck, errors=[str(error)], full_log='',
+            error_title='Ошибка экспорта колоды',
+        ), 409
     return send_file(
-        io.BytesIO(export_deck_json(_repo(), deck_id)),
+        io.BytesIO(payload),
         mimetype='application/json',
         as_attachment=True,
         download_name=f'{deck.name}.didactic-cards.json',
@@ -724,8 +736,15 @@ def export_deck_as_csv(deck_id):
     deck = GetDeckInfo(_repo()).execute(deck_id)
     if deck is None:
         return redirect(url_for('cards.decks_list'))
+    try:
+        payload = export_deck_csv(_repo(), deck_id)
+    except DeckTransferError as error:
+        return render_template(
+            'cards/error.html', deck=deck, errors=[str(error)], full_log='',
+            error_title='Ошибка экспорта колоды',
+        ), 409
     return send_file(
-        io.BytesIO(export_deck_csv(_repo(), deck_id)),
+        io.BytesIO(payload),
         mimetype='text/csv',
         as_attachment=True,
         download_name=f'{deck.name}.csv',
@@ -1007,6 +1026,13 @@ def add_card(deck_id):
     section = request.form.get('section', '').strip()
     upper_header = request.form.get('upper_header', '')
     lower_header = request.form.get('lower_header', '')
+    try:
+        validate_card_mode_fields(
+            Card(upper_header=upper_header, lower_header=lower_header),
+            _repo().get_render_settings(deck_id).authoring_mode,
+        )
+    except CardModeError as error:
+        return _render_deck_error(deck_id, str(error), 400)
     if front.strip() or back.strip() or upper_header.strip() or lower_header.strip():
         try:
             AddCard(_repo(), _max_cards()).execute(
@@ -1020,6 +1046,8 @@ def add_card(deck_id):
             )
         except CardLimitExceeded as error:
             return _render_deck_error(deck_id, str(error))
+        except CardModeError as error:
+            return _render_deck_error(deck_id, str(error), 400)
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
 
@@ -1210,13 +1238,16 @@ def edit_card(deck_id, card_id):
         section = request.form.get('section', '').strip()
         upper_header = request.form.get('upper_header')
         lower_header = request.form.get('lower_header')
-        EditCard(_repo()).execute(
-            deck_id, card_id, front, back,
-            _optional_version(request.form.get('version')),
-            section=section,
-            upper_header=upper_header,
-            lower_header=lower_header,
-        )
+        try:
+            EditCard(_repo()).execute(
+                deck_id, card_id, front, back,
+                _optional_version(request.form.get('version')),
+                section=section,
+                upper_header=upper_header,
+                lower_header=lower_header,
+            )
+        except CardModeError as error:
+            return _render_deck_error(deck_id, str(error), 400)
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
     card = card_deck.cards[index].to_dict()
@@ -1456,6 +1487,16 @@ def api_add_card(deck_id):
     front = front_value
     back = back_value
     section = section_value.strip()
+    try:
+        validate_card_mode_fields(
+            Card(
+                upper_header=upper_header_value,
+                lower_header=lower_header_value,
+            ),
+            _repo().get_render_settings(deck_id).authoring_mode,
+        )
+    except CardModeError as error:
+        return jsonify({'error': str(error)}), 400
     if not any((
         front.strip(),
         back.strip(),
@@ -1476,6 +1517,8 @@ def api_add_card(deck_id):
         )
     except CardLimitExceeded as error:
         return jsonify({'error': str(error)}), 409
+    except CardModeError as error:
+        return jsonify({'error': str(error)}), 400
     card_deck = GetDeck(_repo()).execute(deck_id)
     stats = _deck_print_stats(deck_id)
 
@@ -1550,16 +1593,19 @@ def api_edit_card(deck_id, card_id):
         or (lower_header is not None and not isinstance(lower_header, str))
     ):
         return jsonify({'error': 'Поля карточки должны быть строками'}), 400
-    result = EditCard(_repo()).execute(
-        deck_id,
-        card_id,
-        front,
-        back,
-        _optional_version(data.get('version')),
-        section=section.strip() if section is not None else None,
-        upper_header=upper_header,
-        lower_header=lower_header,
-    )
+    try:
+        result = EditCard(_repo()).execute(
+            deck_id,
+            card_id,
+            front,
+            back,
+            _optional_version(data.get('version')),
+            section=section.strip() if section is not None else None,
+            upper_header=upper_header,
+            lower_header=lower_header,
+        )
+    except CardModeError as error:
+        return jsonify({'error': str(error)}), 400
     if not result:
         return jsonify({'error': 'Неверный индекс'}), 404
     card_deck = GetDeck(_repo()).execute(deck_id)

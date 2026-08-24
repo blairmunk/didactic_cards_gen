@@ -4,13 +4,14 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from contextlib import closing
 from functools import lru_cache
+import json
 import re
 import sqlite3
 from typing import Callable
 
 
 SQLITE_APPLICATION_ID = 0x44434731  # "DCG1"
-SQLITE_SCHEMA_VERSION = 13
+SQLITE_SCHEMA_VERSION = 14
 MINIMUM_MIGRATABLE_SCHEMA_VERSION = 12
 
 
@@ -41,17 +42,19 @@ SCHEMA_12_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     }),
 }
 
-CURRENT_TABLE_COLUMNS = {
+SCHEMA_13_TABLE_COLUMNS = {
     **SCHEMA_12_TABLE_COLUMNS,
     'schema_migrations': frozenset({'version', 'name', 'applied_at'}),
 }
+CURRENT_TABLE_COLUMNS = SCHEMA_13_TABLE_COLUMNS
 
 SCHEMA_12_INDEXES = frozenset({
     'idx_deck_cards_position',
     'idx_trusted_templates_one_approved',
 })
 
-CURRENT_INDEXES = SCHEMA_12_INDEXES
+SCHEMA_13_INDEXES = SCHEMA_12_INDEXES
+CURRENT_INDEXES = SCHEMA_13_INDEXES
 
 
 CREATE_SCHEMA_STATEMENTS = (
@@ -220,6 +223,34 @@ def _migrate_12_to_13(connection: sqlite3.Connection) -> None:
     connection.execute(f'PRAGMA application_id = {SQLITE_APPLICATION_ID}')
 
 
+def _migrate_13_to_14(connection: sqlite3.Connection) -> None:
+    safe_deck_ids: list[str] = []
+    for row in connection.execute(
+        'SELECT deck_id, typography_json FROM deck_render_settings '
+        'ORDER BY deck_id'
+    ):
+        typography = json.loads(row[1])
+        if not isinstance(typography, dict):
+            raise ValueError('invalid typography settings during migration')
+        if typography.get('authoring_mode', 'safe') == 'safe':
+            safe_deck_ids.append(row[0])
+    for deck_id in safe_deck_ids:
+        connection.execute(
+            '''
+            UPDATE cards SET upper_header = '', lower_header = ''
+            WHERE id IN (
+                SELECT card_id FROM deck_cards WHERE deck_id = ?
+            )
+            ''',
+            (deck_id,),
+        )
+    connection.execute(
+        'INSERT INTO schema_migrations(version, name, applied_at) '
+        'VALUES (14, ?, ?)',
+        ('enforce-mode-card-fields', utc_now_iso()),
+    )
+
+
 @dataclass(frozen=True)
 class Migration:
     to_version: int
@@ -229,10 +260,16 @@ class Migration:
 
 MIGRATIONS: dict[int, Migration] = {
     12: Migration(13, 'storage-foundation', _migrate_12_to_13),
+    13: Migration(14, 'enforce-mode-card-fields', _migrate_13_to_14),
 }
 
 
 def migrate_to_current(connection: sqlite3.Connection, version: int) -> None:
+    if version > SQLITE_SCHEMA_VERSION:
+        raise ValueError(
+            f'cannot migrate future SQLite schema {version} to '
+            f'{SQLITE_SCHEMA_VERSION}'
+        )
     current = version
     while current < SQLITE_SCHEMA_VERSION:
         migration = MIGRATIONS.get(current)
@@ -249,14 +286,14 @@ def _normalized_schema_sql(source: str | None) -> str:
     return re.sub(r'\s+', '', source).lower()
 
 
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=3)
 def _expected_schema_sql(expected_version: int) -> dict[tuple[str, str], str]:
-    if expected_version not in {12, SQLITE_SCHEMA_VERSION}:
+    if expected_version not in {12, 13, SQLITE_SCHEMA_VERSION}:
         return {}
     statements = (
-        CREATE_SCHEMA_STATEMENTS
-        if expected_version == SQLITE_SCHEMA_VERSION
-        else CREATE_SCHEMA_STATEMENTS[:-1]
+        CREATE_SCHEMA_STATEMENTS[:-1]
+        if expected_version == 12
+        else CREATE_SCHEMA_STATEMENTS
     )
     with closing(sqlite3.connect(':memory:')) as expected:
         for statement in statements:
@@ -279,7 +316,9 @@ def schema_structure_issues(
     expected_tables = (
         CURRENT_TABLE_COLUMNS
         if expected_version == SQLITE_SCHEMA_VERSION
-        else SCHEMA_12_TABLE_COLUMNS if expected_version == 12 else None
+        else SCHEMA_13_TABLE_COLUMNS if expected_version == 13
+        else SCHEMA_12_TABLE_COLUMNS if expected_version == 12
+        else None
     )
     if expected_tables is None:
         return [f'unsupported-schema-version: {expected_version}']
@@ -319,6 +358,7 @@ def schema_structure_issues(
     expected_indexes = (
         CURRENT_INDEXES
         if expected_version == SQLITE_SCHEMA_VERSION
+        else SCHEMA_13_INDEXES if expected_version == 13
         else SCHEMA_12_INDEXES
     )
     if expected_indexes:

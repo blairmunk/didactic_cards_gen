@@ -102,6 +102,74 @@ def test_advanced_json_round_trip_preserves_mixed_newlines_in_all_raw_fields(
     )
 
 
+@pytest.mark.parametrize('field', ['upper_header', 'lower_header'])
+@pytest.mark.parametrize('value', ['raw', ' \t '])
+def test_safe_json_import_rejects_hidden_raw_headers_atomically(
+    repo, field, value
+):
+    source = json.dumps(_payload(cards=[{
+        'front': 'Q',
+        'back': 'A',
+        field: value,
+    }])).encode()
+    before = len(repo.list_decks())
+
+    with pytest.raises(DeckTransferError, match='Advanced'):
+        import_deck_json(repo, source)
+
+    assert len(repo.list_decks()) == before
+
+
+def test_safe_json_import_accepts_explicit_empty_raw_header_keys(repo):
+    imported = import_deck_json(repo, json.dumps(_payload(cards=[{
+        'front': 'Q',
+        'back': 'A',
+        'upper_header': '',
+        'lower_header': '',
+    }])).encode())
+
+    card = repo.load_cards(imported.id).cards[0]
+    assert (card.upper_header, card.lower_header) == ('', '')
+
+
+@pytest.mark.parametrize('exporter', [export_deck_json, export_deck_csv])
+def test_corrupt_safe_deck_export_fails_instead_of_losing_hidden_fields(
+    repo, exporter
+):
+    deck = repo.create_deck('Corrupt export')
+    card = Card(front='Q')
+    repo.save_cards(deck.id, CardDeck([card]))
+    with repo._transaction(write=True) as connection:
+        connection.execute(
+            'UPDATE cards SET upper_header = ? WHERE id = ?',
+            ('hidden', card.id),
+        )
+
+    with pytest.raises(DeckTransferError, match='Safe/Advanced'):
+        exporter(repo, deck.id)
+
+
+def test_safe_payload_cannot_smuggle_trusted_templates(repo):
+    template = TrustedTemplateVersion(
+        deck_id='source',
+        version=1,
+        front_source='{{ content }}',
+        back_source='{{ content }}',
+    )
+    payload = _payload(templates=[{
+        'id': template.id,
+        'version': template.version,
+        'front_source': template.front_source,
+        'back_source': template.back_source,
+        'source_hash': template.source_hash,
+        'source_provenance': 'local-author',
+    }])
+
+    with pytest.raises(DeckTransferError, match='Advanced'):
+        import_deck_json(repo, json.dumps(payload).encode())
+    assert repo.list_decks() == []
+
+
 def test_trusted_export_import_preserves_wrappers_but_never_approval(tmp_path):
     repo = SqliteRepository(tmp_path / 'transfer')
     source = repo.create_deck(

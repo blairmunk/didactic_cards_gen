@@ -237,7 +237,11 @@ def _logical_sha256(connection: sqlite3.Connection) -> str:
     return digest.hexdigest()
 
 
-def _semantic_issues(connection: sqlite3.Connection) -> list[str]:
+def _semantic_issues(
+    connection: sqlite3.Connection,
+    *,
+    expected_schema_version: int = SQLITE_SCHEMA_VERSION,
+) -> list[str]:
     issues: list[str] = []
     missing_settings = connection.execute(
         '''
@@ -286,6 +290,7 @@ def _semantic_issues(connection: sqlite3.Connection) -> list[str]:
     from ..domain.trusted import TrustedTemplateVersion
 
     allowed_typography = set(DeckRenderSettings().typography_dict())
+    safe_deck_ids: set[str] = set()
     for row in connection.execute(
         'SELECT * FROM deck_render_settings ORDER BY deck_id'
     ):
@@ -295,7 +300,7 @@ def _semantic_issues(connection: sqlite3.Connection) -> list[str]:
                 raise ValueError
             if set(typography) - allowed_typography:
                 raise ValueError
-            DeckRenderSettings.from_dict({
+            settings = DeckRenderSettings.from_dict({
                 'preset': row['preset'],
                 'horizontal_alignment': row['horizontal_alignment'],
                 'vertical_alignment': row['vertical_alignment'],
@@ -306,8 +311,26 @@ def _semantic_issues(connection: sqlite3.Connection) -> list[str]:
                 'section_break': row['section_break'],
                 **typography,
             })
+            if settings.authoring_mode.value == 'safe':
+                safe_deck_ids.add(row['deck_id'])
         except (TypeError, ValueError, json.JSONDecodeError):
             issues.append(f"invalid-render-settings: {row['deck_id']}")
+
+    if expected_schema_version >= 14 and safe_deck_ids:
+        for row in connection.execute(
+            '''
+            SELECT deck_cards.deck_id, cards.id, cards.upper_header,
+                   cards.lower_header
+            FROM cards
+            JOIN deck_cards ON deck_cards.card_id = cards.id
+            ORDER BY deck_cards.deck_id, cards.id
+            '''
+        ):
+            if (
+                row['deck_id'] in safe_deck_ids
+                and (row['upper_header'] != '' or row['lower_header'] != '')
+            ):
+                issues.append(f"hidden-safe-card-headers: {row['id']}")
 
     for row in connection.execute('SELECT * FROM trusted_templates ORDER BY id'):
         try:
@@ -375,7 +398,7 @@ def _semantic_issues(connection: sqlite3.Connection) -> list[str]:
         ).fetchall()
         if (
             not migration_rows
-            or migration_rows[-1]['version'] != SQLITE_SCHEMA_VERSION
+            or migration_rows[-1]['version'] != expected_schema_version
         ):
             issues.append('invalid-migration-history: current version is missing')
         for row in migration_rows:
@@ -384,7 +407,7 @@ def _semantic_issues(connection: sqlite3.Connection) -> list[str]:
                 if (
                     applied_at.tzinfo is None
                     or not row['name']
-                    or row['version'] > SQLITE_SCHEMA_VERSION
+                    or row['version'] > expected_schema_version
                 ):
                     raise ValueError
             except (TypeError, ValueError):
@@ -412,7 +435,10 @@ def connection_validation_issues(
         for row in connection.execute('PRAGMA foreign_key_check')
     )
     if not structural:
-        issues.extend(_semantic_issues(connection))
+        issues.extend(_semantic_issues(
+            connection,
+            expected_schema_version=expected_schema_version,
+        ))
     return issues
 
 

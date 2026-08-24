@@ -19,7 +19,7 @@ from didactic_cards.adapters.sqlite_storage import (
     StorageBusyError,
     exclusive_runtime_lock,
 )
-from didactic_cards.domain.entities import Card, CardDeck
+from didactic_cards.domain.entities import Card, CardDeck, CardModeError
 from didactic_cards.domain.interfaces import ConcurrentModificationError
 from didactic_cards.domain.printing import PrinterProfile
 from didactic_cards.domain.rendering import DeckRenderSettings
@@ -268,6 +268,70 @@ def test_sqlite_reopen_preserves_mixed_newlines_in_all_card_fields(sqlite_repo):
     )
 
 
+def test_safe_repository_writes_reject_hidden_headers_without_partial_change(
+    sqlite_repo,
+):
+    deck = sqlite_repo.create_deck('Safe invariant')
+    sqlite_repo.save_cards(deck.id, CardDeck([Card(front='before')]))
+    before_version = sqlite_repo.get_deck(deck.id).version
+
+    with pytest.raises(ValueError, match='Advanced'):
+        sqlite_repo.save_cards(
+            deck.id,
+            CardDeck([Card(front='after', upper_header='hidden')]),
+        )
+
+    assert sqlite_repo.load_cards(deck.id).cards[0].front == 'before'
+    assert sqlite_repo.get_deck(deck.id).version == before_version
+
+    deck_count = len(sqlite_repo.list_decks())
+    with pytest.raises(CardModeError, match='Advanced'):
+        sqlite_repo.create_deck_with_cards(
+            'Rejected atomically',
+            '',
+            None,
+            CardDeck([Card(front='Q', lower_header=' ')]),
+            DeckRenderSettings.centered(),
+        )
+    assert len(sqlite_repo.list_decks()) == deck_count
+
+
+def test_integrity_reports_hidden_raw_headers_in_safe_deck(sqlite_repo):
+    deck = sqlite_repo.create_deck('Tampered Safe')
+    card = Card(front='Q')
+    sqlite_repo.save_cards(deck.id, CardDeck([card]))
+    with closing(sqlite_repo._connect()) as connection:
+        connection.execute(
+            'UPDATE cards SET upper_header = ? WHERE id = ?',
+            ('hidden', card.id),
+        )
+        connection.commit()
+
+    issue = f'hidden-safe-card-headers: {card.id}'
+    assert issue in sqlite_repo.integrity_check()
+    assert issue in sqlite_repo.readiness_check()
+
+
+def test_corrupt_safe_deck_cannot_be_cloned_or_snapshotted(sqlite_repo):
+    deck = sqlite_repo.create_deck('Tampered operations')
+    card = Card(front='Q')
+    sqlite_repo.save_cards(deck.id, CardDeck([card]))
+    with closing(sqlite_repo._connect()) as connection:
+        connection.execute(
+            'UPDATE cards SET lower_header = ? WHERE id = ?',
+            ('hidden', card.id),
+        )
+        connection.commit()
+    before_ids = {item.id for item in sqlite_repo.list_decks()}
+
+    with pytest.raises(CardModeError, match='Advanced'):
+        sqlite_repo.clone_deck(deck.id)
+    with pytest.raises(CardModeError, match='Advanced'):
+        sqlite_repo.get_print_job_snapshot(deck.id)
+
+    assert {item.id for item in sqlite_repo.list_decks()} == before_ids
+
+
 def test_render_settings_are_versioned_and_cloned(sqlite_repo):
     source = sqlite_repo.create_deck('Styled')
     assert sqlite_repo.get_render_settings(source.id) == DeckRenderSettings.centered()
@@ -299,6 +363,28 @@ def test_render_settings_are_versioned_and_cloned(sqlite_repo):
         )
     clone = sqlite_repo.clone_deck(source.id)
     assert sqlite_repo.get_render_settings(clone.id) == custom
+
+
+@pytest.mark.parametrize(
+    ('initial_mode', 'replacement_mode'),
+    [('safe', 'advanced'), ('advanced', 'safe')],
+)
+def test_authoring_mode_is_immutable_at_repository_boundary(
+    sqlite_repo, initial_mode, replacement_mode
+):
+    initial = DeckRenderSettings(authoring_mode=initial_mode)
+    deck = sqlite_repo.create_deck('Immutable mode', render_settings=initial)
+    version = sqlite_repo.get_deck(deck.id).version
+
+    with pytest.raises(ValueError, match='не может быть изменён'):
+        sqlite_repo.save_render_settings(
+            deck.id,
+            DeckRenderSettings(authoring_mode=replacement_mode),
+            expected_version=version,
+        )
+
+    assert sqlite_repo.get_render_settings(deck.id) == initial
+    assert sqlite_repo.get_deck(deck.id).version == version
 
 
 def test_missing_deck_has_no_render_settings(sqlite_repo):
@@ -568,6 +654,10 @@ def test_optimistic_version_prevents_stale_mutation(sqlite_repo):
     assert [card.front for card in sqlite_repo.load_cards(deck.id).cards] == ['first']
     with pytest.raises(DeckNotFoundError):
         AddCard(sqlite_repo).execute('missing', 'Q', '')
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.mutate_cards(
+            'missing', lambda cards: (cards, False)
+        )
 
 
 def test_threaded_mutations_do_not_lose_updates(sqlite_repo):

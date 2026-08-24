@@ -335,18 +335,22 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
+            const payload = {
+                front: front,
+                back: back,
+                section: section,
+                version: deckVersion
+            };
+            if (IS_ADVANCED) {
+                payload.upper_header = upperHeader;
+                payload.lower_header = lowerHeader;
+            }
+
             try {
                 const resp = await fetch(API.addCard, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        front: front,
-                        back: back,
-                        section: section,
-                        upper_header: upperHeader,
-                        lower_header: lowerHeader,
-                        version: deckVersion
-                    })
+                    body: JSON.stringify(payload)
                 });
                 const data = await resp.json();
 

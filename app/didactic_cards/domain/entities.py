@@ -5,7 +5,39 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
-from .rendering import DeckRenderSettings
+from .rendering import AuthoringMode, DeckRenderSettings
+
+
+class CardModeError(ValueError):
+    """Raised when mode-specific card fields cross an authoring boundary."""
+
+
+def validate_card_mode_fields(
+    card: Card,
+    authoring_mode: AuthoringMode | str,
+) -> None:
+    """Keep raw per-card headers exclusive to Advanced decks.
+
+    Empty means exactly the empty string. Whitespace and line endings are raw
+    content in Advanced mode, so silently trimming them in Safe mode would be
+    a lossy and ambiguous conversion.
+    """
+    mode = AuthoringMode(authoring_mode)
+    if mode is AuthoringMode.SAFE and (
+        card.upper_header != '' or card.lower_header != ''
+    ):
+        raise CardModeError(
+            'Поля верхнего и нижнего колонтитулов карточки доступны '
+            'только в Advanced-колоде.'
+        )
+
+
+def validate_card_deck_mode(
+    card_deck: CardDeck,
+    authoring_mode: AuthoringMode | str,
+) -> None:
+    for card in card_deck.cards:
+        validate_card_mode_fields(card, authoring_mode)
 
 
 def _now() -> datetime:

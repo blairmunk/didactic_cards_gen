@@ -17,6 +17,7 @@ from didactic_cards.adapters.sqlite_repository import (
     UnsupportedSqliteSchemaError,
 )
 from didactic_cards.adapters.sqlite_schema import (
+    MINIMUM_MIGRATABLE_SCHEMA_VERSION,
     initialize_current_schema,
     migrate_to_current,
 )
@@ -61,6 +62,18 @@ def _downgrade_current_database_to_schema_12(database: Path) -> None:
         connection.execute('DROP TABLE schema_migrations')
         connection.execute('PRAGMA application_id = 0')
         connection.execute('PRAGMA user_version = 12')
+        connection.commit()
+
+
+def _downgrade_current_database_to_schema_13(database: Path) -> None:
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute('DELETE FROM schema_migrations')
+        connection.execute(
+            'INSERT INTO schema_migrations(version, name, applied_at) '
+            "VALUES (13, 'initial-current-schema', "
+            "'2026-08-24T00:00:00+00:00')"
+        )
+        connection.execute('PRAGMA user_version = 13')
         connection.commit()
 
 
@@ -148,7 +161,11 @@ def test_schema_initializer_refuses_nonempty_version_zero_database():
 def test_migration_registry_fails_closed_when_path_is_missing():
     with closing(sqlite3.connect(':memory:')) as connection:
         with pytest.raises(ValueError, match='no migration path'):
-            migrate_to_current(connection, SQLITE_SCHEMA_VERSION - 2)
+            migrate_to_current(
+                connection, MINIMUM_MIGRATABLE_SCHEMA_VERSION - 1
+            )
+        with pytest.raises(ValueError, match='future SQLite schema'):
+            migrate_to_current(connection, SQLITE_SCHEMA_VERSION + 1)
 
 
 def test_inspect_reports_structural_schema_drift(tmp_path):
@@ -278,10 +295,14 @@ def test_schema_12_migrates_once_without_losing_data(tmp_path):
     assert migrated.get_deck(deck.id).name == 'До миграции'
     assert migrated.load_cards(deck.id).cards[0].front == 'Сохранить'
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 13
         assert connection.execute(
-            'SELECT version FROM schema_migrations ORDER BY version'
-        ).fetchall()[-1][0] == 13
+            'PRAGMA user_version'
+        ).fetchone()[0] == SQLITE_SCHEMA_VERSION
+        assert [
+            tuple(row) for row in connection.execute(
+                'SELECT version FROM schema_migrations ORDER BY version'
+            )
+        ] == [(13,), (14,)]
     migrated.close()
     backup_files = list((repository.data_dir / 'backups').glob(
         'pre-migration-v12-*.sqlite3'
@@ -294,6 +315,201 @@ def test_schema_12_migrates_once_without_losing_data(tmp_path):
     assert list((repository.data_dir / 'backups').glob(
         'pre-migration-v12-*.sqlite3'
     )) == backup_files
+
+
+def test_schema_13_migration_scrubs_only_safe_hidden_headers_and_keeps_backup(
+    tmp_path,
+):
+    repository = SqliteRepository(tmp_path / 'data')
+    safe = repository.create_deck('Safe legacy')
+    advanced = repository.create_deck(
+        'Advanced exact',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    safe_card = Card(front='Safe body', back='Safe back')
+    advanced_card = Card(
+        front='Raw\r\nfront',
+        back='Raw\rback\n',
+        upper_header=' \tTOP\r\n ',
+        lower_header='BOTTOM\r',
+    )
+    repository.save_cards(safe.id, CardDeck([safe_card]))
+    repository.save_cards(advanced.id, CardDeck([advanced_card]))
+    repository.close()
+    with closing(sqlite3.connect(repository.database_file)) as connection:
+        typography = json.loads(connection.execute(
+            'SELECT typography_json FROM deck_render_settings WHERE deck_id = ?',
+            (safe.id,),
+        ).fetchone()[0])
+        typography.pop('authoring_mode')
+        connection.execute(
+            'UPDATE deck_render_settings SET typography_json = ? '
+            'WHERE deck_id = ?',
+            (json.dumps(typography), safe.id),
+        )
+        connection.execute(
+            'UPDATE cards SET upper_header = ?, lower_header = ? WHERE id = ?',
+            (' hidden\r\n ', '\t', safe_card.id),
+        )
+        safe_metadata = connection.execute(
+            'SELECT created_at, updated_at, version FROM cards WHERE id = ?',
+            (safe_card.id,),
+        ).fetchone()
+        connection.commit()
+    _downgrade_current_database_to_schema_13(repository.database_file)
+
+    migrated = SqliteRepository(repository.data_dir)
+
+    loaded_safe = migrated.load_cards(safe.id).cards[0]
+    loaded_advanced = migrated.load_cards(advanced.id).cards[0]
+    assert (loaded_safe.upper_header, loaded_safe.lower_header) == ('', '')
+    assert (
+        loaded_advanced.front,
+        loaded_advanced.back,
+        loaded_advanced.upper_header,
+        loaded_advanced.lower_header,
+    ) == (
+        advanced_card.front,
+        advanced_card.back,
+        advanced_card.upper_header,
+        advanced_card.lower_header,
+    )
+    with closing(migrated._connect()) as connection:
+        assert tuple(connection.execute(
+            'SELECT created_at, updated_at, version FROM cards WHERE id = ?',
+            (safe_card.id,),
+        ).fetchone()) == safe_metadata
+        assert [
+            tuple(row) for row in connection.execute(
+                'SELECT version, name FROM schema_migrations ORDER BY version'
+            )
+        ] == [
+            (13, 'initial-current-schema'),
+            (14, 'enforce-mode-card-fields'),
+        ]
+    migrated.close()
+
+    backups = list((repository.data_dir / 'backups').glob(
+        'pre-migration-v13-*.sqlite3'
+    ))
+    assert len(backups) == 1
+    assert inspect_database(backups[0], expected_schema_version=13).healthy
+    with closing(sqlite3.connect(backups[0])) as connection:
+        assert connection.execute(
+            'SELECT upper_header, lower_header FROM cards WHERE id = ?',
+            (safe_card.id,),
+        ).fetchone() == (' hidden\r\n ', '\t')
+
+    reopened = SqliteRepository(repository.data_dir)
+    reopened.close()
+    assert list((repository.data_dir / 'backups').glob(
+        'pre-migration-v13-*.sqlite3'
+    )) == backups
+
+
+def test_failed_schema_13_cleanup_rolls_back_and_reuses_stable_backup(
+    tmp_path, monkeypatch
+):
+    repository = SqliteRepository(tmp_path / 'data')
+    safe = repository.create_deck('Safe retry')
+    card = Card(front='Keep')
+    repository.save_cards(safe.id, CardDeck([card]))
+    repository.close()
+    with closing(sqlite3.connect(repository.database_file)) as connection:
+        connection.execute(
+            'UPDATE cards SET upper_header = ? WHERE id = ?',
+            ('recoverable raw', card.id),
+        )
+        connection.commit()
+    _downgrade_current_database_to_schema_13(repository.database_file)
+    real_migrate = sqlite_repository_module.migrate_to_current
+
+    def fail_after_cleanup(connection, version):
+        assert version == 13
+        connection.execute(
+            "UPDATE cards SET upper_header = '', lower_header = ''"
+        )
+        connection.execute('PRAGMA user_version = 14')
+        raise RuntimeError('injected schema-13 migration failure')
+
+    monkeypatch.setattr(
+        sqlite_repository_module, 'migrate_to_current', fail_after_cleanup
+    )
+    with pytest.raises(RuntimeError, match='schema-13 migration failure'):
+        SqliteRepository(repository.data_dir)
+
+    assert inspect_database(
+        repository.database_file, expected_schema_version=13
+    ).healthy
+    with closing(sqlite3.connect(repository.database_file)) as connection:
+        assert connection.execute(
+            'SELECT upper_header FROM cards WHERE id = ?', (card.id,)
+        ).fetchone()[0] == 'recoverable raw'
+    backups = list((repository.data_dir / 'backups').glob(
+        'pre-migration-v13-*.sqlite3'
+    ))
+    assert len(backups) == 1
+    backup_state = _sqlite_family_state(backups[0])
+    manifest = backups[0].with_suffix(backups[0].suffix + '.manifest.json')
+    manifest_state = _file_state(manifest)
+
+    monkeypatch.setattr(
+        sqlite_repository_module, 'migrate_to_current', real_migrate
+    )
+    migrated = SqliteRepository(repository.data_dir)
+    assert migrated.load_cards(safe.id).cards[0].upper_header == ''
+    migrated.close()
+    assert list((repository.data_dir / 'backups').glob(
+        'pre-migration-v13-*.sqlite3'
+    )) == backups
+    assert _sqlite_family_state(backups[0]) == backup_state
+    assert _file_state(manifest) == manifest_state
+
+
+def test_semantically_incomplete_schema_13_migration_rolls_back(
+    tmp_path, monkeypatch
+):
+    repository = SqliteRepository(tmp_path / 'data')
+    safe = repository.create_deck('Safe incomplete migration')
+    card = Card(front='Keep')
+    repository.save_cards(safe.id, CardDeck([card]))
+    repository.close()
+    with closing(sqlite3.connect(repository.database_file)) as connection:
+        connection.execute(
+            'UPDATE cards SET upper_header = ? WHERE id = ?',
+            ('must survive rollback', card.id),
+        )
+        connection.commit()
+    _downgrade_current_database_to_schema_13(repository.database_file)
+    real_migrate = sqlite_repository_module.migrate_to_current
+
+    def leave_hidden_value(connection, version):
+        real_migrate(connection, version)
+        connection.execute(
+            'UPDATE cards SET upper_header = ? WHERE id = ?',
+            ('still hidden', card.id),
+        )
+
+    monkeypatch.setattr(
+        sqlite_repository_module, 'migrate_to_current', leave_hidden_value
+    )
+
+    with pytest.raises(
+        UnsupportedSqliteSchemaError,
+        match='validation failed during migration.*hidden-safe-card-headers',
+    ):
+        SqliteRepository(repository.data_dir)
+
+    assert inspect_database(
+        repository.database_file, expected_schema_version=13
+    ).healthy
+    with closing(sqlite3.connect(repository.database_file)) as connection:
+        assert connection.execute(
+            'PRAGMA user_version'
+        ).fetchone()[0] == 13
+        assert connection.execute(
+            'SELECT upper_header FROM cards WHERE id = ?', (card.id,)
+        ).fetchone()[0] == 'must survive rollback'
 
 
 def test_failed_migration_rolls_back_schema_and_preserves_version_12_data(
@@ -1050,8 +1266,80 @@ def test_restore_schema_12_backup_migrates_staged_copy_without_mutating_source(
     assert reopened.get_deck(source_deck.id).name == 'Из v12'
     assert reopened.load_cards(source_deck.id).cards[0].front == 'Сохранено'
     with closing(reopened._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 13
         assert connection.execute(
-            'SELECT name FROM schema_migrations WHERE version = 13'
-        ).fetchone()[0] == 'storage-foundation'
+            'PRAGMA user_version'
+        ).fetchone()[0] == SQLITE_SCHEMA_VERSION
+        assert [
+            tuple(row) for row in connection.execute(
+                'SELECT version, name FROM schema_migrations ORDER BY version'
+            )
+        ] == [
+            (13, 'storage-foundation'),
+            (14, 'enforce-mode-card-fields'),
+        ]
     reopened.close()
+
+
+def test_restore_schema_13_backup_scrubs_safe_and_preserves_advanced_raw(
+    tmp_path,
+):
+    source_repository = SqliteRepository(tmp_path / 'source-v13')
+    safe = source_repository.create_deck('Safe v13')
+    advanced = source_repository.create_deck(
+        'Advanced v13',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    safe_card = Card(front='Safe')
+    advanced_card = Card(
+        front='Raw\r\nfront',
+        back='Raw\rback',
+        upper_header=' \tTOP\n',
+        lower_header='BOTTOM\r\n',
+    )
+    source_repository.save_cards(safe.id, CardDeck([safe_card]))
+    source_repository.save_cards(advanced.id, CardDeck([advanced_card]))
+    source_repository.close()
+    with closing(sqlite3.connect(source_repository.database_file)) as connection:
+        connection.execute(
+            'UPDATE cards SET upper_header = ?, lower_header = ? WHERE id = ?',
+            ('legacy hidden', ' \r\n ', safe_card.id),
+        )
+        connection.commit()
+    _downgrade_current_database_to_schema_13(
+        source_repository.database_file
+    )
+    source_state = _sqlite_family_state(source_repository.database_file)
+    backup = backup_database(
+        source_repository.database_file,
+        tmp_path / 'schema-13.sqlite3',
+        expected_schema_version=13,
+    )
+    backup_state = _sqlite_family_state(backup.path)
+    manifest_state = _file_state(backup.manifest_path)
+
+    live_repository = SqliteRepository(tmp_path / 'live-v14')
+    live_repository.create_deck('Replaced')
+    live_repository.close()
+    restore_database(live_repository.database_file, backup.path)
+
+    assert _sqlite_family_state(
+        source_repository.database_file
+    ) == source_state
+    assert _sqlite_family_state(backup.path) == backup_state
+    assert _file_state(backup.manifest_path) == manifest_state
+    restored = SqliteRepository(live_repository.data_dir)
+    restored_safe = restored.load_cards(safe.id).cards[0]
+    restored_advanced = restored.load_cards(advanced.id).cards[0]
+    assert (restored_safe.upper_header, restored_safe.lower_header) == ('', '')
+    assert (
+        restored_advanced.front,
+        restored_advanced.back,
+        restored_advanced.upper_header,
+        restored_advanced.lower_header,
+    ) == (
+        advanced_card.front,
+        advanced_card.back,
+        advanced_card.upper_header,
+        advanced_card.lower_header,
+    )
+    restored.close()

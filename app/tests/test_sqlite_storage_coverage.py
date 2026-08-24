@@ -207,7 +207,11 @@ def test_connection_validation_surfaces_integrity_result_and_quick_mode(
 
     connection = FakeConnection()
     monkeypatch.setattr(storage, 'schema_structure_issues', lambda *a, **k: [])
-    monkeypatch.setattr(storage, '_semantic_issues', lambda connection: [])
+    monkeypatch.setattr(
+        storage,
+        '_semantic_issues',
+        lambda connection, **_kwargs: [],
+    )
 
     issues = storage.connection_validation_issues(connection, quick=True)
 

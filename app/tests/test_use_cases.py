@@ -55,6 +55,60 @@ def test_card_crud_and_reorder(repo, deck_id):
     assert len(repo.load_cards(deck_id)) == 0
 
 
+@pytest.mark.parametrize('field', ['upper_header', 'lower_header'])
+@pytest.mark.parametrize('value', ['raw', ' \t '])
+def test_safe_card_crud_rejects_raw_header_fields_atomically(
+    repo, deck_id, field, value
+):
+    with pytest.raises(ValueError, match='Advanced'):
+        AddCard(repo).execute(deck_id, 'Q', 'A', **{field: value})
+    assert len(repo.load_cards(deck_id)) == 0
+
+    card, _ = AddCard(repo).execute(deck_id, 'before', 'answer')
+    before_version = repo.get_deck(deck_id).version
+    with pytest.raises(ValueError, match='Advanced'):
+        EditCard(repo).execute(
+            deck_id,
+            card.id,
+            'after',
+            'changed',
+            **{field: value},
+        )
+
+    stored = repo.load_cards(deck_id).cards[0]
+    assert (stored.front, stored.back, stored.upper_header, stored.lower_header) == (
+        'before', 'answer', '', '',
+    )
+    assert repo.get_deck(deck_id).version == before_version
+
+
+def test_advanced_card_crud_preserves_all_raw_header_characters(repo):
+    deck = repo.create_deck(
+        'Advanced raw fields',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    card, _ = AddCard(repo).execute(
+        deck.id,
+        'Q',
+        'A',
+        upper_header=' \tTOP\r\n ',
+        lower_header='BOTTOM\r',
+    )
+
+    assert EditCard(repo).execute(
+        deck.id,
+        card.id,
+        'Q2',
+        'A2',
+        upper_header='\r\n{{ card_number }}\n',
+        lower_header=' \t ',
+    )
+    stored = repo.load_cards(deck.id).cards[0]
+    assert (stored.upper_header, stored.lower_header) == (
+        '\r\n{{ card_number }}\n', ' \t ',
+    )
+
+
 def test_default_repository_mutation_contract_covers_write_noop_and_conflict():
     class RepositoryDouble:
         def __init__(self):

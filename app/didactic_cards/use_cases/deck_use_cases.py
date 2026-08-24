@@ -79,6 +79,12 @@ class UpdateDeckRenderSettings:
         settings: DeckRenderSettings,
         expected_version: int | None = None,
     ) -> DeckRenderSettings:
+        current = self.repo.get_render_settings(deck_id)
+        if settings.authoring_mode is not current.authoring_mode:
+            raise ValueError(
+                'Тип Safe/Advanced задаётся при создании колоды '
+                'и не может быть изменён.'
+            )
         return self.repo.save_render_settings(
             deck_id,
             settings,

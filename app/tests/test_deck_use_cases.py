@@ -70,3 +70,18 @@ def test_render_settings_use_cases_apply_optimistic_lock(repo):
             DeckRenderSettings.centered(),
             expected_version=deck.version,
         )
+
+
+def test_render_settings_use_case_rejects_authoring_mode_transition(repo):
+    deck = CreateDeck(repo).execute('Immutable type')
+    before_version = repo.get_deck(deck.id).version
+
+    with pytest.raises(ValueError, match='не может быть изменён'):
+        UpdateDeckRenderSettings(repo).execute(
+            deck.id,
+            DeckRenderSettings(authoring_mode='advanced'),
+            expected_version=before_version,
+        )
+
+    assert repo.get_render_settings(deck.id).authoring_mode.value == 'safe'
+    assert repo.get_deck(deck.id).version == before_version

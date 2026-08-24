@@ -9,7 +9,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterator, Optional, TypeVar
 
-from ..domain.entities import Card, CardDeck, Deck
+from ..domain.entities import (
+    Card,
+    CardDeck,
+    Deck,
+    validate_card_deck_mode,
+)
 from ..domain.interfaces import (
     ConcurrentModificationError,
     DeckRepository,
@@ -158,7 +163,7 @@ class SqliteRepository(DeckRepository):
                     try:
                         connection.execute('BEGIN IMMEDIATE')
                         migrate_to_current(connection, version)
-                        issues = schema_structure_issues(connection)
+                        issues = connection_validation_issues(connection)
                         if issues:
                             raise UnsupportedSqliteSchemaError(
                                 'SQLite schema validation failed during '
@@ -361,7 +366,11 @@ class SqliteRepository(DeckRepository):
             ''',
             (deck_id,),
         ).fetchall()
-        return CardDeck([self._card_from_row(row) for row in rows])
+        card_deck = CardDeck([self._card_from_row(row) for row in rows])
+        validate_card_deck_mode(
+            card_deck, self._get_render_settings(connection, deck_id).authoring_mode
+        )
+        return card_deck
 
     @staticmethod
     def _insert_deck(connection: sqlite3.Connection, deck: Deck) -> None:
@@ -411,8 +420,12 @@ class SqliteRepository(DeckRepository):
         deck_id: str,
         card_deck: CardDeck,
     ) -> None:
-        if self._get_deck(connection, deck_id) is None:
+        deck = self._get_deck(connection, deck_id)
+        if deck is None:
             raise DeckNotFoundError(deck_id)
+        validate_card_deck_mode(
+            card_deck, deck.render_settings.authoring_mode
+        )
         card_ids = [card.id for card in card_deck.cards]
         if len(card_ids) != len(set(card_ids)):
             raise ValueError('Duplicate card IDs are not allowed')
@@ -670,6 +683,14 @@ class SqliteRepository(DeckRepository):
                 raise DeckNotFoundError(deck_id)
             if expected_version is not None and deck.version != expected_version:
                 raise ConcurrentModificationError(expected_version, deck.version)
+            if (
+                settings.authoring_mode
+                is not deck.render_settings.authoring_mode
+            ):
+                raise ValueError(
+                    'Тип Safe/Advanced задаётся при создании колоды '
+                    'и не может быть изменён.'
+                )
             connection.execute(
                 '''
                 UPDATE deck_render_settings SET

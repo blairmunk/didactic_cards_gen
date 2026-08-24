@@ -7,7 +7,7 @@ from ..domain.interfaces import (
     DeckRepository,
     DocumentRenderer, PdfCompiler, CompileResult,
 )
-from ..domain.entities import Card, CardDeck
+from ..domain.entities import Card, CardDeck, validate_card_mode_fields
 from ..domain.rendering import AuthoringMode, DeckRenderSettings
 from ..domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
 from .card_import import (
@@ -145,16 +145,19 @@ class AddCard:
         upper_header: str = '',
         lower_header: str = '',
     ) -> tuple[Card, int]:
+        mode = self.repo.get_render_settings(deck_id).authoring_mode
+        candidate = Card(
+            front=front,
+            back=back,
+            section=section,
+            upper_header=upper_header,
+            lower_header=lower_header,
+        )
+        validate_card_mode_fields(candidate, mode)
+
         def add(deck: CardDeck):
             _ensure_capacity(deck, 1, self.max_cards)
-            card = Card(
-                front=front,
-                back=back,
-                section=section,
-                upper_header=upper_header,
-                lower_header=lower_header,
-            )
-            return (card, deck.add(card)), True
+            return (candidate, deck.add(candidate)), True
 
         return self.repo.mutate_cards(
             deck_id, add, expected_version=expected_version
@@ -251,6 +254,15 @@ class EditCard:
         upper_header: str | None = None,
         lower_header: str | None = None,
     ) -> bool:
+        mode = self.repo.get_render_settings(deck_id).authoring_mode
+        validate_card_mode_fields(
+            Card(
+                upper_header='' if upper_header is None else upper_header,
+                lower_header='' if lower_header is None else lower_header,
+            ),
+            mode,
+        )
+
         def edit(deck: CardDeck):
             result = deck.edit_by_id(
                 card_id, front, back, section, upper_header, lower_header

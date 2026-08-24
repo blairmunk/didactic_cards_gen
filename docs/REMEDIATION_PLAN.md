@@ -7,17 +7,18 @@
 
 ## 1. Актуальный контракт
 
-- Единственное хранилище — SQLite schema 13. В ней есть
+- Единственное хранилище — SQLite schema 14. В ней есть
   `schema_migrations`, фиксированный `application_id`, foreign keys, WAL и
   транзакционные read/write snapshots.
-- Пустая база инициализируется сразу как schema 13. Единственный
-  автоматический upgrade — явная миграция 12→13; перед ней создаётся
-  проверенный stable backup, повторно используемый при retry. Upgrade только
-  offline: все workers старой schema-12 версии нужно остановить до запуска нового
-  кода. Чужая schema 0, версии ниже 12 и будущие версии отклоняются без попытки
-  «починить» их.
+- Пустая база инициализируется сразу как schema 14. Автоматически принимаются
+  только точные schema 12/13: выполняется цепочка 12→13→14 либо шаг 13→14,
+  перед ней создаётся проверенный stable backup, повторно используемый при retry.
+  Upgrade только offline: все workers старой schema-12/13 версии нужно остановить
+  до запуска нового кода. Чужая schema 0, версии ниже 12 и будущие версии
+  отклоняются без попытки «починить» их.
 - Полный обмен колодой использует только JSON schema 8. Прежние JSON-схемы
-  и legacy backend удалены; JSON export не заменяет backup всей базы.
+  и legacy backend удалены; JSON export не заменяет backup всей базы. Safe payload
+  не может содержать trusted history и никогда автоматически не становится Advanced.
 - CSV — строгий формат с обязательным canonical header, стандартным quoting,
   проверяемым preview и атомарным import. Safe-колода принимает
   `section/front/back`, Advanced —
@@ -25,7 +26,9 @@
   подрезаются и не переписываются.
 - Safe и Advanced — неизменяемые типы колод. Safe экранирует текст и
   даёт allowlisted-типографику; Advanced передаёт raw TeX только в
-  fail-closed `bubblewrap` sandbox.
+  fail-closed `bubblewrap` sandbox. Raw-поля карточки
+  `upper_header/lower_header` разрешены только Advanced; Safe требует точную
+  пустую строку во всех ingress/storage/export boundaries.
 - Программные geometry/raster/preflight-проверки не являются заменой
   физической приёмки на конкретном принтере.
 - Persistence-контур рассчитан на Linux и один host с локальной POSIX-файловой
@@ -37,11 +40,12 @@
 | ID | Статус | Результат и критерий приёмки |
 |---|---|---|
 | `DATA-BACKUP-001` | ✅ Выполнено | `scripts/storage.py backup` снимает целостный online snapshot вместе с committed WAL-данными; hard-link publication атомарно отказывает при уже существующей цели. Копия и manifest имеют `0600`; manifest содержит байтовый и логический SHA-256, размер и schema version. |
-| `DATA-MIGRATION-001` | ✅ Выполнено | Реестр миграций ведёт schema 12→13 в одной write-транзакции. `pre-migration-v12-stable.sqlite3` создаётся один раз, проверяется и повторно используется при failed-start retry; неизвестная/неполная схема отклоняется. |
-| `DATA-RESTORE-001` | ✅ Выполнено | Offline restore требует `--yes`, matching manifest и exclusive inode lease. Healthy live сначала превращается в pre-restore backup; unhealthy live по отдельному opt-in `--allow-unhealthy-live` сначала копируется без изменения в forensic bundle вместе с WAL/SHM/journal. После этого проверенная staged-копия публикуется атомарно; schema 12 мигрируется только в staging. |
+| `DATA-MIGRATION-001` | ✅ Выполнено | Реестр миграций ведёт цепочку schema 12→13→14 в одной write-транзакции. Stable backup исходной schema создаётся один раз, проверяется и повторно используется при failed-start retry; неизвестная/неполная схема отклоняется. Шаг 13→14 очищает только legacy Safe raw-колонтитулы, сохраняя Advanced посимвольно. |
+| `DATA-RESTORE-001` | ✅ Выполнено | Offline restore требует `--yes`, matching manifest и exclusive inode lease. Healthy live сначала превращается в pre-restore backup; unhealthy live по отдельному opt-in `--allow-unhealthy-live` сначала копируется без изменения в forensic bundle вместе с WAL/SHM/journal. После этого проверенная staged-копия публикуется атомарно; schema 12/13 мигрируется только в staging. |
 | `LIMIT-002` | ✅ Выполнено | `CardDeck.padded()` отклоняет bool, нецелые и `cards_per_page <= 0` до арифметики; прямые domain/use-case regression-тесты не допускают частичного действия. |
 | `IMPORT-CSV-V2` | ✅ Выполнено | Canonical header, comma/semicolon/tab, BOM/кодировки, quoted delimiter/multiline/doubled quote, пять Advanced-полей, preview binding и atomic reject покрыты regression/E2E. |
 | `MODE-SPLIT-001` | ✅ Выполнено | Safe/Advanced разделены в domain, persistence, import/export, UI и renderer; built-in-оформление не влияет на Advanced. |
+| `MODE-HIDDEN-FIELDS-001` | ✅ Выполнено | Safe add/edit/API/JSON/repository отклоняют любое непустое raw-поле карточки без частичной записи; type transition запрещён. Schema 14 исправляет schema-13 данные с recoverable backup, integrity ловит ручную порчу, export не теряет скрытые значения, Advanced round-trip пяти полей остаётся character-preserving. |
 | `TEXT-NEWLINE-001` | ✅ Выполнено | Safe front/back получили единые CRLF/LF/CR, line/paragraph/display-math semantics в HTML и PDF; SQLite/CSV/JSON остаются character-preserving, no-op browser edit не переписывает импортированный EOL, Advanced остаётся raw. Реальные Chromium, `pdflatex` и bbox regression проверяют layout и TeX-boundary. |
 | `PRINT-GEOMETRY-001` | ✅ Программная часть | PDF идёт `front-1/back-1/…`, long-edge/short-edge permutation отделена от поворота 0°/180°; cut size, offsets, мишени, calibration PDF и overflow покрыты PDF/raster/vector-тестами. |
 | `PRINT-PHYSICAL-001` | 🟡 Заблокировано вне кода | Нужен принтер и реальные измерения long-edge, short-edge и ручной подачи по [протоколу](PHYSICAL_PRINT_ACCEPTANCE.md). До этого нельзя обещать точность на любом принтере. |
@@ -49,8 +53,8 @@
 Статус storage-пунктов подтверждён обычными regression-тестами: проверены
 forensic API/CLI restore, отказ при publication `replace/fsync`, committed WAL,
 конкурентный no-clobber backup и повторное использование stable pre-migration backup.
-Последний полный локальный gate 24.08.2026: **727 passed**, statement coverage
-100%, общий branch coverage **99,44%**; в прогон вошли реальные Chromium,
+Последний полный локальный gate 24.08.2026: **768 passed**, statement coverage
+100%, branch coverage **99,55%** (общий coverage 99,90%); в прогон вошли реальные Chromium,
 `pdflatex` и `bubblewrap` integration-тесты.
 
 ## 3. Ближайший backlog
@@ -60,17 +64,11 @@ forensic API/CLI restore, отказ при publication `replace/fsync`, committ
 
 ### P1 — надёжность и основной UX
 
-1. **`MODE-HIDDEN-FIELDS-001` — закрыть скрытые raw-поля в Safe.**
-   Сейчас API/JSON могут сохранить у Safe-карточки `upper_header/lower_header`, хотя
-   UI, renderer и Safe CSV их не показывают. Определить миграцию тестовых значений и
-   fail-closed отклонять новые non-empty raw headers во всех Safe ingress. Критерий:
-   API/JSON/import не создают скрытых данных, export не теряет их молча, Advanced
-   round-trip всех пяти полей остаётся посимвольным.
-2. **`DATA-TRASH-001` — обратимое удаление колоды.**
+1. **`DATA-TRASH-001` — обратимое удаление колоды.**
    Заменить мгновенный hard delete на trash/restore с явным сроком хранения и
    отдельным безвозвратным purge. Критерий: cards/settings/trusted history восстанавливаются
    атомарно; stale-version и quota semantics определены тестами.
-3. **`PREVIEW-OVERLAY-001` — точная сверка сторон.**
+2. **`PREVIEW-OVERLAY-001` — точная сверка сторон.**
    Добавить в preview управляемое наложение front/back с зеркалированием,
    прозрачностью, cut bounds, номерами slots и выбранным printer profile.
    Критерий: overlay и print PDF получают один immutable job и одинаковую
@@ -95,11 +93,10 @@ forensic API/CLI restore, отказ при publication `replace/fsync`, committ
 
 ## 4. Порядок работ
 
-1. Закрыть `MODE-HIDDEN-FIELDS-001` без изменения raw-контракта Advanced.
-2. Реализовать `DATA-TRASH-001` как отдельную migration + UI-фичу с полным
+1. Реализовать `DATA-TRASH-001` как отдельную migration + UI-фичу с полным
    restore/purge-контуром.
-3. Сделать `PREVIEW-OVERLAY-001`, не меняя print transform и не дублируя renderer.
-4. После доступа к принтеру выполнить `PRINT-PHYSICAL-001`, внести измерения
+2. Сделать `PREVIEW-OVERLAY-001`, не меняя print transform и не дублируя renderer.
+3. После доступа к принтеру выполнить `PRINT-PHYSICAL-001`, внести измерения
    в протокол и только после этого закрыть печатный этап.
 
 ## 5. Обязательные quality gates

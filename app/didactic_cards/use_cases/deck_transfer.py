@@ -5,7 +5,14 @@ import io
 import json
 from datetime import datetime, timezone
 
-from ..domain.entities import Card, CardDeck, Deck
+from ..domain.entities import (
+    Card,
+    CardDeck,
+    Deck,
+    CardModeError,
+    validate_card_deck_mode,
+    validate_card_mode_fields,
+)
 from ..domain.interfaces import DeckRepository
 from ..domain.rendering import AuthoringMode, DeckRenderSettings
 from ..domain.trusted import (
@@ -22,11 +29,28 @@ class DeckTransferError(ValueError):
     pass
 
 
+def _validated_cards_for_transfer(
+    repo: DeckRepository,
+    deck: Deck,
+) -> CardDeck:
+    try:
+        cards = repo.load_cards(deck.id)
+        validate_card_deck_mode(
+            cards, deck.render_settings.authoring_mode
+        )
+    except CardModeError as error:
+        raise DeckTransferError(
+            'Колода нарушает контракт Safe/Advanced и не может быть '
+            'экспортирована.'
+        ) from error
+    return cards
+
+
 def export_deck_json(repo: DeckRepository, deck_id: str) -> bytes:
     deck = repo.get_deck(deck_id)
     if deck is None:
         raise KeyError(deck_id)
-    cards = repo.load_cards(deck_id)
+    cards = _validated_cards_for_transfer(repo, deck)
     payload = {
         'schema_version': DECK_EXPORT_SCHEMA_VERSION,
         'exported_at': datetime.now(timezone.utc).isoformat(),
@@ -69,7 +93,7 @@ def export_deck_csv(repo: DeckRepository, deck_id: str) -> bytes:
         if advanced
         else ['section', 'front', 'back']
     )
-    for card in repo.load_cards(deck_id).cards:
+    for card in _validated_cards_for_transfer(repo, deck).cards:
         row = [card.section, card.front, card.back]
         if advanced:
             row.extend([card.upper_header, card.lower_header])
@@ -153,14 +177,19 @@ def import_deck_json(
             raise DeckTransferError(f'Повтор ID карточки {index}')
         if source_card_id:
             source_ids.add(source_card_id)
-        cards.append(Card(
+        card = Card(
             front=front,
             back=back,
             section=section,
             upper_header=upper_header,
             lower_header=lower_header,
             parent_id=source_card_id,
-        ))
+        )
+        try:
+            validate_card_mode_fields(card, render_settings.authoring_mode)
+        except CardModeError as error:
+            raise DeckTransferError(f'Карточка {index}: {error}') from error
+        cards.append(card)
 
     template_items = payload.get('trusted_templates')
     if not isinstance(template_items, list):
@@ -204,11 +233,14 @@ def import_deck_json(
         template_versions.add(version)
         trusted_templates.append(template)
 
+    if (
+        trusted_templates
+        and render_settings.authoring_mode is not AuthoringMode.ADVANCED
+    ):
+        raise DeckTransferError(
+            'Trusted-шаблоны допустимы только в Advanced-колоде'
+        )
     if trusted_templates:
-        render_settings = DeckRenderSettings.from_dict({
-            **render_settings.to_dict(),
-            'authoring_mode': 'advanced',
-        })
         create_with_trusted = getattr(
             repo, 'create_deck_with_cards_and_trusted', None
         )

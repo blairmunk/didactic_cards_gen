@@ -59,6 +59,26 @@ async def _exercise_browser(
         assert await page.Jeval(
             'body', 'element => element.dataset.horizontalAlignment'
         ) == 'center'
+        assert not await page.querySelector('[name="upper_header"]')
+        assert not await page.querySelector('[name="lower_header"]')
+        forged_safe_header = await page.evaluate(
+            '''async () => {
+                const response = await fetch(`/api${location.pathname}/add_card`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        front: 'forged', back: 'value',
+                        upper_header: 'hidden raw'
+                    })
+                });
+                return {status: response.status, payload: await response.json()};
+            }'''
+        )
+        assert forged_safe_header['status'] == 400
+        assert 'Advanced' in forged_safe_header['payload']['error']
+        assert await page.Jeval(
+            '#cards-count', 'element => element.textContent'
+        ) == '0'
         await page.select('#style-preset', 'custom')
         await page.select('#horizontal-alignment', 'right')
         await page.select('#vertical-alignment', 'bottom')
@@ -228,6 +248,8 @@ async def _exercise_browser(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('#cards-tbody tr:nth-child(3) a[aria-label^="Редактировать"]'),
         )
+        assert not await page.querySelector('[name="upper_header"]')
+        assert not await page.querySelector('[name="lower_header"]')
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('#edit-card-form button[type="submit"]'),

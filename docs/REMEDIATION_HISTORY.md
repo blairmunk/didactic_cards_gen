@@ -102,7 +102,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 553 теста, 0 `xfail`, включая browser E2E; branch coverage — 98,37% при обязательном CI-пороге 98%. Chromium-сценарий проверяет раздельные safe/Advanced-колоды, strict safe CSV, пятиколоночный Advanced CSV с trust confirmation, динамические safe-колонтитулы и линии, direct raw-печать, разные Advanced-оболочки front/back, колонтитулы карточки, focus/scroll preflight и calibration UI. Физический прогон на реальном принтере ещё обязателен: PDF/raster-проверка и калькулятор не моделируют driver margins, feed skew и аппаратный duplex offset.
+На этом этапе автоматизированная база содержала 553 теста, 0 `xfail`, включая browser E2E; branch coverage составлял 98,37% при обязательном CI-пороге 98%. Chromium-сценарий проверял раздельные safe/Advanced-колоды, strict safe CSV, пятиколоночный Advanced CSV с trust confirmation, динамические safe-колонтитулы и линии, direct raw-печать, разные Advanced-оболочки front/back, колонтитулы карточки, focus/scroll preflight и calibration UI. Физический прогон на реальном принтере ещё обязателен: PDF/raster-проверка и калькулятор не моделируют driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -571,3 +571,30 @@ Security regression отдельно фиксирует строку `[30mm]` п
 закрывает optional argument `\\`, поэтому Safe-текст не может навязать вертикальный
 отступ. Реальные `pdflatex`/bbox и Chromium-тесты проверяют строки, абзацный gap,
 MathJax, XSS boundary, CSV no-op edit и независимость Advanced/raw.
+
+### 7.14. ✅ Закрытие скрытых Advanced-полей в Safe
+
+`MODE-HIDDEN-FIELDS-001` закрыт 24.08.2026 после повторного аудита всех ingress,
+repository, export и UI. Ранее forged HTML/API или JSON schema 8 могли сохранить у
+Safe-карточки raw `upper_header/lower_header`, хотя Safe UI/renderer их не показывали,
+а трёхколоночный CSV терял. Теперь точная пустая строка является частью mode-инварианта:
+пробел, tab и перевод строки также отклоняются с HTTP 400/доменной ошибкой до записи.
+Safe/Advanced type transition запрещён и в use case, и в SQLite adapter; Advanced
+по-прежнему сохраняет все пять полей посимвольно.
+
+SQLite schema 14 добавляет явную миграцию 13→14. До неё создаётся проверенный stable
+backup schema 13; migration очищает только два скрытых поля Safe-карточек, не меняя
+body, section, порядок, lineage, timestamps/version и Advanced raw. Полный путь
+12→13→14 выполняется в одной write-транзакции. Post-migration semantic integrity
+проверяется до commit: инъекционный тест неполной очистки доказывает rollback к schema
+13 и сохранение исходного значения. Offline restore schema 12/13 мигрирует только
+staged-копию, оставляя backup и manifest неизменными.
+
+Integrity/readiness теперь адресно сообщает о ручной SQL-порче current schema. Clone,
+print snapshot, JSON и CSV export при таком состоянии fail closed, поэтому скрытое
+значение не копируется и не теряется молча. Chromium E2E проверяет отсутствие raw
+controls в Safe add/edit, forged raw отказ без добавления строки и прежний Advanced
+workflow; whitespace-only варианты отдельно проходят Flask HTTP regressions. Safe JSON
+с trusted history отклоняется и больше не получает неявное повышение до Advanced.
+Финальный gate инкремента: 768 passed, 100% statements, 99,55% branches и 99,90%
+общего coverage с реальными Chromium, `pdflatex` и `bubblewrap`.

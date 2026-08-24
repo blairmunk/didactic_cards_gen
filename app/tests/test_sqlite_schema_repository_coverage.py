@@ -59,6 +59,29 @@ def test_schema_helper_edge_cases_and_idempotent_current_migration(monkeypatch):
             migrate_to_current(connection, 12)
 
 
+def test_schema_13_migration_rejects_non_object_typography(tmp_path):
+    repository = SqliteRepository(tmp_path / 'data')
+    deck = repository.create_deck('Invalid migration input')
+    database = repository.database_file
+    repository.close()
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute(
+            'UPDATE deck_render_settings SET typography_json = ? '
+            'WHERE deck_id = ?',
+            ('[]', deck.id),
+        )
+        connection.execute('DELETE FROM schema_migrations')
+        connection.execute(
+            'INSERT INTO schema_migrations(version, name, applied_at) '
+            "VALUES (13, 'initial-current-schema', "
+            "'2026-08-24T00:00:00+00:00')"
+        )
+        connection.execute('PRAGMA user_version = 13')
+
+        with pytest.raises(ValueError, match='invalid typography settings'):
+            migrate_to_current(connection, 13)
+
+
 def test_schema_structure_reports_metadata_views_and_triggers(monkeypatch):
     with closing(sqlite3.connect(':memory:')) as connection:
         initialize_current_schema(connection)
@@ -71,7 +94,10 @@ def test_schema_structure_reports_metadata_views_and_triggers(monkeypatch):
 
         issues = schema_structure_issues(connection)
 
-        assert 'schema-version: expected 13, got 7' in issues
+        assert (
+            f'schema-version: expected {SQLITE_SCHEMA_VERSION}, got 7'
+            in issues
+        )
         assert (
             f'application-id: expected {schema_module.SQLITE_APPLICATION_ID}, got 99'
             in issues
@@ -161,17 +187,13 @@ def test_post_migration_validation_failure_rolls_back_migration(
     repository.close()
     _downgrade_to_schema_12(str(database))
 
-    real_validator = schema_structure_issues
-
-    def reject_migrated_schema(
-        connection, *, expected_version=SQLITE_SCHEMA_VERSION
-    ):
-        if expected_version == 12:
-            return real_validator(connection, expected_version=12)
+    def reject_migrated_schema(_connection, **_kwargs):
         return ['synthetic-post-migration-drift']
 
     monkeypatch.setattr(
-        repository_module, 'schema_structure_issues', reject_migrated_schema
+        repository_module,
+        'connection_validation_issues',
+        reject_migrated_schema,
     )
 
     with pytest.raises(

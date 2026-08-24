@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import uuid
 
 import pytest
@@ -11,10 +12,11 @@ from config import AppConfig
 from didactic_cards.domain.printing import PrinterProfile
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.adapters.sqlite_repository import SqliteRepository
-from didactic_cards.domain.entities import Card, CardDeck
+from didactic_cards.domain.entities import Card, CardDeck, CardModeError
 from didactic_cards.domain.interfaces import CompileResult
 from didactic_cards.domain.rendering import DeckRenderSettings
-from didactic_cards.domain.trusted import TemplateStatus
+from didactic_cards.domain.trusted import TemplateStatus, TrustedTemplateVersion
+from didactic_cards.web import blueprint as blueprint_module
 from run import create_app
 
 
@@ -279,6 +281,63 @@ def test_deck_import_and_export_validation_errors(client):
     )
     assert broken.status_code == 400
     assert 'Некорректный JSON' in broken.text
+
+
+def test_safe_json_upload_rejects_hidden_headers_and_trusted_history(
+    client, repo
+):
+    template = TrustedTemplateVersion(
+        deck_id='source',
+        version=1,
+        front_source='{{ content }}',
+        back_source='{{ content }}',
+    )
+    base = {
+        'schema_version': 8,
+        'deck': {
+            'id': 'source',
+            'name': 'Forged Safe',
+            'description': '',
+            'render_settings': DeckRenderSettings.centered().to_dict(),
+        },
+        'trusted_templates': [],
+    }
+    payloads = (
+        {
+            **base,
+            'cards': [{
+                'front': 'Q', 'back': 'A', 'upper_header': 'hidden'
+            }],
+        },
+        {
+            **base,
+            'cards': [{'front': 'Q', 'back': 'A'}],
+            'trusted_templates': [{
+                'id': template.id,
+                'version': template.version,
+                'front_source': template.front_source,
+                'back_source': template.back_source,
+                'source_hash': template.source_hash,
+                'source_provenance': 'local-author',
+            }],
+        },
+    )
+    before_ids = {deck.id for deck in repo.list_decks()}
+
+    for index, payload in enumerate(payloads):
+        response = client.post(
+            '/import_deck',
+            data={
+                'deck_file': (
+                    io.BytesIO(json.dumps(payload).encode()),
+                    f'forged-{index}.json',
+                ),
+            },
+            content_type='multipart/form-data',
+        )
+        assert response.status_code == 400
+        assert 'Advanced' in response.text
+        assert {deck.id for deck in repo.list_decks()} == before_ids
 
 
 def test_card_html_workflow(client, repo, deck_id):
@@ -1765,6 +1824,92 @@ def test_advanced_card_ui_and_api_persist_per_card_header_values(
     )
     assert updated.upper_header == 'Другой верх'
     assert updated.lower_header == ''
+
+
+@pytest.mark.parametrize('endpoint', ['html', 'api'])
+@pytest.mark.parametrize('field', ['upper_header', 'lower_header'])
+@pytest.mark.parametrize('value', ['hidden', ' \t '])
+def test_safe_card_add_rejects_forged_raw_header_fields(
+    client, repo, deck, endpoint, field, value
+):
+    payload = {'front': '', 'back': '', field: value}
+    response = (
+        client.post(f'/deck/{deck.id}/add_card', data=payload)
+        if endpoint == 'html'
+        else client.post(f'/api/deck/{deck.id}/add_card', json=payload)
+    )
+
+    assert response.status_code == 400
+    assert 'Advanced' in response.text
+    assert len(repo.load_cards(deck.id)) == 0
+
+
+@pytest.mark.parametrize('endpoint', ['html', 'api'])
+def test_card_add_translates_late_mode_validation_error_to_http_400(
+    client, deck, monkeypatch, endpoint
+):
+    class RejectingAddCard:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def execute(self, *_args, **_kwargs):
+            raise CardModeError('Только Advanced')
+
+    monkeypatch.setattr(blueprint_module, 'AddCard', RejectingAddCard)
+    response = (
+        client.post(
+            f'/deck/{deck.id}/add_card', data={'front': 'Q', 'back': 'A'}
+        )
+        if endpoint == 'html'
+        else client.post(
+            f'/api/deck/{deck.id}/add_card', json={'front': 'Q', 'back': 'A'}
+        )
+    )
+
+    assert response.status_code == 400
+    assert 'Advanced' in response.text
+
+
+@pytest.mark.parametrize('endpoint', ['html', 'api'])
+@pytest.mark.parametrize('field', ['upper_header', 'lower_header'])
+def test_safe_card_edit_rejects_forged_raw_header_fields_atomically(
+    client, repo, deck, endpoint, field
+):
+    card = Card(front='before', back='answer')
+    repo.save_cards(deck.id, CardDeck([card]))
+    payload = {'front': 'after', 'back': 'changed', field: 'hidden'}
+    response = (
+        client.post(f'/deck/{deck.id}/edit_card/{card.id}', data=payload)
+        if endpoint == 'html'
+        else client.put(
+            f'/api/deck/{deck.id}/edit_card/{card.id}', json=payload
+        )
+    )
+
+    assert response.status_code == 400
+    assert 'Advanced' in response.text
+    stored = repo.load_cards(deck.id).cards[0]
+    assert (stored.front, stored.back, stored.upper_header, stored.lower_header) == (
+        'before', 'answer', '', '',
+    )
+
+
+@pytest.mark.parametrize('suffix', ['export.json', 'export.csv'])
+def test_corrupt_safe_export_routes_fail_explicitly(client, repo, deck, suffix):
+    card = Card(front='Q')
+    repo.save_cards(deck.id, CardDeck([card]))
+    with repo._transaction(write=True) as connection:
+        connection.execute(
+            'UPDATE cards SET upper_header = ? WHERE id = ?',
+            ('hidden', card.id),
+        )
+
+    response = client.get(f'/deck/{deck.id}/{suffix}')
+
+    assert response.status_code == 409
+    assert 'Safe/Advanced' in response.text
+    assert 'Ошибка экспорта колоды' in response.text
+    assert 'Ошибка компиляции LaTeX' not in response.text
 
 
 def test_trusted_test_compile_is_read_only_and_validation_is_atomic(

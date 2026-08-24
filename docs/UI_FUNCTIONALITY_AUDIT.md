@@ -16,7 +16,14 @@ bulk/CSV были видимы в обоих режимах, но имели н�
 Теперь UI показывает единственный строгий формат, отдельные safe/Advanced-наборы полей,
 downloadable template, подробный обязательный preview и подтверждение доверия raw-файлу.
 
-В ходе аудита исправлены три разрыва:
+Повторная проверка границы режимов закрыла ещё один невидимый UI-разрыв: forged
+HTML/JSON-запрос и JSON import могли записать `upper_header/lower_header` в обычную
+карточку, хотя пользователь не имел ни поля просмотра, ни способа исправления. Теперь
+Safe допускает только точную пустую строку на HTTP/use-case/storage boundaries,
+schema 14 очищает прежние скрытые значения с pre-migration backup, а Advanced UI и
+character-preserving round-trip пяти полей не изменены.
+
+В ходе аудита исправлены пять разрывов:
 
 1. Advanced перенесён из смешанной панели оформления в явный неизменяемый тип колоды.
 2. Export JSON/CSV находился внутри скрытого блока генерации и поэтому исчезал у пустой
@@ -24,6 +31,8 @@ downloadable template, подробный обязательный preview и п
 3. Два произвольно перемещаемых numbered-колонтитула заменены на семантические верхний и нижний.
 4. Backend поддерживал обновление printer profile по ключу, но в таблице был только
    Delete: для изменения приходилось вручную заново вводить ключ и все значения.
+5. Raw-поля Advanced-карточки можно было подделать в Safe-запросе и сохранить без
+   видимого control; теперь UI не отправляет их, а backend отклоняет fail closed.
 
 ## Матрица пользовательских функций
 
@@ -79,7 +88,8 @@ Regression-тесты отдельно открывают safe и Advanced-ко�
 базовые single/bulk/CSV, edit/delete/reorder, оба export, все PDF-варианты,
 preview, preflight, reset и printer profile. Отдельные тесты проверяют disabled/enabled
 Advanced navigation, export пустой колоды и prefilled edit printer profile. Chromium E2E
-проходит реальную навигацию в Advanced editor и calibration calculator.
+проходит реальную навигацию в Advanced editor и calibration calculator, отсутствие
+raw-полей в Safe add/edit и атомарный HTTP 400 для поддельного Safe raw-поля.
 
 Дополнительное покрытие доказывает пятиколоночный Advanced round-trip, strict malformed
 input, сохранение raw whitespace/backslashes, свежесть preview и mode-aware UI. Chromium
