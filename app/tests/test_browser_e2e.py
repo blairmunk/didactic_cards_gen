@@ -408,6 +408,69 @@ async def _exercise_browser(
             '.trusted-version', 'element => element.textContent'
         )
 
+        await page.goto(base_url, {'waitUntil': 'networkidle2'})
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.evaluate(
+                '''() => {
+                    const row = [...document.querySelectorAll('.decks-table tbody tr')]
+                        .find(item => item.querySelector('.deck-name-link').textContent.trim()
+                            === 'Browser Advanced');
+                    HTMLFormElement.prototype.submit.call(
+                        row.querySelector('form[action$="/delete"]')
+                    );
+                }'''
+            ),
+        )
+        assert 'Корзина (1)' in await page.Jeval(
+            '.app-navigation', 'element => element.textContent'
+        )
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('a[href$="/trash"]'),
+        )
+        assert 'Browser Advanced' in await page.Jeval(
+            '.decks-table', 'element => element.textContent'
+        )
+        restore_button = await page.querySelector(
+            'button[aria-label^="Восстановить колоду Browser Advanced"]'
+        )
+        await restore_button.focus()
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.keyboard.press('Enter'),
+        )
+        assert 'Корзина пуста' in await page.Jeval(
+            'body', 'element => element.textContent'
+        )
+
+        await page.goto(base_url, {'waitUntil': 'networkidle2'})
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.evaluate(
+                '''() => {
+                    const row = [...document.querySelectorAll('.decks-table tbody tr')]
+                        .find(item => item.querySelector('.deck-name-link').textContent.trim()
+                            === 'Browser Advanced');
+                    HTMLFormElement.prototype.submit.call(
+                        row.querySelector('form[action$="/delete"]')
+                    );
+                }'''
+            ),
+        )
+        await page.goto(base_url + '/trash', {'waitUntil': 'networkidle2'})
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.evaluate(
+                '''() => HTMLFormElement.prototype.submit.call(
+                    document.querySelector('form[action$="/purge"]')
+                )'''
+            ),
+        )
+        assert 'Корзина пуста' in await page.Jeval(
+            'body', 'element => element.textContent'
+        )
+
         resource_urls = await page.evaluate(
             "() => performance.getEntriesByType('resource').map(entry => entry.name)"
         )

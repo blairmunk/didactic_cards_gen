@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+from datetime import datetime, timedelta, timezone
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from multiprocessing import get_context
@@ -215,7 +216,7 @@ def test_deck_and_ordered_card_round_trip(sqlite_repo):
     assert loaded.update_deck('missing', 'No') is None
 
 
-def test_clone_lineage_and_delete(sqlite_repo):
+def test_clone_lineage_and_trash(sqlite_repo):
     source = sqlite_repo.create_deck('Source')
     original = Card(
         front=' Q\r\nline\rraw\n ',
@@ -236,10 +237,165 @@ def test_clone_lineage_and_delete(sqlite_repo):
     )
     assert sqlite_repo.clone_deck('missing') is None
 
-    assert sqlite_repo.delete_deck(source.id) is True
-    assert sqlite_repo.delete_deck(source.id) is False
+    now = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    assert sqlite_repo.trash_deck(
+        source.id,
+        expected_version=sqlite_repo.get_deck(source.id).version,
+        trashed_at=now,
+        purge_after=now + timedelta(days=30),
+    ) is True
     assert sqlite_repo.get_deck(source.id) is None
+    assert sqlite_repo.clone_deck(source.id) is None
+    assert sqlite_repo.list_trashed_decks()[0].id == source.id
     assert sqlite_repo.load_cards(clone.id).cards[0].front == original.front
+
+
+def test_trash_restore_and_purge_preserve_or_remove_complete_aggregate(
+    sqlite_repo,
+):
+    deck = sqlite_repo.create_deck(
+        'Advanced aggregate',
+        'Must survive',
+        DeckRenderSettings(authoring_mode='advanced'),
+    )
+    card = Card(
+        front='raw, front',
+        back='raw\nback',
+        upper_header='TOP',
+        lower_header='BOTTOM',
+    )
+    sqlite_repo.save_cards(deck.id, CardDeck([card]))
+    template = sqlite_repo.quarantine_trusted_template(
+        deck.id, r'front {{ content }}', r'back {{ content }}'
+    )
+    approved = sqlite_repo.approve_trusted_template(deck.id, template.id)
+    active = sqlite_repo.get_deck(deck.id)
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    assert sqlite_repo.trash_deck(
+        deck.id,
+        expected_version=active.version,
+        trashed_at=now,
+        purge_after=now + timedelta(days=30),
+    ) is True
+    trashed = sqlite_repo.list_trashed_decks()[0]
+    assert trashed.version == active.version + 1
+    assert trashed.trashed_at == now
+    assert trashed.purge_after == now + timedelta(days=30)
+    assert sqlite_repo.list_decks() == []
+    assert sqlite_repo.get_deck(deck.id) is None
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.load_cards(deck.id)
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.list_trusted_templates(deck.id)
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.approve_trusted_template(deck.id, template.id)
+    with pytest.raises(DeckNotFoundError):
+        sqlite_repo.revoke_trusted_template(deck.id, template.id)
+    assert sqlite_repo.trash_deck(
+        deck.id,
+        expected_version=trashed.version,
+        trashed_at=now,
+        purge_after=now + timedelta(days=30),
+    ) is False
+    with pytest.raises(ConcurrentModificationError):
+        sqlite_repo.restore_deck(
+            deck.id, expected_version=active.version
+        )
+
+    # Expiration makes the deck eligible for cleanup, but does not turn a
+    # restore into a partial re-import or enforce the per-deck card quota.
+    assert sqlite_repo.restore_deck(
+        deck.id, expected_version=trashed.version
+    ) is True
+    restored = sqlite_repo.get_deck(deck.id)
+    assert restored.version == trashed.version + 1
+    assert restored.trashed_at is None
+    assert restored.purge_after is None
+    assert sqlite_repo.load_cards(deck.id).cards[0].to_dict() == card.to_dict()
+    assert sqlite_repo.get_render_settings(deck.id) == deck.render_settings
+    history = sqlite_repo.list_trusted_templates(deck.id)
+    assert len(history) == 1
+    assert history[0].id == approved.id
+    assert history[0].status is TemplateStatus.APPROVED
+
+    later = now + timedelta(days=90)
+    assert sqlite_repo.trash_deck(
+        deck.id,
+        expected_version=restored.version,
+        trashed_at=later,
+        purge_after=later + timedelta(days=30),
+    ) is True
+    trashed_again = sqlite_repo.list_trashed_decks()[0]
+    with pytest.raises(ConcurrentModificationError):
+        sqlite_repo.purge_deck(
+            deck.id, expected_version=restored.version
+        )
+    assert sqlite_repo.purge_deck(
+        deck.id, expected_version=trashed_again.version
+    ) is True
+    assert sqlite_repo.list_trashed_decks() == []
+    with closing(sqlite_repo._connect()) as connection:
+        for table, column in (
+            ('decks', 'id'),
+            ('deck_render_settings', 'deck_id'),
+            ('deck_cards', 'deck_id'),
+            ('trusted_templates', 'deck_id'),
+        ):
+            assert connection.execute(
+                f'SELECT COUNT(*) FROM {table} WHERE {column} = ?',
+                (deck.id,),
+            ).fetchone()[0] == 0
+        assert connection.execute(
+            'SELECT COUNT(*) FROM cards WHERE id = ?', (card.id,)
+        ).fetchone()[0] == 0
+
+
+def test_trash_state_guards_are_atomic(sqlite_repo):
+    deck = sqlite_repo.create_deck('Guards')
+    now = datetime(2026, 8, 24, tzinfo=timezone.utc)
+
+    with pytest.raises(ValueError, match='retention timestamps'):
+        sqlite_repo.trash_deck(
+            deck.id,
+            expected_version=deck.version,
+            trashed_at=now,
+            purge_after=now,
+        )
+    assert sqlite_repo.get_deck(deck.id).version == deck.version
+    assert sqlite_repo.restore_deck(
+        deck.id, expected_version=deck.version
+    ) is False
+    assert sqlite_repo.purge_deck(
+        deck.id, expected_version=deck.version
+    ) is False
+    assert sqlite_repo.trash_deck(
+        'missing',
+        expected_version=1,
+        trashed_at=now,
+        purge_after=now + timedelta(days=1),
+    ) is False
+    assert sqlite_repo.restore_deck('missing', expected_version=1) is False
+    assert sqlite_repo.purge_deck('missing', expected_version=1) is False
+
+
+def test_trash_timestamps_are_normalized_to_utc(sqlite_repo):
+    deck = sqlite_repo.create_deck('UTC normalization')
+    local_zone = timezone(timedelta(hours=3))
+    trashed_at = datetime(2026, 8, 24, 22, 0, tzinfo=local_zone)
+
+    assert sqlite_repo.trash_deck(
+        deck.id,
+        expected_version=deck.version,
+        trashed_at=trashed_at,
+        purge_after=trashed_at + timedelta(days=30),
+    ) is True
+
+    trashed = sqlite_repo.list_trashed_decks()[0]
+    assert trashed.trashed_at == datetime(
+        2026, 8, 24, 19, 0, tzinfo=timezone.utc
+    )
+    assert trashed.trashed_at.utcoffset() == timedelta(0)
 
 
 def test_sqlite_reopen_preserves_mixed_newlines_in_all_card_fields(sqlite_repo):

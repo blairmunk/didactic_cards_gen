@@ -2,7 +2,8 @@ from ..domain.interfaces import DeckRepository
 from ..domain.entities import Deck
 from ..domain.rendering import AuthoringMode, DeckRenderSettings
 
-from typing import Optional
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
 
 
 class ListDecks:
@@ -45,12 +46,60 @@ class UpdateDeck:
         return self.repo.update_deck(deck_id, name, description)
 
 
-class DeleteDeck:
+class ListTrashedDecks:
     def __init__(self, repo: DeckRepository):
         self.repo = repo
 
-    def execute(self, deck_id: str) -> bool:
-        return self.repo.delete_deck(deck_id)
+    def execute(self) -> list[Deck]:
+        return self.repo.list_trashed_decks()
+
+
+class TrashDeck:
+    def __init__(
+        self,
+        repo: DeckRepository,
+        retention_days: int,
+        *,
+        clock: Callable[[], datetime] | None = None,
+    ):
+        if (
+            isinstance(retention_days, bool)
+            or not isinstance(retention_days, int)
+            or retention_days <= 0
+        ):
+            raise ValueError('Срок хранения корзины должен быть положительным')
+        self.repo = repo
+        self.retention_days = retention_days
+        self.clock = clock or (lambda: datetime.now(timezone.utc))
+
+    def execute(self, deck_id: str, expected_version: int) -> bool:
+        trashed_at = self.clock()
+        if trashed_at.tzinfo is None:
+            raise ValueError('Время удаления должно содержать часовой пояс')
+        return self.repo.trash_deck(
+            deck_id,
+            expected_version=expected_version,
+            trashed_at=trashed_at,
+            purge_after=trashed_at + timedelta(days=self.retention_days),
+        )
+
+
+class RestoreDeck:
+    def __init__(self, repo: DeckRepository):
+        self.repo = repo
+
+    def execute(self, deck_id: str, expected_version: int) -> bool:
+        return self.repo.restore_deck(
+            deck_id, expected_version=expected_version
+        )
+
+
+class PurgeDeck:
+    def __init__(self, repo: DeckRepository):
+        self.repo = repo
+
+    def execute(self, deck_id: str, expected_version: int) -> bool:
+        return self.repo.purge_deck(deck_id, expected_version=expected_version)
 
 
 class CloneDeck:

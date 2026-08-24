@@ -387,6 +387,28 @@ def _semantic_issues(
             except (TypeError, ValueError):
                 issues.append(f"invalid-{table[:-1]}-metadata: {row['id']}")
 
+    if expected_schema_version >= 15:
+        for row in connection.execute(
+            'SELECT id, trashed_at, purge_after FROM decks ORDER BY id'
+        ):
+            try:
+                if (row['trashed_at'] is None) != (row['purge_after'] is None):
+                    raise ValueError
+                if row['trashed_at'] is None:
+                    continue
+                trashed_at = datetime.fromisoformat(row['trashed_at'])
+                purge_after = datetime.fromisoformat(row['purge_after'])
+                if (
+                    trashed_at.tzinfo is None
+                    or purge_after.tzinfo is None
+                    or trashed_at.utcoffset() != timezone.utc.utcoffset(None)
+                    or purge_after.utcoffset() != timezone.utc.utcoffset(None)
+                    or purge_after <= trashed_at
+                ):
+                    raise ValueError
+            except (TypeError, ValueError):
+                issues.append(f"invalid-deck-trash-metadata: {row['id']}")
+
     if 'schema_migrations' in {
         row[0] for row in connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table'"

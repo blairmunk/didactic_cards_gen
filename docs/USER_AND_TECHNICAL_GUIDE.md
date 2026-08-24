@@ -70,9 +70,23 @@ kpsewhich babel-russian.tex
 
 ### Колоды
 
-Стартовая страница создаёт, открывает, переименовывает, клонирует и удаляет колоды. Удаление необратимо: корзины и резервной копии пока нет.
+Стартовая страница создаёт, открывает, переименовывает, клонирует и перемещает колоды
+в корзину. Ссылка «Корзина» показывает число удалённых колод. В ней можно атомарно
+восстановить весь агрегат — карточки, оформление и историю Advanced-шаблонов — либо
+отдельно удалить его навсегда. Обе операции защищены CSRF и версией колоды: действие
+из устаревшей вкладки получает HTTP 409.
+
+По умолчанию срок хранения равен 30 дням. Его можно задать переменной
+`DIDACTIC_CARDS_TRASH_RETENTION_DAYS` в диапазоне 1–3650. Просроченная запись остаётся
+восстанавливаемой до явного purge: фонового scheduler в локальном приложении нет.
+Ручное «Удалить навсегда» доступно и до даты хранения, всегда отдельной операцией.
+Корзина не входит в список активных колод и недоступна для просмотра, печати, clone,
+экспорта или trusted API. `MAX_CARDS` остаётся лимитом изменения одной активной
+колоды; restore не создаёт карточки заново и потому не применяет квоту повторно.
 
 ![Список колод](images/decks.png)
+
+![Корзина колод](images/trash.png)
 
 Служебный хвост `HTML`, который был виден на исходном audit-снимке, удалён из шаблона; актуальный screenshot переснят после успешной browser-приёмки.
 
@@ -305,7 +319,7 @@ MathJax 3.2.2 вместе с web fonts хранится локально в sta
 app/data/cards.sqlite3        # активная транзакционная база
 ```
 
-Активное хранилище — только SQLite schema 14: `decks`, `cards`,
+Активное хранилище — только SQLite schema 15: `decks`, `cards`,
 упорядоченная связь `deck_cards(position)`, `deck_render_settings`,
 `printer_profiles`, карантин `trusted_templates` и журнал
 `schema_migrations`. Схема помечена фиксированным SQLite `application_id`:
@@ -314,22 +328,25 @@ app/data/cards.sqlite3        # активная транзакционная б
 работает в WAL, а каждая серия чтений или записей имеет единый
 транзакционный snapshot.
 
-Пустой файл создаётся сразу в schema 14. Из старых баз автоматически
-поддерживаются только точные schema 12 и 13. При первом старте приложение:
+Пустой файл создаётся сразу в schema 15. Из старых баз автоматически
+поддерживаются только точные schema 12, 13 и 14. При первом старте приложение:
 
 1. проверит таблицы, индексы и metadata исходной schema;
 2. создаст в `app/data/backups` проверенный
-   `pre-migration-v12-stable.sqlite3` либо `pre-migration-v13-stable.sqlite3`
+   `pre-migration-v12-stable.sqlite3`, `pre-migration-v13-stable.sqlite3` либо
+   `pre-migration-v14-stable.sqlite3`
    с manifest или проверит/повторно
    использует уже созданную копию после failed-start;
-3. выполнит цепочку 12→13→14 либо шаг 13→14 в одной write-транзакции;
+3. выполнит цепочку 12→13→14→15, 13→14→15 либо шаг 14→15 в одной write-транзакции;
 4. в шаге 13→14 приведёт `upper_header/lower_header` Safe-карточек к точной
    пустой строке, не меняя body, секцию, порядок, версии/timestamps и все пять
-   полей Advanced-карточек. Исходные legacy-значения остаются в backup.
+   полей Advanced-карточек. Исходные legacy-значения остаются в backup;
+5. в шаге 14→15 добавит `trashed_at/purge_after` и индекс корзины. Все существующие
+   колоды останутся активными; карточки и trusted history не переписываются.
 
-Перед первым запуском schema-14 кода остановите **все** workers прежней
-schema-12/13 версии. Rolling upgrade со смешанными версиями небезопасен: старый
-процесс не знает о schema 14 и новом mode-инварианте. Только после успешного
+Перед первым запуском schema-15 кода остановите **все** workers прежней
+schema-12/13/14 версии. Rolling upgrade со смешанными версиями небезопасен: старый
+процесс не знает о schema 15 и trash-инварианте. Только после успешного
 однократного startup запускайте остальные workers новой версии.
 
 Базы ниже schema 12, будущие версии и неполные/неизвестные схемы
@@ -426,8 +443,8 @@ python scripts/storage.py inspect
 live-базы; соседний manifest обязателен, а его hash/schema/size обязаны совпасть.
 Перед заменой создаётся проверенный `pre-restore-*` backup текущего состояния,
 кандидат ставится через staged-файл и повторно проверяется. `.secret_key` и другие
-файлы каталога данных restore не заменяет. Backup schema 12 или 13 с корректным
-manifest допустим: цепочка 12→13→14 либо шаг 13→14 выполняется в staged-копии,
+файлы каталога данных restore не заменяет. Backup schema 12, 13 или 14 с корректным
+manifest допустим: миграция до schema 15 выполняется в staged-копии,
 а не в файле источника. Поэтому restore не переписывает старый backup; при
 восстановлении schema 13 его legacy Safe-поля очищаются только в новой live-копии.
 
@@ -498,7 +515,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние полного набора фиксируется после каждого полного CI-прогона; `xfail` нет, branch coverage не ниже обязательного порога 98%. В storage-матрицу входят SQLite 12→13→14 и 13→14, stable migration retry, mode-aware cleanup, staged restore старых backup, strict rejection неизвестных схем, WAL snapshot, concurrent hard-link no-clobber, manifest mismatch, inode leases, active-worker refusal, healthy/forensic restore и rollback при `replace/fsync` failure. Остальной набор покрывает JSON schema 8, hard split safe/Advanced на HTTP/use-case/storage boundaries, разные оболочки front/back, колонтитулы на уровне карточек, dynamic safe headers, линии, strict mode-aware CSV, explicit Safe newline/paragraph semantics, direct raw sandbox route, физические row/sheet breaks, PDF-геометрию, safe-типографику, UI-inventory, calibration calculator и production health. Hostile-набор проверяет namespaces, отсутствие host/project mounts и сети, запрет host-записи/shell escape, timeout, лимиты и очистку. Chromium E2E отдельно проходит forged Safe raw-field rejection, Safe строки/абзацы и XSS boundary, safe-оформление, Advanced raw/оболочки и колонтитулы карточки, CSV no-op round-trip, preflight и calibration UI.
+Текущее состояние полного набора фиксируется после каждого полного CI-прогона; `xfail` нет, branch coverage не ниже обязательного порога 98%. Storage-матрица включает SQLite 12→13→14→15, отдельные 13→14→15 и 14→15, stable migration retry, mode-aware cleanup, trash metadata integrity, staged restore старых backup, WAL snapshot, no-clobber backup, manifest mismatch, inode leases и publish-failure rollback. Остальной набор покрывает JSON schema 8, hard split Safe/Advanced, атомарные trash/restore/purge со stale-version и quota semantics, mode-aware CSV, Safe newline semantics, sandbox, PDF-геометрию, типографику, calibration и production health. Chromium E2E проходит forged Safe raw-field rejection, оформление обоих режимов, CSV round-trip, клавиатурное восстановление из корзины, purge, preflight и calibration UI.
 
 Golden fixtures обновляются осознанной отдельной командой после визуальной проверки изменения раскладки:
 

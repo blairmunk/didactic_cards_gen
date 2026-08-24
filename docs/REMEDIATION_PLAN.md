@@ -7,11 +7,11 @@
 
 ## 1. Актуальный контракт
 
-- Единственное хранилище — SQLite schema 14. В ней есть
+- Единственное хранилище — SQLite schema 15. В ней есть
   `schema_migrations`, фиксированный `application_id`, foreign keys, WAL и
   транзакционные read/write snapshots.
-- Пустая база инициализируется сразу как schema 14. Автоматически принимаются
-  только точные schema 12/13: выполняется цепочка 12→13→14 либо шаг 13→14,
+- Пустая база инициализируется сразу как schema 15. Автоматически принимаются
+  только точные schema 12/13/14: выполняется миграция до 15,
   перед ней создаётся проверенный stable backup, повторно используемый при retry.
   Upgrade только offline: все workers старой schema-12/13 версии нужно остановить
   до запуска нового кода. Чужая schema 0, версии ниже 12 и будущие версии
@@ -40,7 +40,8 @@
 | ID | Статус | Результат и критерий приёмки |
 |---|---|---|
 | `DATA-BACKUP-001` | ✅ Выполнено | `scripts/storage.py backup` снимает целостный online snapshot вместе с committed WAL-данными; hard-link publication атомарно отказывает при уже существующей цели. Копия и manifest имеют `0600`; manifest содержит байтовый и логический SHA-256, размер и schema version. |
-| `DATA-MIGRATION-001` | ✅ Выполнено | Реестр миграций ведёт цепочку schema 12→13→14 в одной write-транзакции. Stable backup исходной schema создаётся один раз, проверяется и повторно используется при failed-start retry; неизвестная/неполная схема отклоняется. Шаг 13→14 очищает только legacy Safe raw-колонтитулы, сохраняя Advanced посимвольно. |
+| `DATA-MIGRATION-001` | ✅ Выполнено | Реестр миграций ведёт цепочку schema 12→13→14→15 в одной write-транзакции. Stable backup исходной schema создаётся один раз, проверяется и повторно используется при failed-start retry; неизвестная/неполная схема отклоняется. Шаг 13→14 очищает только legacy Safe raw-колонтитулы, а 14→15 добавляет trash-state без переписывания агрегатов. |
+| `DATA-TRASH-001` | ✅ Выполнено | Schema 15 хранит парные UTC `trashed_at/purge_after`; активные queries fail closed для удалённой колоды. UI даёт отдельные version-locked trash/restore/purge POST. Карточки, настройки и trusted history восстанавливаются без re-import; purge удаляет агрегат каскадно. 30-дневный retention настраивается в deployment, просроченная запись сохраняется до явного purge, а `MAX_CARDS` при restore не применяется повторно. |
 | `DATA-RESTORE-001` | ✅ Выполнено | Offline restore требует `--yes`, matching manifest и exclusive inode lease. Healthy live сначала превращается в pre-restore backup; unhealthy live по отдельному opt-in `--allow-unhealthy-live` сначала копируется без изменения в forensic bundle вместе с WAL/SHM/journal. После этого проверенная staged-копия публикуется атомарно; schema 12/13 мигрируется только в staging. |
 | `LIMIT-002` | ✅ Выполнено | `CardDeck.padded()` отклоняет bool, нецелые и `cards_per_page <= 0` до арифметики; прямые domain/use-case regression-тесты не допускают частичного действия. |
 | `IMPORT-CSV-V2` | ✅ Выполнено | Canonical header, comma/semicolon/tab, BOM/кодировки, quoted delimiter/multiline/doubled quote, пять Advanced-полей, preview binding и atomic reject покрыты regression/E2E. |
@@ -53,8 +54,8 @@
 Статус storage-пунктов подтверждён обычными regression-тестами: проверены
 forensic API/CLI restore, отказ при publication `replace/fsync`, committed WAL,
 конкурентный no-clobber backup и повторное использование stable pre-migration backup.
-Последний полный локальный gate 24.08.2026: **768 passed**, statement coverage
-100%, branch coverage **99,55%** (общий coverage 99,90%); в прогон вошли реальные Chromium,
+Последний полный локальный gate 24.08.2026: **786 passed**, statement coverage
+100%, branch coverage **99,48%** (общий coverage 99,88%); в прогон вошли реальные Chromium,
 `pdflatex` и `bubblewrap` integration-тесты.
 
 ## 3. Ближайший backlog
@@ -64,11 +65,7 @@ forensic API/CLI restore, отказ при publication `replace/fsync`, committ
 
 ### P1 — надёжность и основной UX
 
-1. **`DATA-TRASH-001` — обратимое удаление колоды.**
-   Заменить мгновенный hard delete на trash/restore с явным сроком хранения и
-   отдельным безвозвратным purge. Критерий: cards/settings/trusted history восстанавливаются
-   атомарно; stale-version и quota semantics определены тестами.
-2. **`PREVIEW-OVERLAY-001` — точная сверка сторон.**
+1. **`PREVIEW-OVERLAY-001` — точная сверка сторон.**
    Добавить в preview управляемое наложение front/back с зеркалированием,
    прозрачностью, cut bounds, номерами slots и выбранным printer profile.
    Критерий: overlay и print PDF получают один immutable job и одинаковую
@@ -93,10 +90,8 @@ forensic API/CLI restore, отказ при publication `replace/fsync`, committ
 
 ## 4. Порядок работ
 
-1. Реализовать `DATA-TRASH-001` как отдельную migration + UI-фичу с полным
-   restore/purge-контуром.
-2. Сделать `PREVIEW-OVERLAY-001`, не меняя print transform и не дублируя renderer.
-3. После доступа к принтеру выполнить `PRINT-PHYSICAL-001`, внести измерения
+1. Сделать `PREVIEW-OVERLAY-001`, не меняя print transform и не дублируя renderer.
+2. После доступа к принтеру выполнить `PRINT-PHYSICAL-001`, внести измерения
    в протокол и только после этого закрыть печатный этап.
 
 ## 5. Обязательные quality gates

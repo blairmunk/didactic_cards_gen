@@ -1,4 +1,5 @@
 import pytest
+from datetime import datetime, timezone
 
 from didactic_cards.domain.entities import Card, CardDeck
 from didactic_cards.domain.interfaces import ConcurrentModificationError
@@ -6,10 +7,13 @@ from didactic_cards.domain.rendering import DeckRenderSettings
 from didactic_cards.use_cases.deck_use_cases import (
     CloneDeck,
     CreateDeck,
-    DeleteDeck,
     GetDeckInfo,
     GetDeckRenderSettings,
     ListDecks,
+    ListTrashedDecks,
+    PurgeDeck,
+    RestoreDeck,
+    TrashDeck,
     UpdateDeck,
     UpdateDeckRenderSettings,
 )
@@ -25,9 +29,42 @@ def test_deck_lifecycle(repo):
     assert updated.name == "Новая колода"
     assert updated.description == "Новая версия"
 
-    assert DeleteDeck(repo).execute(created.id) is True
-    assert DeleteDeck(repo).execute(created.id) is False
+    now = datetime(2026, 8, 24, tzinfo=timezone.utc)
+    assert TrashDeck(repo, 30, clock=lambda: now).execute(
+        created.id, updated.version
+    ) is True
     assert GetDeckInfo(repo).execute(created.id) is None
+    trashed = ListTrashedDecks(repo).execute()[0]
+    assert trashed.trashed_at == now
+    assert trashed.purge_after == datetime(2026, 9, 23, tzinfo=timezone.utc)
+    assert RestoreDeck(repo).execute(created.id, trashed.version) is True
+    restored = GetDeckInfo(repo).execute(created.id)
+    assert restored.version == trashed.version + 1
+
+    assert TrashDeck(repo, 30, clock=lambda: now).execute(
+        created.id, restored.version
+    ) is True
+    trashed = ListTrashedDecks(repo).execute()[0]
+    assert PurgeDeck(repo).execute(created.id, trashed.version) is True
+    assert PurgeDeck(repo).execute(created.id, trashed.version) is False
+
+
+@pytest.mark.parametrize('retention', [True, 0, -1, 1.5])
+def test_trash_use_case_validates_retention(retention, repo):
+    with pytest.raises(ValueError, match='Срок хранения'):
+        TrashDeck(repo, retention)
+
+
+def test_trash_use_case_rejects_naive_clock(repo):
+    deck = repo.create_deck('Naive')
+    operation = TrashDeck(
+        repo, 30, clock=lambda: datetime(2026, 8, 24)
+    )
+
+    with pytest.raises(ValueError, match='часовой пояс'):
+        operation.execute(deck.id, deck.version)
+
+    assert repo.get_deck(deck.id) is not None
 
 
 def test_clone_deck_is_deep(repo):

@@ -49,11 +49,14 @@ def test_pinned_mathjax_bundle_and_fonts_are_vendored():
 def test_icon_actions_and_reorder_have_accessible_names():
     index = (WEB_ROOT / 'templates/cards/index.html').read_text(encoding='utf-8')
     decks = (WEB_ROOT / 'templates/cards/decks.html').read_text(encoding='utf-8')
+    trash = (WEB_ROOT / 'templates/cards/trash.html').read_text(encoding='utf-8')
     assert 'class="drag-handle" tabindex="0" role="button" aria-label=' in index
     assert 'class="delete-btn"' in index and 'aria-label="Удалить карточку' in index
     assert 'aria-label="Редактировать карточку' in index
     assert 'aria-label="Копировать колоду' in decks
-    assert 'aria-label="Удалить колоду' in decks
+    assert 'aria-label="Переместить колоду' in decks
+    assert 'aria-label="Восстановить колоду' in trash
+    assert 'aria-label="Безвозвратно удалить колоду' in trash
 
 
 def test_mathjax_has_local_loading_status():

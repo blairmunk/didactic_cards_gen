@@ -76,6 +76,7 @@ def create_app(
     )
     app.config['CARDS_PER_PAGE'] = layout.cards_per_page
     app.config['MAX_CARDS'] = cfg.max_cards
+    app.config['TRASH_RETENTION_DAYS'] = cfg.trash_retention_days
     app.config['MAX_CONTENT_LENGTH'] = cfg.max_request_bytes
     app.config['CSRF_ENABLED'] = cfg.csrf_enabled
     app.config['TRUSTED_LATEX_ENABLED'] = cfg.trusted_latex_enabled

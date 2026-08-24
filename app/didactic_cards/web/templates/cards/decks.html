@@ -11,6 +11,7 @@
     <h1>📚 Мои колоды</h1>
     <nav class="app-navigation" aria-label="Инструменты приложения">
         <a href="{{ url_for('cards.printer_profiles') }}">Профили принтеров и калибровка</a>
+        <a href="{{ url_for('cards.trash_list') }}">Корзина ({{ trashed_count }})</a>
         {% if trusted_enabled %}
         <span class="feature-status feature-enabled">Можно создавать отдельные Advanced-колоды</span>
         {% else %}
@@ -101,10 +102,11 @@ DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true python app/run.py</code></pre>
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
                         <button type="submit" class="btn-small btn-secondary" aria-label="Копировать колоду {{ deck.name }}">📋 Копировать</button>
                     </form>
-                    <form method="post" action="{{ url_for('cards.delete_deck', deck_id=deck.id) }}"
-                          onsubmit="return confirm('Удалить колоду «{{ deck.name }}»?')">
+                    <form method="post" action="{{ url_for('cards.trash_deck', deck_id=deck.id) }}"
+                          onsubmit="return confirm('Переместить колоду «{{ deck.name }}» в корзину на {{ trash_retention_days }} дней?')">
                         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-                        <button type="submit" class="btn-small btn-danger" aria-label="Удалить колоду {{ deck.name }}">🗑️ Удалить</button>
+                        <input type="hidden" name="version" value="{{ deck.version }}">
+                        <button type="submit" class="btn-small btn-danger" aria-label="Переместить колоду {{ deck.name }} в корзину">🗑️ В корзину</button>
                     </form>
                 </td>
             </tr>

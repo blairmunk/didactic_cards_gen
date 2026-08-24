@@ -35,6 +35,11 @@ async def capture(
         await page.goto(f"{base_url}/", {"waitUntil": "domcontentloaded"})
         await page.screenshot({"path": str(output_dir / "decks.png"), "fullPage": True})
 
+        await page.goto(f"{base_url}/trash", {"waitUntil": "domcontentloaded"})
+        await page.screenshot({
+            "path": str(output_dir / "trash.png"), "fullPage": True
+        })
+
         await page.goto(f"{base_url}/deck/{deck_id}", {"waitUntil": "domcontentloaded"})
         await page.evaluate(
             """() => {

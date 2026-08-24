@@ -598,3 +598,35 @@ workflow; whitespace-only варианты отдельно проходят Fla
 с trusted history отклоняется и больше не получает неявное повышение до Advanced.
 Финальный gate инкремента: 768 passed, 100% statements, 99,55% branches и 99,90%
 общего coverage с реальными Chromium, `pdflatex` и `bubblewrap`.
+
+### 7.15. ✅ Обратимое удаление колод
+
+`DATA-TRASH-001` закрыт 24.08.2026. Прямой `DELETE FROM decks` заменён на
+version-locked переход активной колоды в schema-15 состояние с парными UTC
+`trashed_at/purge_after`. Обычные list/get/mutate/clone/export/print/trusted пути
+видят только активные строки, поэтому удалённую колоду нельзя использовать по
+сохранённому URL или обходным repository-вызовом. Список корзины остаётся отдельным
+read contract.
+
+Restore одной write-транзакцией возвращает тот же агрегат: карточки и их порядок,
+render settings, Safe/Advanced type и полная trusted template history не копируются и
+не пересоздаются. Поэтому per-deck `MAX_CARDS` не проверяется повторно. Любой POST
+trash/restore/purge несёт текущую deck version; устаревшая вкладка получает конфликт
+до изменения данных. Повторный переход с актуальной версией является no-op, а
+irreversible purge доступен только уже удалённой колоде и затем каскадно удаляет
+settings/history/links и owned cards.
+
+Retention по умолчанию равен 30 дням и конфигурируется переменной
+`DIDACTIC_CARDS_TRASH_RETENTION_DAYS` от 1 до 3650. Дата является явным сроком
+хранения, но локальное приложение не имеет фонового scheduler: даже просроченную
+колоду можно восстановить до отдельного purge. UI сообщает это прямо и не обещает
+несуществующего автоматического удаления.
+
+Миграция 14→15 добавляет два nullable timestamp-поля и индекс без переписывания
+агрегатов; существующие колоды остаются активными. Stable schema-14 backup,
+transaction rollback/retry и staged migration старых schema входят в storage gate.
+Semantic integrity отвергает неполную пару, naive/невалидные даты и `purge_after`,
+который не позже `trashed_at`. Repository, HTTP, CSRF, stale-version, aggregate
+restore/purge, quota и реальный Chromium keyboard workflow покрыты regression-тестами.
+Финальный gate инкремента: 786 passed, 100% statements, 99,48% branches и 99,88%
+общего coverage с реальными Chromium, `pdflatex` и `bubblewrap`.

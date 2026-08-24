@@ -22,6 +22,16 @@ def _environment_bool(name: str, default: bool = False) -> bool:
     raise ValueError(f'{name} must be a boolean value')
 
 
+def _environment_int(name: str, default: int) -> int:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except ValueError as error:
+        raise ValueError(f'{name} must be an integer') from error
+
+
 def load_or_create_local_secret(data_dir: Path) -> str:
     """Return one process-safe local secret for every app worker.
 
@@ -161,6 +171,9 @@ class AppConfig:
     pdflatex_path: str = 'pdflatex'
     pdflatex_timeout: int = 30
     max_cards: int = 200
+    trash_retention_days: int = field(default_factory=lambda: _environment_int(
+        'DIDACTIC_CARDS_TRASH_RETENTION_DAYS', 30
+    ))
     max_request_bytes: int = 2 * 1024 * 1024
     csrf_enabled: bool = True
     trusted_latex_enabled: bool = field(
@@ -185,6 +198,14 @@ class AppConfig:
             raise ValueError('debug must be boolean')
         if not isinstance(self.trusted_latex_enabled, bool):
             raise ValueError('trusted LaTeX feature flag must be boolean')
+        if (
+            isinstance(self.trash_retention_days, bool)
+            or not isinstance(self.trash_retention_days, int)
+            or not 1 <= self.trash_retention_days <= 3650
+        ):
+            raise ValueError(
+                'trash retention must be an integer from 1 to 3650 days'
+            )
         if (
             isinstance(self.trusted_pdflatex_timeout, bool)
             or not isinstance(self.trusted_pdflatex_timeout, int)

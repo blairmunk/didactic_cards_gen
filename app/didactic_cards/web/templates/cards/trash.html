@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Корзина колод</title>
+    <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
+    <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
+</head>
+<body>
+    <h1>🗑️ Корзина колод</h1>
+    <nav class="app-navigation" aria-label="Навигация по колодам">
+        <a href="{{ url_for('cards.decks_list') }}">← Активные колоды</a>
+    </nav>
+
+    <div class="info-panel" role="note">
+        <p>Колоды получают срок хранения {{ trash_retention_days }} дней. До безвозвратной очистки восстанавливается весь агрегат: карточки, оформление и история Advanced-шаблонов.</p>
+        <p>Дата ниже обозначает срок хранения. Просроченная колода остаётся восстанавливаемой, пока вы явно не удалите её навсегда.</p>
+    </div>
+
+    {% if decks %}
+    <table class="decks-table">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Колода</th>
+                <th>Карточек</th>
+                <th>В корзине с</th>
+                <th>Срок хранения до</th>
+                <th>Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for deck in decks %}
+            <tr>
+                <td>{{ loop.index }}</td>
+                <td>
+                    <strong>{{ deck.name }}</strong>
+                    <span class="feature-status {% if deck.render_settings.authoring_mode.value == 'advanced' %}feature-disabled{% else %}feature-enabled{% endif %}">{{ 'Advanced' if deck.render_settings.authoring_mode.value == 'advanced' else 'Обычная' }}</span>
+                    {% if deck.description %}<br><span class="deck-description">{{ deck.description }}</span>{% endif %}
+                </td>
+                <td>{{ deck.card_ids | length }}</td>
+                <td>{{ deck.trashed_at.strftime('%d.%m.%Y %H:%M UTC') }}</td>
+                <td>{{ deck.purge_after.strftime('%d.%m.%Y %H:%M UTC') }}</td>
+                <td class="actions">
+                    <form method="post" action="{{ url_for('cards.restore_deck', deck_id=deck.id) }}">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="version" value="{{ deck.version }}">
+                        <button type="submit" class="btn-small btn-secondary" aria-label="Восстановить колоду {{ deck.name }}">↩️ Восстановить</button>
+                    </form>
+                    <form method="post" action="{{ url_for('cards.purge_deck', deck_id=deck.id) }}"
+                          onsubmit="return confirm('Безвозвратно удалить колоду «{{ deck.name }}» вместе со всеми карточками и историей шаблонов? Это действие нельзя отменить.')">
+                        <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="version" value="{{ deck.version }}">
+                        <button type="submit" class="btn-small btn-danger" aria-label="Безвозвратно удалить колоду {{ deck.name }}">Удалить навсегда</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color:#777; margin-top:30px;">Корзина пуста.</p>
+    {% endif %}
+</body>
+</html>

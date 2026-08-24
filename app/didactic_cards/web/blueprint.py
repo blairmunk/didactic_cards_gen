@@ -32,7 +32,8 @@ from ..use_cases.card_use_cases import (
 )
 from ..use_cases.deck_use_cases import (
     ListDecks, GetDeckInfo, CreateDeck, UpdateDeck,
-    DeleteDeck, CloneDeck, UpdateDeckRenderSettings,
+    ListTrashedDecks, TrashDeck, RestoreDeck, PurgeDeck,
+    CloneDeck, UpdateDeckRenderSettings,
 )
 from ..use_cases.deck_transfer import (
     DeckTransferError,
@@ -204,6 +205,10 @@ def _max_cards():
     return current_app.config.get('MAX_CARDS')
 
 
+def _trash_retention_days() -> int:
+    return current_app.config.get('TRASH_RETENTION_DAYS', 30)
+
+
 @cards_bp.route('/health/live', methods=['GET'])
 def health_live():
     return jsonify({'status': 'ok'})
@@ -270,6 +275,13 @@ def _optional_version(value) -> int | None:
     version = int(value)
     if version <= 0:
         abort(400, description='Некорректная версия колоды')
+    return version
+
+
+def _required_version(value) -> int:
+    version = _optional_version(value)
+    if version is None:
+        abort(400, description='Не указана версия колоды')
     return version
 
 
@@ -527,10 +539,27 @@ def _render_deck_error(deck_id: str, message: str, status: int = 409):
 
 # ─── Колоды ─────────────────────────────────────────────────────────
 
+def _decks_list_context(**extra):
+    context = {
+        'decks': ListDecks(_repo()).execute(),
+        'trashed_count': len(ListTrashedDecks(_repo()).execute()),
+        'trash_retention_days': _trash_retention_days(),
+    }
+    context.update(extra)
+    return context
+
 @cards_bp.route('/', methods=['GET'])
 def decks_list():
-    decks = ListDecks(_repo()).execute()
-    return render_template('cards/decks.html', decks=decks)
+    return render_template('cards/decks.html', **_decks_list_context())
+
+
+@cards_bp.route('/trash', methods=['GET'])
+def trash_list():
+    return render_template(
+        'cards/trash.html',
+        decks=ListTrashedDecks(_repo()).execute(),
+        trash_retention_days=_trash_retention_days(),
+    )
 
 
 @cards_bp.route('/printer_profiles', methods=['GET'])
@@ -668,17 +697,15 @@ def create_deck():
     except ValueError:
         return render_template(
             'cards/decks.html',
-            decks=ListDecks(_repo()).execute(),
-            error='Неизвестный тип колоды.',
+            **_decks_list_context(error='Неизвестный тип колоды.'),
         ), 400
     if mode is AuthoringMode.ADVANCED and not _trusted_enabled():
         return render_template(
             'cards/decks.html',
-            decks=ListDecks(_repo()).execute(),
-            error=(
+            **_decks_list_context(error=(
                 'Advanced-колоду нельзя создать: trusted LaTeX '
                 'выключен при запуске сервера.'
-            ),
+            )),
         ), 503
     CreateDeck(_repo()).execute(name, desc, mode)
     return redirect(url_for('cards.decks_list'))
@@ -700,9 +727,27 @@ def edit_deck(deck_id):
 
 
 @cards_bp.route('/deck/<deck_id>/delete', methods=['POST'])
-def delete_deck(deck_id):
-    DeleteDeck(_repo()).execute(deck_id)
+def trash_deck(deck_id):
+    TrashDeck(_repo(), _trash_retention_days()).execute(
+        deck_id, _required_version(request.form.get('version'))
+    )
     return redirect(url_for('cards.decks_list'))
+
+
+@cards_bp.route('/deck/<deck_id>/restore', methods=['POST'])
+def restore_deck(deck_id):
+    RestoreDeck(_repo()).execute(
+        deck_id, _required_version(request.form.get('version'))
+    )
+    return redirect(url_for('cards.trash_list'))
+
+
+@cards_bp.route('/deck/<deck_id>/purge', methods=['POST'])
+def purge_deck(deck_id):
+    PurgeDeck(_repo()).execute(
+        deck_id, _required_version(request.form.get('version'))
+    )
+    return redirect(url_for('cards.trash_list'))
 
 
 @cards_bp.route('/deck/<deck_id>/clone', methods=['POST'])

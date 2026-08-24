@@ -11,7 +11,7 @@ from typing import Callable
 
 
 SQLITE_APPLICATION_ID = 0x44434731  # "DCG1"
-SQLITE_SCHEMA_VERSION = 14
+SQLITE_SCHEMA_VERSION = 15
 MINIMUM_MIGRATABLE_SCHEMA_VERSION = 12
 
 
@@ -46,7 +46,13 @@ SCHEMA_13_TABLE_COLUMNS = {
     **SCHEMA_12_TABLE_COLUMNS,
     'schema_migrations': frozenset({'version', 'name', 'applied_at'}),
 }
-CURRENT_TABLE_COLUMNS = SCHEMA_13_TABLE_COLUMNS
+SCHEMA_14_TABLE_COLUMNS = SCHEMA_13_TABLE_COLUMNS
+CURRENT_TABLE_COLUMNS = {
+    **SCHEMA_14_TABLE_COLUMNS,
+    'decks': frozenset({
+        *SCHEMA_14_TABLE_COLUMNS['decks'], 'trashed_at', 'purge_after',
+    }),
+}
 
 SCHEMA_12_INDEXES = frozenset({
     'idx_deck_cards_position',
@@ -54,11 +60,14 @@ SCHEMA_12_INDEXES = frozenset({
 })
 
 SCHEMA_13_INDEXES = SCHEMA_12_INDEXES
-CURRENT_INDEXES = SCHEMA_13_INDEXES
+SCHEMA_14_INDEXES = SCHEMA_13_INDEXES
+CURRENT_INDEXES = frozenset({
+    *SCHEMA_14_INDEXES,
+    'idx_decks_trash_purge',
+})
 
 
-CREATE_SCHEMA_STATEMENTS = (
-    '''
+PRE_TRASH_DECKS_STATEMENT = '''
     CREATE TABLE decks (
         id TEXT PRIMARY KEY,
         parent_id TEXT,
@@ -68,6 +77,27 @@ CREATE_SCHEMA_STATEMENTS = (
         updated_at TEXT NOT NULL,
         version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0)
     )
+    '''
+
+CURRENT_DECKS_STATEMENT = '''
+    CREATE TABLE decks (
+        id TEXT PRIMARY KEY,
+        parent_id TEXT,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0),
+        trashed_at TEXT,
+        purge_after TEXT
+    )
+    '''
+
+CREATE_SCHEMA_STATEMENTS = (
+    CURRENT_DECKS_STATEMENT,
+    '''
+    CREATE INDEX idx_decks_trash_purge
+    ON decks(trashed_at, purge_after)
     ''',
     '''
     CREATE TABLE cards (
@@ -251,6 +281,20 @@ def _migrate_13_to_14(connection: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_14_to_15(connection: sqlite3.Connection) -> None:
+    connection.execute('ALTER TABLE decks ADD COLUMN trashed_at TEXT')
+    connection.execute('ALTER TABLE decks ADD COLUMN purge_after TEXT')
+    connection.execute(
+        'CREATE INDEX idx_decks_trash_purge '
+        'ON decks(trashed_at, purge_after)'
+    )
+    connection.execute(
+        'INSERT INTO schema_migrations(version, name, applied_at) '
+        'VALUES (15, ?, ?)',
+        ('reversible-deck-trash', utc_now_iso()),
+    )
+
+
 @dataclass(frozen=True)
 class Migration:
     to_version: int
@@ -261,6 +305,7 @@ class Migration:
 MIGRATIONS: dict[int, Migration] = {
     12: Migration(13, 'storage-foundation', _migrate_12_to_13),
     13: Migration(14, 'enforce-mode-card-fields', _migrate_13_to_14),
+    14: Migration(15, 'reversible-deck-trash', _migrate_14_to_15),
 }
 
 
@@ -286,15 +331,16 @@ def _normalized_schema_sql(source: str | None) -> str:
     return re.sub(r'\s+', '', source).lower()
 
 
-@lru_cache(maxsize=3)
+@lru_cache(maxsize=4)
 def _expected_schema_sql(expected_version: int) -> dict[tuple[str, str], str]:
-    if expected_version not in {12, 13, SQLITE_SCHEMA_VERSION}:
+    if expected_version not in {12, 13, 14, SQLITE_SCHEMA_VERSION}:
         return {}
-    statements = (
-        CREATE_SCHEMA_STATEMENTS[:-1]
-        if expected_version == 12
-        else CREATE_SCHEMA_STATEMENTS
-    )
+    statements = list(CREATE_SCHEMA_STATEMENTS)
+    if expected_version <= 14:
+        statements[0] = PRE_TRASH_DECKS_STATEMENT
+        statements.pop(1)
+    if expected_version == 12:
+        statements.pop()
     with closing(sqlite3.connect(':memory:')) as expected:
         for statement in statements:
             expected.execute(statement)
@@ -316,6 +362,7 @@ def schema_structure_issues(
     expected_tables = (
         CURRENT_TABLE_COLUMNS
         if expected_version == SQLITE_SCHEMA_VERSION
+        else SCHEMA_14_TABLE_COLUMNS if expected_version == 14
         else SCHEMA_13_TABLE_COLUMNS if expected_version == 13
         else SCHEMA_12_TABLE_COLUMNS if expected_version == 12
         else None
@@ -358,6 +405,7 @@ def schema_structure_issues(
     expected_indexes = (
         CURRENT_INDEXES
         if expected_version == SQLITE_SCHEMA_VERSION
+        else SCHEMA_14_INDEXES if expected_version == 14
         else SCHEMA_13_INDEXES if expected_version == 13
         else SCHEMA_12_INDEXES
     )

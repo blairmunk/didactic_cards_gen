@@ -68,6 +68,7 @@ def make_test_app(tmp_path, *, compiler_success: bool = True) -> Flask:
         COMPILER=FakeCompiler(compiler_success),
         CARDS_PER_PAGE=8,
         MAX_CARDS=200,
+        TRASH_RETENTION_DAYS=30,
         CSRF_ENABLED=False,
     )
     app.register_blueprint(cards_bp)

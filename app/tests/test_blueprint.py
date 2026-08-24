@@ -111,8 +111,19 @@ def test_deck_crud_pages(client, repo):
     client.post(f"/deck/{deck.id}/clone")
     assert len(repo.list_decks()) == 2
 
-    client.post(f"/deck/{deck.id}/delete")
+    current = repo.get_deck(deck.id)
+    client.post(
+        f"/deck/{deck.id}/delete", data={'version': current.version}
+    )
     assert repo.get_deck(deck.id) is None
+    trash_page = client.get('/trash')
+    assert trash_page.status_code == 200
+    assert 'Физика 2' in trash_page.text
+    trashed = repo.list_trashed_decks()[0]
+    client.post(
+        f"/deck/{deck.id}/restore", data={'version': trashed.version}
+    )
+    assert repo.get_deck(deck.id) is not None
 
 
 def test_empty_safe_deck_ui_exposes_data_export_without_advanced_controls(
@@ -125,6 +136,72 @@ def test_empty_safe_deck_ui_exposes_data_export_without_advanced_controls(
     assert f'/deck/{deck_id}/export.csv' in page.text
     assert 'Обычная колода' in page.text
     assert 'Advanced-колода' not in page.text
+
+
+def test_deck_trash_http_requires_fresh_version_and_restores_over_quota(
+    client, app, repo
+):
+    deck = repo.create_deck('Корзина HTTP', 'Полный агрегат')
+    repo.save_cards(
+        deck.id,
+        CardDeck([Card(front='Q1'), Card(front='Q2')]),
+    )
+    active = repo.get_deck(deck.id)
+    app.config['MAX_CARDS'] = 1
+
+    home = client.get('/')
+    assert 'Корзина (0)' in home.text
+    assert f'name="version" value="{active.version}"' in home.text
+    assert client.post(f'/deck/{deck.id}/delete').status_code == 400
+    stale = client.post(
+        f'/deck/{deck.id}/delete',
+        data={'version': active.version + 1},
+    )
+    assert stale.status_code == 409
+    assert repo.get_deck(deck.id) is not None
+
+    moved = client.post(
+        f'/deck/{deck.id}/delete', data={'version': active.version}
+    )
+    assert moved.status_code == 302
+    trashed = repo.list_trashed_decks()[0]
+    assert repo.get_deck(deck.id) is None
+    assert 'Корзина (1)' in client.get('/').text
+    assert client.get(f'/deck/{deck.id}').location.endswith('/')
+    assert client.get(f'/deck/{deck.id}/export.json').location.endswith('/')
+
+    trash_page = client.get('/trash')
+    assert trash_page.status_code == 200
+    assert 'Корзина HTTP' in trash_page.text
+    assert 'Срок хранения до' in trash_page.text
+    assert f'name="version" value="{trashed.version}"' in trash_page.text
+    stale_restore = client.post(
+        f'/deck/{deck.id}/restore', data={'version': active.version}
+    )
+    assert stale_restore.status_code == 409
+
+    restored_response = client.post(
+        f'/deck/{deck.id}/restore', data={'version': trashed.version}
+    )
+    assert restored_response.status_code == 302
+    restored = repo.get_deck(deck.id)
+    assert restored is not None
+    assert len(repo.load_cards(deck.id)) == 2
+
+    client.post(
+        f'/deck/{deck.id}/delete', data={'version': restored.version}
+    )
+    trashed_again = repo.list_trashed_decks()[0]
+    stale_purge = client.post(
+        f'/deck/{deck.id}/purge', data={'version': restored.version}
+    )
+    assert stale_purge.status_code == 409
+    purged = client.post(
+        f'/deck/{deck.id}/purge', data={'version': trashed_again.version}
+    )
+    assert purged.status_code == 302
+    assert repo.list_trashed_decks() == []
+    assert 'Корзина пуста' in client.get('/trash').text
 
 
 def test_home_explains_disabled_advanced_mode(client):

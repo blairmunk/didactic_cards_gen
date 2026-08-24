@@ -29,6 +29,9 @@ from didactic_cards.domain.trusted import (
 
 def _downgrade_to_schema_12(database: str) -> None:
     with closing(sqlite3.connect(database)) as connection:
+        connection.execute('DROP INDEX idx_decks_trash_purge')
+        connection.execute('ALTER TABLE decks DROP COLUMN purge_after')
+        connection.execute('ALTER TABLE decks DROP COLUMN trashed_at')
         connection.execute('DROP TABLE schema_migrations')
         connection.execute('PRAGMA application_id = 0')
         connection.execute('PRAGMA user_version = 12')

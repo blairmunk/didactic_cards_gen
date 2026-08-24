@@ -136,12 +136,18 @@ class Deck:
     version: int = 1
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)
+    trashed_at: Optional[datetime] = None
+    purge_after: Optional[datetime] = None
 
     def __len__(self) -> int:
         return len(self.card_ids)
 
     def __bool__(self) -> bool:
         return True
+
+    @property
+    def is_trashed(self) -> bool:
+        return self.trashed_at is not None
 
     def add_card_id(self, card_id: str) -> int:
         self.card_ids.append(card_id)

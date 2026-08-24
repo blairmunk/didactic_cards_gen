@@ -58,6 +58,7 @@ def _sqlite_family_state(database: Path) -> dict[str, tuple[int, int, int, str]]
 
 
 def _downgrade_current_database_to_schema_12(database: Path) -> None:
+    _downgrade_current_database_to_schema_14(database)
     with closing(sqlite3.connect(database)) as connection:
         connection.execute('DROP TABLE schema_migrations')
         connection.execute('PRAGMA application_id = 0')
@@ -66,6 +67,7 @@ def _downgrade_current_database_to_schema_12(database: Path) -> None:
 
 
 def _downgrade_current_database_to_schema_13(database: Path) -> None:
+    _downgrade_current_database_to_schema_14(database)
     with closing(sqlite3.connect(database)) as connection:
         connection.execute('DELETE FROM schema_migrations')
         connection.execute(
@@ -74,6 +76,21 @@ def _downgrade_current_database_to_schema_13(database: Path) -> None:
             "'2026-08-24T00:00:00+00:00')"
         )
         connection.execute('PRAGMA user_version = 13')
+        connection.commit()
+
+
+def _downgrade_current_database_to_schema_14(database: Path) -> None:
+    with closing(sqlite3.connect(database)) as connection:
+        connection.execute('DROP INDEX idx_decks_trash_purge')
+        connection.execute('ALTER TABLE decks DROP COLUMN purge_after')
+        connection.execute('ALTER TABLE decks DROP COLUMN trashed_at')
+        connection.execute('DELETE FROM schema_migrations')
+        connection.execute(
+            'INSERT INTO schema_migrations(version, name, applied_at) '
+            "VALUES (14, 'initial-current-schema', "
+            "'2026-08-24T00:00:00+00:00')"
+        )
+        connection.execute('PRAGMA user_version = 14')
         connection.commit()
 
 
@@ -302,7 +319,7 @@ def test_schema_12_migrates_once_without_losing_data(tmp_path):
             tuple(row) for row in connection.execute(
                 'SELECT version FROM schema_migrations ORDER BY version'
             )
-        ] == [(13,), (14,)]
+        ] == [(13,), (14,), (15,)]
     migrated.close()
     backup_files = list((repository.data_dir / 'backups').glob(
         'pre-migration-v12-*.sqlite3'
@@ -386,6 +403,7 @@ def test_schema_13_migration_scrubs_only_safe_hidden_headers_and_keeps_backup(
         ] == [
             (13, 'initial-current-schema'),
             (14, 'enforce-mode-card-fields'),
+            (15, 'reversible-deck-trash'),
         ]
     migrated.close()
 
@@ -405,6 +423,128 @@ def test_schema_13_migration_scrubs_only_safe_hidden_headers_and_keeps_backup(
     assert list((repository.data_dir / 'backups').glob(
         'pre-migration-v13-*.sqlite3'
     )) == backups
+
+
+def test_schema_14_migration_adds_empty_trash_state_and_stable_backup(tmp_path):
+    repository = SqliteRepository(tmp_path / 'data')
+    deck = repository.create_deck('До корзины')
+    repository.save_cards(deck.id, CardDeck([Card(front='Сохранить')]))
+    repository.close()
+    _downgrade_current_database_to_schema_14(repository.database_file)
+    assert inspect_database(
+        repository.database_file, expected_schema_version=14
+    ).healthy
+
+    migrated = SqliteRepository(repository.data_dir)
+
+    loaded = migrated.get_deck(deck.id)
+    assert loaded.trashed_at is None
+    assert loaded.purge_after is None
+    assert migrated.load_cards(deck.id).cards[0].front == 'Сохранить'
+    with closing(migrated._connect()) as connection:
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 15
+        assert [
+            tuple(row) for row in connection.execute(
+                'SELECT version, name FROM schema_migrations ORDER BY version'
+            )
+        ] == [
+            (14, 'initial-current-schema'),
+            (15, 'reversible-deck-trash'),
+        ]
+    migrated.close()
+
+    backups = list((repository.data_dir / 'backups').glob(
+        'pre-migration-v14-*.sqlite3'
+    ))
+    assert len(backups) == 1
+    assert inspect_database(backups[0], expected_schema_version=14).healthy
+
+
+def test_failed_schema_14_migration_rolls_back_and_reuses_backup(
+    tmp_path, monkeypatch
+):
+    repository = SqliteRepository(tmp_path / 'data')
+    deck = repository.create_deck('Retry v14')
+    repository.close()
+    _downgrade_current_database_to_schema_14(repository.database_file)
+    real_migrate = sqlite_repository_module.migrate_to_current
+
+    def fail_after_trash_columns(connection, version):
+        assert version == 14
+        real_migrate(connection, version)
+        raise RuntimeError('injected schema-14 migration failure')
+
+    monkeypatch.setattr(
+        sqlite_repository_module, 'migrate_to_current', fail_after_trash_columns
+    )
+    with pytest.raises(RuntimeError, match='schema-14 migration failure'):
+        SqliteRepository(repository.data_dir)
+
+    assert inspect_database(
+        repository.database_file, expected_schema_version=14
+    ).healthy
+    backups = list((repository.data_dir / 'backups').glob(
+        'pre-migration-v14-*.sqlite3'
+    ))
+    assert len(backups) == 1
+    backup_state = _sqlite_family_state(backups[0])
+    manifest = backups[0].with_suffix(backups[0].suffix + '.manifest.json')
+    manifest_state = _file_state(manifest)
+
+    monkeypatch.setattr(
+        sqlite_repository_module, 'migrate_to_current', real_migrate
+    )
+    migrated = SqliteRepository(repository.data_dir)
+    assert migrated.get_deck(deck.id).name == 'Retry v14'
+    migrated.close()
+    assert _sqlite_family_state(backups[0]) == backup_state
+    assert _file_state(manifest) == manifest_state
+
+
+def test_inspection_rejects_incomplete_or_invalid_trash_metadata(tmp_path):
+    repository = SqliteRepository(tmp_path / 'data')
+    first = repository.create_deck('Incomplete')
+    second = repository.create_deck('Backwards')
+    repository.close()
+    with closing(sqlite3.connect(repository.database_file)) as connection:
+        connection.execute(
+            'UPDATE decks SET trashed_at = ? WHERE id = ?',
+            ('2026-08-24T00:00:00+00:00', first.id),
+        )
+        connection.execute(
+            'UPDATE decks SET trashed_at = ?, purge_after = ? WHERE id = ?',
+            (
+                '2026-08-24T00:00:00+00:00',
+                '2026-08-23T00:00:00+00:00',
+                second.id,
+            ),
+        )
+        connection.commit()
+
+    report = inspect_database(repository.database_file)
+
+    assert f'invalid-deck-trash-metadata: {first.id}' in report.issues
+    assert f'invalid-deck-trash-metadata: {second.id}' in report.issues
+
+
+def test_inspection_rejects_non_utc_trash_metadata(tmp_path):
+    repository = SqliteRepository(tmp_path / 'data')
+    deck = repository.create_deck('Non UTC')
+    repository.close()
+    with closing(sqlite3.connect(repository.database_file)) as connection:
+        connection.execute(
+            'UPDATE decks SET trashed_at = ?, purge_after = ? WHERE id = ?',
+            (
+                '2026-08-24T22:00:00+03:00',
+                '2026-09-23T22:00:00+03:00',
+                deck.id,
+            ),
+        )
+        connection.commit()
+
+    report = inspect_database(repository.database_file)
+
+    assert f'invalid-deck-trash-metadata: {deck.id}' in report.issues
 
 
 def test_failed_schema_13_cleanup_rolls_back_and_reuses_stable_backup(
@@ -1276,6 +1416,7 @@ def test_restore_schema_12_backup_migrates_staged_copy_without_mutating_source(
         ] == [
             (13, 'storage-foundation'),
             (14, 'enforce-mode-card-fields'),
+            (15, 'reversible-deck-trash'),
         ]
     reopened.close()
 

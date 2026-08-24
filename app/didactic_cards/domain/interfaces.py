@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Callable, Optional, TypeVar
 
 from .entities import Card, Deck, CardDeck
@@ -56,7 +57,26 @@ class DeckRepository(ABC):
         ...
 
     @abstractmethod
-    def delete_deck(self, deck_id: str) -> bool:
+    def list_trashed_decks(self) -> list[Deck]:
+        ...
+
+    @abstractmethod
+    def trash_deck(
+        self,
+        deck_id: str,
+        *,
+        expected_version: int,
+        trashed_at: datetime,
+        purge_after: datetime,
+    ) -> bool:
+        ...
+
+    @abstractmethod
+    def restore_deck(self, deck_id: str, *, expected_version: int) -> bool:
+        ...
+
+    @abstractmethod
+    def purge_deck(self, deck_id: str, *, expected_version: int) -> bool:
         ...
 
     @abstractmethod

@@ -27,7 +27,7 @@ def test_create_app_registers_required_services(tmp_path, monkeypatch):
     assert {
         'REPO', 'RENDERER', 'RENDERER_FACTORY', 'PRINT_PROFILES',
         'COMPILER', 'CARDS_PER_PAGE', 'TRUSTED_LATEX_ENABLED',
-        'TRUSTED_COMPILER',
+        'TRUSTED_COMPILER', 'TRASH_RETENTION_DAYS',
     } <= app.config.keys()
     assert app.url_map.bind('').match('/')[0] == 'cards.decks_list'
     assert app.config['REPO'].database_file == (tmp_path / 'data' / 'cards.sqlite3')
@@ -113,6 +113,20 @@ def test_trusted_latex_configuration_rejects_unsafe_values(kwargs, message):
 def test_debug_configuration_must_be_boolean():
     with pytest.raises(ValueError, match='debug'):
         AppConfig(debug=1)
+
+
+@pytest.mark.parametrize('value', [True, 0, -1, 3651])
+def test_trash_retention_rejects_invalid_values(value):
+    with pytest.raises(ValueError, match='trash retention'):
+        AppConfig(trash_retention_days=value)
+
+
+def test_trash_retention_environment_is_explicit(monkeypatch):
+    monkeypatch.setenv('DIDACTIC_CARDS_TRASH_RETENTION_DAYS', '45')
+    assert AppConfig().trash_retention_days == 45
+    monkeypatch.setenv('DIDACTIC_CARDS_TRASH_RETENTION_DAYS', 'later')
+    with pytest.raises(ValueError, match='DIDACTIC_CARDS_TRASH_RETENTION_DAYS'):
+        AppConfig()
 
 
 def test_app_debug_is_disabled_by_default(tmp_path, monkeypatch):

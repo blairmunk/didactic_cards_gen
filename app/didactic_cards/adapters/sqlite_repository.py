@@ -260,6 +260,14 @@ class SqliteRepository(DeckRepository):
             created_at=datetime.fromisoformat(row['created_at']),
             updated_at=datetime.fromisoformat(row['updated_at']),
             version=row['version'],
+            trashed_at=(
+                datetime.fromisoformat(row['trashed_at'])
+                if row['trashed_at'] else None
+            ),
+            purge_after=(
+                datetime.fromisoformat(row['purge_after'])
+                if row['purge_after'] else None
+            ),
         )
 
     @staticmethod
@@ -339,6 +347,21 @@ class SqliteRepository(DeckRepository):
         return [row['card_id'] for row in rows]
 
     def _get_deck(
+        self, connection: sqlite3.Connection, deck_id: str
+    ) -> Optional[Deck]:
+        row = connection.execute(
+            'SELECT * FROM decks WHERE id = ? AND trashed_at IS NULL',
+            (deck_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._deck_from_row(
+            row,
+            self._card_ids(connection, deck_id),
+            self._get_render_settings(connection, deck_id),
+        )
+
+    def _get_any_deck(
         self, connection: sqlite3.Connection, deck_id: str
     ) -> Optional[Deck]:
         row = connection.execute(
@@ -498,7 +521,23 @@ class SqliteRepository(DeckRepository):
     def list_decks(self) -> list[Deck]:
         with self._transaction() as connection:
             rows = connection.execute(
-                'SELECT * FROM decks ORDER BY updated_at DESC'
+                'SELECT * FROM decks WHERE trashed_at IS NULL '
+                'ORDER BY updated_at DESC'
+            ).fetchall()
+            return [
+                self._deck_from_row(
+                    row,
+                    self._card_ids(connection, row['id']),
+                    self._get_render_settings(connection, row['id']),
+                )
+                for row in rows
+            ]
+
+    def list_trashed_decks(self) -> list[Deck]:
+        with self._transaction() as connection:
+            rows = connection.execute(
+                'SELECT * FROM decks WHERE trashed_at IS NOT NULL '
+                'ORDER BY trashed_at DESC'
             ).fetchall()
             return [
                 self._deck_from_row(
@@ -537,7 +576,7 @@ class SqliteRepository(DeckRepository):
                 '''
                 UPDATE decks SET name = ?, description = ?, updated_at = ?,
                     version = version + 1
-                WHERE id = ?
+                WHERE id = ? AND trashed_at IS NULL
                 ''',
                 (name, description, updated_at.isoformat(), deck_id),
             )
@@ -545,12 +584,78 @@ class SqliteRepository(DeckRepository):
                 return None
             return self._get_deck(connection, deck_id)
 
-    def delete_deck(self, deck_id: str) -> bool:
+    def trash_deck(
+        self,
+        deck_id: str,
+        *,
+        expected_version: int,
+        trashed_at: datetime,
+        purge_after: datetime,
+    ) -> bool:
+        if (
+            trashed_at.tzinfo is None
+            or purge_after.tzinfo is None
+            or purge_after <= trashed_at
+        ):
+            raise ValueError('Invalid trash retention timestamps')
+        trashed_at = trashed_at.astimezone(timezone.utc)
+        purge_after = purge_after.astimezone(timezone.utc)
         with self._transaction(write=True) as connection:
-            card_ids = self._card_ids(connection, deck_id)
-            cursor = connection.execute('DELETE FROM decks WHERE id = ?', (deck_id,))
-            if cursor.rowcount == 0:
+            deck = self._get_any_deck(connection, deck_id)
+            if deck is None:
                 return False
+            if deck.version != expected_version:
+                raise ConcurrentModificationError(expected_version, deck.version)
+            if deck.is_trashed:
+                return False
+            connection.execute(
+                '''
+                UPDATE decks SET trashed_at = ?, purge_after = ?,
+                    updated_at = ?, version = version + 1
+                WHERE id = ? AND trashed_at IS NULL
+                ''',
+                (
+                    trashed_at.isoformat(),
+                    purge_after.isoformat(),
+                    trashed_at.isoformat(),
+                    deck_id,
+                ),
+            )
+            return True
+
+    def restore_deck(self, deck_id: str, *, expected_version: int) -> bool:
+        with self._transaction(write=True) as connection:
+            deck = self._get_any_deck(connection, deck_id)
+            if deck is None:
+                return False
+            if deck.version != expected_version:
+                raise ConcurrentModificationError(expected_version, deck.version)
+            if not deck.is_trashed:
+                return False
+            connection.execute(
+                '''
+                UPDATE decks SET trashed_at = NULL, purge_after = NULL,
+                    updated_at = ?, version = version + 1
+                WHERE id = ? AND trashed_at IS NOT NULL
+                ''',
+                (datetime.now(timezone.utc).isoformat(), deck_id),
+            )
+            return True
+
+    def purge_deck(self, deck_id: str, *, expected_version: int) -> bool:
+        with self._transaction(write=True) as connection:
+            deck = self._get_any_deck(connection, deck_id)
+            if deck is None:
+                return False
+            if deck.version != expected_version:
+                raise ConcurrentModificationError(expected_version, deck.version)
+            if not deck.is_trashed:
+                return False
+            card_ids = self._card_ids(connection, deck_id)
+            connection.execute(
+                'DELETE FROM decks WHERE id = ? AND trashed_at IS NOT NULL',
+                (deck_id,),
+            )
             for card_id in card_ids:
                 connection.execute(
                     'DELETE FROM cards WHERE id = ? '
@@ -865,6 +970,8 @@ class SqliteRepository(DeckRepository):
         self, deck_id: str, template_id: str
     ) -> TrustedTemplateVersion:
         with self._transaction(write=True) as connection:
+            if self._get_deck(connection, deck_id) is None:
+                raise DeckNotFoundError(deck_id)
             row = connection.execute(
                 '''
                 SELECT * FROM trusted_templates
@@ -904,6 +1011,8 @@ class SqliteRepository(DeckRepository):
         self, deck_id: str, template_id: str
     ) -> TrustedTemplateVersion:
         with self._transaction(write=True) as connection:
+            if self._get_deck(connection, deck_id) is None:
+                raise DeckNotFoundError(deck_id)
             row = connection.execute(
                 '''
                 SELECT * FROM trusted_templates
