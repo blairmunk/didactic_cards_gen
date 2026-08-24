@@ -26,7 +26,7 @@ from .json_repository import DeckNotFoundError, JsonRepository
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 9
+SQLITE_SCHEMA_VERSION = 10
 
 
 class LegacyMigrationError(ValueError):
@@ -75,7 +75,7 @@ class SqliteRepository(DeckRepository, CardRepository):
         with self._transaction(write=True) as connection:
             version = connection.execute('PRAGMA user_version').fetchone()[0]
             if version not in {
-                0, 1, 2, 3, 4, 5, 6, 7, 8, SQLITE_SCHEMA_VERSION
+                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, SQLITE_SCHEMA_VERSION
             }:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
@@ -165,6 +165,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                     version INTEGER NOT NULL CHECK (version > 0),
                     source TEXT NOT NULL,
                     source_hash TEXT NOT NULL,
+                    upper_header TEXT NOT NULL DEFAULT '',
+                    lower_header TEXT NOT NULL DEFAULT '',
                     front_content_mode TEXT NOT NULL DEFAULT 'escaped' CHECK (
                         front_content_mode IN ('escaped', 'raw')
                     ),
@@ -275,6 +277,14 @@ class SqliteRepository(DeckRepository, CardRepository):
                         ALTER TABLE trusted_templates
                         ADD COLUMN {column} TEXT NOT NULL DEFAULT 'escaped'
                             CHECK ({column} IN ('escaped', 'raw'))
+                        """
+                    )
+            for column in ('upper_header', 'lower_header'):
+                if column not in template_columns:
+                    connection.execute(
+                        f"""
+                        ALTER TABLE trusted_templates
+                        ADD COLUMN {column} TEXT NOT NULL DEFAULT ''
                         """
                     )
             if 0 < version < 9:
@@ -470,6 +480,8 @@ class SqliteRepository(DeckRepository, CardRepository):
             deck_id=row['deck_id'],
             version=row['version'],
             source=row['source'],
+            upper_header=row['upper_header'],
+            lower_header=row['lower_header'],
             source_hash=row['source_hash'],
             front_content_mode=row['front_content_mode'],
             back_content_mode=row['back_content_mode'],
@@ -493,8 +505,9 @@ class SqliteRepository(DeckRepository, CardRepository):
             INSERT INTO trusted_templates(
                 id, deck_id, version, source, source_hash, provenance,
                 status, origin_template_id, created_at, approved_at,
-                front_content_mode, back_content_mode
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                front_content_mode, back_content_mode, upper_header,
+                lower_header
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 template.id,
@@ -510,6 +523,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                 if template.approved_at else None,
                 template.front_content_mode.value,
                 template.back_content_mode.value,
+                template.upper_header,
+                template.lower_header,
             ),
         )
 
@@ -766,6 +781,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                         deck_id=clone.id,
                         version=version,
                         source=row['source'],
+                        upper_header=row['upper_header'],
+                        lower_header=row['lower_header'],
                         front_content_mode=row['front_content_mode'],
                         back_content_mode=row['back_content_mode'],
                         provenance=TemplateProvenance.CLONED,
@@ -829,6 +846,8 @@ class SqliteRepository(DeckRepository, CardRepository):
                         deck_id=deck.id,
                         version=version,
                         source=template.source,
+                        upper_header=template.upper_header,
+                        lower_header=template.lower_header,
                         source_hash=template.source_hash,
                         provenance=TemplateProvenance.IMPORTED,
                         origin_template_id=template.origin_template_id,
@@ -1006,6 +1025,8 @@ class SqliteRepository(DeckRepository, CardRepository):
         deck_id: str,
         source: str,
         *,
+        upper_header: str = '',
+        lower_header: str = '',
         provenance: TemplateProvenance | str = TemplateProvenance.LOCAL_AUTHOR,
         origin_template_id: str | None = None,
         front_content_mode: ContentMode | str = ContentMode.ESCAPED,
@@ -1024,6 +1045,8 @@ class SqliteRepository(DeckRepository, CardRepository):
             template = TrustedTemplateVersion(
                 deck_id=deck_id,
                 source=source,
+                upper_header=upper_header,
+                lower_header=lower_header,
                 version=version,
                 provenance=provenance,
                 origin_template_id=origin_template_id,

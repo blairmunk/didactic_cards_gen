@@ -348,6 +348,10 @@ def _render_settings_from_form(
         header_font_size=request.form.get('header_font_size', 'small'),
         header_font_weight=request.form.get('header_font_weight', 'normal'),
         header_font_style=request.form.get('header_font_style', 'upright'),
+        header_rule=request.form.get('header_rule', 'none'),
+        header_rule_spacing=request.form.get(
+            'header_rule_spacing', 'normal'
+        ),
         secondary_header_visibility=request.form.get(
             'secondary_header_visibility', 'none'
         ),
@@ -375,6 +379,12 @@ def _render_settings_from_form(
         ),
         secondary_header_font_style=request.form.get(
             'secondary_header_font_style', 'upright'
+        ),
+        secondary_header_rule=request.form.get(
+            'secondary_header_rule', 'none'
+        ),
+        secondary_header_rule_spacing=request.form.get(
+            'secondary_header_rule_spacing', 'normal'
         ),
     )
 
@@ -750,6 +760,8 @@ def _render_trusted_page(
     error: str | None = None,
     status: int = 200,
     draft_source: str | None = None,
+    draft_upper_header: str | None = None,
+    draft_lower_header: str | None = None,
     draft_front_mode: str | None = None,
     draft_back_mode: str | None = None,
 ):
@@ -770,6 +782,16 @@ def _render_trusted_page(
             if draft_source is not None
             else latest.source if latest else default_source
         ),
+        draft_upper_header=(
+            draft_upper_header
+            if draft_upper_header is not None
+            else latest.upper_header if latest else ''
+        ),
+        draft_lower_header=(
+            draft_lower_header
+            if draft_lower_header is not None
+            else latest.lower_header if latest else ''
+        ),
         draft_front_mode=(
             draft_front_mode
             or 'raw'
@@ -788,6 +810,8 @@ def _trusted_draft_from_form(deck_id: str) -> TrustedTemplateVersion:
         deck_id=deck_id,
         version=1,
         source=request.form.get('source', ''),
+        upper_header=request.form.get('upper_header', ''),
+        lower_header=request.form.get('lower_header', ''),
         front_content_mode=ContentMode.RAW,
         back_content_mode=ContentMode.RAW,
     )
@@ -830,6 +854,8 @@ def test_trusted_latex(deck_id):
             error=str(error),
             status=400,
             draft_source=request.form.get('source', ''),
+            draft_upper_header=request.form.get('upper_header', ''),
+            draft_lower_header=request.form.get('lower_header', ''),
             draft_front_mode=request.form.get('front_content_mode'),
             draft_back_mode=request.form.get('back_content_mode'),
         )
@@ -839,6 +865,8 @@ def test_trusted_latex(deck_id):
             error='Изолированный compiler worker не прошёл readiness-проверку.',
             status=503,
             draft_source=template.source,
+            draft_upper_header=template.upper_header,
+            draft_lower_header=template.lower_header,
             draft_front_mode=template.front_content_mode.value,
             draft_back_mode=template.back_content_mode.value,
         )
@@ -856,6 +884,8 @@ def test_trusted_latex(deck_id):
             error='Тестовая компиляция шаблона завершилась ошибкой.' + location,
             status=422,
             draft_source=template.source,
+            draft_upper_header=template.upper_header,
+            draft_lower_header=template.lower_header,
             draft_front_mode=template.front_content_mode.value,
             draft_back_mode=template.back_content_mode.value,
         )
@@ -876,6 +906,8 @@ def stage_trusted_latex(deck_id):
         service.stage_local(
             deck_id,
             template.source,
+            upper_header=template.upper_header,
+            lower_header=template.lower_header,
             front_content_mode=template.front_content_mode,
             back_content_mode=template.back_content_mode,
         )
@@ -885,6 +917,8 @@ def stage_trusted_latex(deck_id):
             error=str(error),
             status=400,
             draft_source=request.form.get('source', ''),
+            draft_upper_header=request.form.get('upper_header', ''),
+            draft_lower_header=request.form.get('lower_header', ''),
             draft_front_mode=request.form.get('front_content_mode'),
             draft_back_mode=request.form.get('back_content_mode'),
         )
@@ -1088,6 +1122,7 @@ def edit_card(deck_id, card_id):
     card = card_deck.cards[index].to_dict()
     return render_template('cards/edit_card.html',
                            deck=deck_info, card=card, index=index,
+                           cards_count=len(card_deck),
                            previous_section=(
                                None if index == 0
                                else card_deck.cards[index - 1].section

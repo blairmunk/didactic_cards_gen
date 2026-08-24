@@ -29,9 +29,20 @@
     <div class="card-form trusted-editor">
         <form method="post">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <p><code>{% raw %}{{ content }}{% endraw %}</code> обязателен ровно один раз и обозначает raw-код конкретной стороны. Дополнительно доступны <code>{% raw %}{{ section }}{% endraw %}</code>, <code>{% raw %}{{ card_number }}{% endraw %}</code> и <code>{% raw %}{{ side }}{% endraw %}</code>.</p>
+            <p><code>{% raw %}{{ content }}{% endraw %}</code> обязателен ровно один раз и обозначает raw-код конкретной стороны. В оболочке также доступны <code>{% raw %}{{ upper_header }}{% endraw %}</code>, <code>{% raw %}{{ lower_header }}{% endraw %}</code>, <code>{% raw %}{{ section }}{% endraw %}</code>, <code>{% raw %}{{ card_number }}{% endraw %}</code>, <code>{% raw %}{{ card_count }}{% endraw %}</code> и <code>{% raw %}{{ side }}{% endraw %}</code>.</p>
             <label for="trusted-source">Общий TeX-фрагмент вокруг содержимого:</label>
             <textarea id="trusted-source" name="source" rows="14" spellcheck="false" required>{{ draft_source }}</textarea>
+            <div class="settings-grid trusted-header-fields">
+                <div>
+                    <label for="trusted-upper-header">Верхний колонтитул (trusted TeX):</label>
+                    <textarea id="trusted-upper-header" name="upper_header" rows="5" spellcheck="false">{{ draft_upper_header }}</textarea>
+                </div>
+                <div>
+                    <label for="trusted-lower-header">Нижний колонтитул (trusted TeX):</label>
+                    <textarea id="trusted-lower-header" name="lower_header" rows="5" spellcheck="false">{{ draft_lower_header }}</textarea>
+                </div>
+            </div>
+            <p class="preview-notice">В полях колонтитулов доступны контекстные плейсхолдеры <code>{% raw %}{{ section }}{% endraw %}</code>, <code>{% raw %}{{ card_number }}{% endraw %}</code>, <code>{% raw %}{{ card_count }}{% endraw %}</code> и <code>{% raw %}{{ side }}{% endraw %}</code>. Место, размеры и линии задаёт сама оболочка.</p>
             <p class="preview-notice">Test compile ничего не сохраняет. «Сохранить в карантин» создаёт неизменяемую версию, но не включает её в печать.</p>
             <button type="submit" formaction="{{ url_for('cards.test_trusted_latex', deck_id=deck.id) }}" class="btn-secondary">Test compile / PDF</button>
             <button type="submit" formaction="{{ url_for('cards.stage_trusted_latex', deck_id=deck.id) }}" class="btn-primary">Сохранить в карантин</button>
@@ -44,9 +55,11 @@
         {% for template in templates %}
         <article class="card-form trusted-version">
             <h3>Версия {{ template.version }} — {{ template.status.value }}</h3>
-            <p><strong>Источник:</strong> {{ template.provenance.value }} · <strong>SHA-256:</strong> <code>{{ template.source_hash }}</code></p>
+            <p><strong>Источник:</strong> {{ template.provenance.value }} · <strong>SHA-256 состояния:</strong> <code>{{ template.state_hash }}</code></p>
             <p><strong>Содержимое:</strong> raw trusted TeX · {{ template.created_at.isoformat() }}</p>
             <pre>{{ template.source }}</pre>
+            {% if template.upper_header %}<p><strong>Верхний колонтитул:</strong></p><pre>{{ template.upper_header }}</pre>{% endif %}
+            {% if template.lower_header %}<p><strong>Нижний колонтитул:</strong></p><pre>{{ template.lower_header }}</pre>{% endif %}
             {% if template.status.value != 'approved' %}
             <form action="{{ url_for('cards.approve_trusted_latex', deck_id=deck.id, template_id=template.id) }}" method="post">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">

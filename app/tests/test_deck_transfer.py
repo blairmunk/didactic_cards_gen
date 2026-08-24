@@ -75,7 +75,9 @@ def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
     repo.save_cards(source.id, CardDeck([Card(front='Q', back='A')]))
     template = repo.quarantine_trusted_template(
         source.id,
-        r'\vfill {{ content }}\vfill',
+        r'{{ upper_header }}\vfill {{ content }}\vfill{{ lower_header }}',
+        upper_header='Верх {{ card_number }}',
+        lower_header='Низ {{ card_count }}',
         front_content_mode='escaped',
         back_content_mode='raw',
     )
@@ -85,6 +87,8 @@ def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
     payload = json.loads(exported)
     exported_template = payload['trusted_templates'][0]
     assert exported_template['source'] == template.source
+    assert exported_template['upper_header'] == template.upper_header
+    assert exported_template['lower_header'] == template.lower_header
     assert exported_template['source_provenance'] == 'local-author'
     assert 'status' not in exported_template
     assert 'approved_at' not in exported_template
@@ -94,6 +98,8 @@ def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
 
     assert len(imported_history) == 1
     assert imported_history[0].source == template.source
+    assert imported_history[0].upper_header == template.upper_header
+    assert imported_history[0].lower_header == template.lower_header
     assert imported_history[0].provenance.value == 'imported'
     assert imported_history[0].origin_template_id == template.id
     assert imported_history[0].status is TemplateStatus.QUARANTINED
@@ -116,6 +122,25 @@ def test_safe_export_never_carries_stale_trusted_history(tmp_path):
     assert payload['trusted_templates'] == []
 
 
+def test_schema_six_trusted_import_gets_empty_header_fragments(tmp_path):
+    repo = SqliteRepository(tmp_path / 'schema-six-transfer')
+    source = repo.create_deck(
+        'Old advanced',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    repo.quarantine_trusted_template(source.id, '{{ content }}')
+    payload = json.loads(export_deck_json(repo, source.id))
+    payload['schema_version'] = 6
+    payload['trusted_templates'][0].pop('upper_header')
+    payload['trusted_templates'][0].pop('lower_header')
+
+    imported = import_deck_json(repo, json.dumps(payload).encode())
+    template = repo.list_trusted_templates(imported.id)[0]
+
+    assert template.upper_header == ''
+    assert template.lower_header == ''
+
+
 def test_invalid_trusted_import_is_rejected_before_any_write(tmp_path):
     repo = SqliteRepository(tmp_path / 'invalid-trusted-transfer')
     payload = {
@@ -130,6 +155,8 @@ def test_invalid_trusted_import_is_rejected_before_any_write(tmp_path):
             'source_provenance': 'local-author',
             'front_content_mode': 'escaped',
             'back_content_mode': 'raw',
+            'upper_header': '',
+            'lower_header': '',
         }],
     }
 
@@ -171,6 +198,8 @@ def test_schema_four_rejects_malformed_trusted_contract_before_write(
             'source_provenance': 'local-author',
             'front_content_mode': 'escaped',
             'back_content_mode': 'escaped',
+            'upper_header': '',
+            'lower_header': '',
         }],
     }
     mutation(payload)
@@ -196,6 +225,8 @@ def test_trusted_import_requires_atomic_capable_repository(repo):
             'source_provenance': 'local-author',
             'front_content_mode': 'escaped',
             'back_content_mode': 'escaped',
+            'upper_header': '',
+            'lower_header': '',
         }],
     }
 

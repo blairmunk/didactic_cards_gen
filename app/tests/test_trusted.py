@@ -14,6 +14,7 @@ from didactic_cards.domain.trusted import (
     TrustedCompileJob,
     TrustedTemplateVersion,
     render_trusted_template,
+    validate_header_source,
     validate_template_source,
 )
 from didactic_cards.domain.entities import Card
@@ -67,6 +68,53 @@ def test_optional_placeholder_may_repeat_deterministically():
         card_number=1,
         side='back',
     ) == 'One: Q — One'
+
+
+def test_trusted_headers_are_contextual_raw_fragments():
+    source = (
+        r'\vbox{{ upper_header }}\par {{ content }}\par '
+        r'{{ lower_header }}'
+    )
+    rendered = render_trusted_template(
+        source,
+        content=r'\textbf{Q}',
+        section='Явления',
+        card_number=7,
+        card_count=21,
+        side='front',
+        upper_header=r'\small {{ section }}',
+        lower_header='Карточка {{ card_number }}/{{ card_count }}',
+    )
+
+    assert rendered == (
+        r'\vbox\small Явления\par \textbf{Q}\par Карточка 7/21'
+    )
+
+
+@pytest.mark.parametrize(
+    'source',
+    ['{{ content }}', '{{ upper_header }}', '{{ danger }}', '{{ card_count }'],
+)
+def test_trusted_header_rejects_non_context_placeholders(source):
+    with pytest.raises(ValueError):
+        validate_header_source(source)
+
+
+def test_trusted_template_record_keeps_headers_in_one_version():
+    template = TrustedTemplateVersion(
+        deck_id='deck',
+        source='{{ upper_header }}{{ content }}{{ lower_header }}',
+        upper_header='Верх {{ card_number }}',
+        lower_header='Низ {{ card_count }}',
+        version=1,
+    )
+
+    assert template.upper_header == 'Верх {{ card_number }}'
+    assert template.lower_header == 'Низ {{ card_count }}'
+    assert template.state_hash != template.source_hash
+    assert replace(template, lower_header='Другой низ').state_hash != (
+        template.state_hash
+    )
 
 
 @pytest.mark.parametrize(

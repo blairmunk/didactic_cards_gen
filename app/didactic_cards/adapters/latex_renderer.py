@@ -22,6 +22,8 @@ from ..domain.rendering import (
     FontWeight,
     HeaderPosition,
     HeaderRepeat,
+    HeaderRule,
+    HeaderRuleSpacing,
     HeaderSource,
     HeaderVisibility,
     HorizontalAlignment,
@@ -30,6 +32,7 @@ from ..domain.rendering import (
     StylePreset,
     TextStyle,
     VerticalAlignment,
+    render_safe_header_template,
 )
 from ..domain.trusted import TrustedTemplateVersion, render_trusted_template
 
@@ -40,6 +43,15 @@ PAGE_HEIGHT_MM = 297.0
 PAGE_MARGIN_MM = 5.0
 HEADER_HEIGHT_CM = 0.48
 HEADER_GAP_CM = 0.12
+HEADER_RULE_THICKNESS_CM = {
+    HeaderRule.THIN: 0.01,
+    HeaderRule.MEDIUM: 0.02,
+}
+HEADER_RULE_SPACING_CM = {
+    HeaderRuleSpacing.COMPACT: 0.035,
+    HeaderRuleSpacing.NORMAL: 0.055,
+    HeaderRuleSpacing.RELAXED: 0.095,
+}
 
 ALLOWED_MATH_COMMANDS = {
     'alpha', 'beta', 'gamma', 'delta', 'epsilon', 'varepsilon', 'zeta', 'eta',
@@ -390,6 +402,7 @@ class LatexRenderer(DocumentRenderer):
             else:
                 logical_number += 1
                 card_numbers[id(card)] = logical_number
+        card_count = logical_number
         section_start_ids: set[int] = set()
         previous_section: str | None = None
         for card in deck.cards:
@@ -419,6 +432,7 @@ class LatexRenderer(DocumentRenderer):
                 cards,
                 side=side,
                 card_numbers=card_numbers,
+                card_count=card_count,
                 section_start_ids=section_start_ids,
             )
             if page_index < len(pages) - 1:
@@ -643,6 +657,7 @@ class LatexRenderer(DocumentRenderer):
         *,
         side: str,
         card_numbers: dict[int, int],
+        card_count: int,
         section_start_ids: set[int],
     ) -> str:
         command = r'\frontcard' if side == 'front' else r'\backcard'
@@ -662,6 +677,7 @@ class LatexRenderer(DocumentRenderer):
                     card,
                     side=side,
                     card_number=card_number,
+                    card_count=card_count,
                     text=text,
                     is_section_start=id(card) in section_start_ids,
                 )
@@ -698,12 +714,39 @@ class LatexRenderer(DocumentRenderer):
         custom_text: str,
         card: Card,
         card_number: int,
+        card_count: int,
     ) -> str:
         if source is HeaderSource.SECTION:
             return _card_content(card.section)
         if source is HeaderSource.CARD_NUMBER:
             return _card_content(f'№ {card_number}')
-        return _card_content(custom_text)
+        return _card_content(render_safe_header_template(
+            custom_text,
+            card_number=card_number,
+            card_count=card_count,
+        ))
+
+    @staticmethod
+    def _header_separator(
+        rule: HeaderRule,
+        spacing: HeaderRuleSpacing,
+    ) -> tuple[str, float]:
+        if rule is HeaderRule.NONE:
+            return (
+                r'\par\nointerlineskip'
+                rf'\vspace*{{{HEADER_GAP_CM}cm}}\noindent',
+                HEADER_GAP_CM,
+            )
+        thickness = HEADER_RULE_THICKNESS_CM[rule]
+        gap = HEADER_RULE_SPACING_CM[spacing]
+        latex = (
+            r'\par\nointerlineskip'
+            rf'\vspace*{{{gap}cm}}'
+            rf'\hrule height {thickness}cm'
+            r'\par\nointerlineskip'
+            rf'\vspace*{{{gap}cm}}\noindent'
+        )
+        return latex, 2 * gap + thickness
 
     def _render_card_content(
         self,
@@ -711,6 +754,7 @@ class LatexRenderer(DocumentRenderer):
         *,
         side: str,
         card_number: int,
+        card_count: int,
         text: str,
         is_section_start: bool,
     ) -> str:
@@ -726,7 +770,10 @@ class LatexRenderer(DocumentRenderer):
                     content=content,
                     section=_card_content(card.section),
                     card_number=card_number,
+                    card_count=card_count,
                     side=side,
+                    upper_header=self.trusted_template.upper_header,
+                    lower_header=self.trusted_template.lower_header,
                 )
             return (
                 f'\\typeout{{DIDACTIC-CARDS-HBOX-BEGIN:{card_number}:{side}:body}}%\n'
@@ -761,17 +808,26 @@ class LatexRenderer(DocumentRenderer):
             repeat=settings.secondary_header_repeat,
             is_section_start=is_section_start,
         )
-        visible_header_count = int(header_visible) + int(secondary_header_visible)
-        reserved_height = visible_header_count * (
-            HEADER_HEIGHT_CM + HEADER_GAP_CM
+        primary_separator, primary_separator_height = self._header_separator(
+            settings.header_rule,
+            settings.header_rule_spacing,
         )
+        secondary_separator, secondary_separator_height = self._header_separator(
+            settings.secondary_header_rule,
+            settings.secondary_header_rule_spacing,
+        )
+        reserved_height = 0.0
+        if header_visible:
+            reserved_height += HEADER_HEIGHT_CM + primary_separator_height
+        if secondary_header_visible:
+            reserved_height += HEADER_HEIGHT_CM + secondary_separator_height
         body_height = self.card_content_height - reserved_height
         body = (
             r'\checkedcardcontent'
             f'{{{card_number}}}{{{side}}}{{{body_height:.6f}cm}}'
             f'{{{content}}}'
         )
-        if not visible_header_count:
+        if not header_visible and not secondary_header_visible:
             return body
 
         top_bands: list[str] = []
@@ -782,6 +838,7 @@ class LatexRenderer(DocumentRenderer):
                 settings.header_text,
                 card,
                 card_number,
+                card_count,
             )
             header = (
                 r'\checkedcardheader'
@@ -800,6 +857,7 @@ class LatexRenderer(DocumentRenderer):
                 settings.secondary_header_text,
                 card,
                 card_number,
+                card_count,
             )
             secondary_header = (
                 r'\checkedcardsecondaryheader'
@@ -812,8 +870,9 @@ class LatexRenderer(DocumentRenderer):
                 else bottom_bands
             )
             destination.append(secondary_header)
-        gap = (
-            r'\par\nointerlineskip'
-            rf'\vspace*{{{HEADER_GAP_CM}cm}}\noindent'
-        )
-        return gap.join([*top_bands, body, *bottom_bands])
+        result = body
+        if top_bands:
+            result = primary_separator.join(top_bands + [result])
+        if bottom_bands:
+            result = secondary_separator.join([result] + bottom_bands)
+        return result

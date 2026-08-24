@@ -501,6 +501,11 @@ def test_safe_typography_and_two_headers_are_available_and_saved_from_ui(
     assert 'id="typography-profile"' in page.text
     assert 'id="typography-custom-controls"' in page.text
     assert 'id="secondary-header-visibility"' in page.text
+    assert 'id="header-rule"' in page.text
+    assert 'id="secondary-header-rule"' in page.text
+    assert '{{ card_number }}' in page.text
+    assert '{{ card_count }}' in page.text
+    assert 'class="btn-small header-placeholder-button"' in page.text
     assert 'Содержимое карточки не становится LaTeX-кодом' in page.text
 
     response = client.post(
@@ -517,11 +522,13 @@ def test_safe_typography_and_two_headers_are_available_and_saved_from_ui(
             'paragraph_spacing': 'medium',
             'header_visibility': 'both',
             'header_source': 'custom',
-            'header_text': 'Курс & группа',
+            'header_text': 'Курс & группа {{ card_number }}/{{ card_count }}',
             'header_font_family': 'serif',
             'header_font_size': 'normal',
             'header_font_weight': 'bold',
             'header_font_style': 'italic',
+            'header_rule': 'thin',
+            'header_rule_spacing': 'compact',
             'secondary_header_visibility': 'front',
             'secondary_header_position': 'bottom',
             'secondary_header_alignment': 'right',
@@ -531,6 +538,8 @@ def test_safe_typography_and_two_headers_are_available_and_saved_from_ui(
             'secondary_header_font_size': 'small',
             'secondary_header_font_weight': 'normal',
             'secondary_header_font_style': 'upright',
+            'secondary_header_rule': 'medium',
+            'secondary_header_rule_spacing': 'relaxed',
         },
     )
 
@@ -538,9 +547,32 @@ def test_safe_typography_and_two_headers_are_available_and_saved_from_ui(
     saved = repo.get_render_settings(deck_id)
     assert saved.typography_profile.value == 'custom'
     assert saved.body_font_family.value == 'sans'
-    assert saved.header_text == 'Курс & группа'
+    assert saved.header_text == 'Курс & группа {{ card_number }}/{{ card_count }}'
+    assert saved.header_rule.value == 'thin'
+    assert saved.header_rule_spacing.value == 'compact'
     assert saved.secondary_header_visibility.value == 'front'
     assert saved.secondary_header_source.value == 'card-number'
+    assert saved.secondary_header_rule.value == 'medium'
+    assert saved.secondary_header_rule_spacing.value == 'relaxed'
+
+
+def test_safe_header_form_rejects_unknown_placeholder_atomically(
+    client, repo, deck_id
+):
+    deck = repo.get_deck(deck_id)
+
+    response = client.post(
+        f'/deck/{deck_id}/render_settings',
+        data={
+            'version': deck.version,
+            'preset': 'centered',
+            'header_source': 'custom',
+            'header_text': '{{ arbitrary_latex }}',
+        },
+    )
+
+    assert response.status_code == 400
+    assert repo.get_render_settings(deck_id) == DeckRenderSettings.centered()
 
 
 def test_safe_typography_form_rejects_latex_as_font_token(client, repo, deck_id):
@@ -1391,11 +1423,20 @@ def test_trusted_editor_stages_modes_without_activation(
     home = client.get('/')
     assert 'Можно создавать отдельные Advanced-колоды' in home.text
     assert f'href="/deck/{deck.id}/advanced"' in home.text
+    editor = client.get(f'/deck/{deck.id}/advanced')
+    assert 'id="trusted-upper-header"' in editor.text
+    assert 'id="trusted-lower-header"' in editor.text
+    assert '{{ card_count }}' in editor.text
 
     staged = client.post(
         f'/deck/{deck.id}/advanced/stage',
         data={
-            'source': r'\vfill {{ content }}\vfill',
+            'source': (
+                r'{{ upper_header }}\vfill {{ content }}\vfill'
+                r'{{ lower_header }}'
+            ),
+            'upper_header': r'\small {{ section }}',
+            'lower_header': '{{ card_number }}/{{ card_count }}',
             'front_content_mode': 'escaped',
             'back_content_mode': 'raw',
         },
@@ -1407,6 +1448,8 @@ def test_trusted_editor_stages_modes_without_activation(
     assert history[0].status is TemplateStatus.QUARANTINED
     assert history[0].front_content_mode.value == 'raw'
     assert history[0].back_content_mode.value == 'raw'
+    assert history[0].upper_header == r'\small {{ section }}'
+    assert history[0].lower_header == '{{ card_number }}/{{ card_count }}'
     assert repository.get_approved_trusted_template(deck.id) is None
 
 

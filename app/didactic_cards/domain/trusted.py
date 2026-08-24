@@ -18,6 +18,15 @@ ALLOWED_PLACEHOLDERS = (
     '{{ content }}',
     '{{ section }}',
     '{{ card_number }}',
+    '{{ card_count }}',
+    '{{ side }}',
+    '{{ upper_header }}',
+    '{{ lower_header }}',
+)
+ALLOWED_HEADER_PLACEHOLDERS = (
+    '{{ section }}',
+    '{{ card_number }}',
+    '{{ card_count }}',
     '{{ side }}',
 )
 
@@ -52,6 +61,8 @@ class TrustedTemplateVersion:
     deck_id: str
     source: str
     version: int
+    upper_header: str = ''
+    lower_header: str = ''
     provenance: TemplateProvenance | str = TemplateProvenance.LOCAL_AUTHOR
     status: TemplateStatus | str = TemplateStatus.QUARANTINED
     front_content_mode: ContentMode | str = ContentMode.ESCAPED
@@ -73,6 +84,16 @@ class TrustedTemplateVersion:
             raise ValueError('trusted template source is too large')
         if '\x00' in self.source:
             raise ValueError('trusted template source contains NUL')
+        for name in ('upper_header', 'lower_header'):
+            value = getattr(self, name)
+            if not isinstance(value, str):
+                raise ValueError(f'trusted template {name} must be a string')
+            if '\x00' in value:
+                raise ValueError(f'trusted template {name} contains NUL')
+        if len(
+            (self.source + self.upper_header + self.lower_header).encode('utf-8')
+        ) > MAX_TRUSTED_TEMPLATE_BYTES:
+            raise ValueError('trusted template state is too large')
         object.__setattr__(
             self, 'provenance', TemplateProvenance(self.provenance)
         )
@@ -92,11 +113,22 @@ class TrustedTemplateVersion:
         if self.status is not TemplateStatus.APPROVED and self.approved_at is not None:
             raise ValueError('only approved template may have approved_at')
         validate_template_source(self.source)
+        validate_header_source(self.upper_header)
+        validate_header_source(self.lower_header)
 
     def approved(self) -> TrustedTemplateVersion:
         return replace(
             self, status=TemplateStatus.APPROVED, approved_at=_now()
         )
+
+    @property
+    def state_hash(self) -> str:
+        """Fingerprint the wrapper and both immutable trusted fragments."""
+        return _sha256('\x00'.join((
+            self.source,
+            self.upper_header,
+            self.lower_header,
+        )))
 
     def revoked(self) -> TrustedTemplateVersion:
         return replace(
@@ -119,24 +151,64 @@ def validate_template_source(source: str) -> None:
         raise ValueError('template must contain {{ content }} exactly once')
 
 
+def validate_header_source(source: str) -> None:
+    """Validate context placeholders allowed inside trusted header fragments."""
+    tokens = re.findall(r'{{.*?}}', source, flags=re.DOTALL)
+    unknown = [
+        token for token in tokens if token not in ALLOWED_HEADER_PLACEHOLDERS
+    ]
+    if unknown:
+        raise ValueError(f'unsupported header placeholder: {unknown[0]}')
+    without_tokens = source
+    for token in ALLOWED_HEADER_PLACEHOLDERS:
+        without_tokens = without_tokens.replace(token, '')
+    if '{{' in without_tokens or '}}' in without_tokens:
+        raise ValueError('malformed header placeholder')
+
+
 def render_trusted_template(
     source: str,
     *,
     content: str,
     section: str,
     card_number: int,
+    card_count: int | None = None,
     side: str,
+    upper_header: str = '',
+    lower_header: str = '',
 ) -> str:
     validate_template_source(source)
     if side not in {'front', 'back'}:
         raise ValueError('template side must be front or back')
     if isinstance(card_number, bool) or card_number < 1:
         raise ValueError('template card_number must be positive')
-    values = {
-        '{{ content }}': content,
+    if card_count is None:
+        card_count = card_number
+    if (
+        isinstance(card_count, bool)
+        or card_count < card_number
+    ):
+        raise ValueError('template card_count must include card_number')
+    validate_header_source(upper_header)
+    validate_header_source(lower_header)
+    context_values = {
         '{{ section }}': section,
         '{{ card_number }}': str(card_number),
+        '{{ card_count }}': str(card_count),
         '{{ side }}': side,
+    }
+    rendered_headers = {}
+    for name, header in (
+        ('{{ upper_header }}', upper_header),
+        ('{{ lower_header }}', lower_header),
+    ):
+        for placeholder, value in context_values.items():
+            header = header.replace(placeholder, value)
+        rendered_headers[name] = header
+    values = {
+        '{{ content }}': content,
+        **context_values,
+        **rendered_headers,
     }
     rendered = source
     for placeholder, value in values.items():

@@ -14,8 +14,10 @@ from ..domain.trusted import (
 )
 
 
-DECK_EXPORT_SCHEMA_VERSION = 6
-SUPPORTED_DECK_EXPORT_SCHEMAS = {1, 2, 3, 4, 5, DECK_EXPORT_SCHEMA_VERSION}
+DECK_EXPORT_SCHEMA_VERSION = 7
+SUPPORTED_DECK_EXPORT_SCHEMAS = {
+    1, 2, 3, 4, 5, 6, DECK_EXPORT_SCHEMA_VERSION,
+}
 
 
 class DeckTransferError(ValueError):
@@ -41,6 +43,8 @@ def export_deck_json(repo: DeckRepository, deck_id: str) -> bytes:
                 'version': template.version,
                 'source': template.source,
                 'source_hash': template.source_hash,
+                'upper_header': template.upper_header,
+                'lower_header': template.lower_header,
                 'source_provenance': template.provenance.value,
                 'front_content_mode': template.front_content_mode.value,
                 'back_content_mode': template.back_content_mode.value,
@@ -146,6 +150,8 @@ def import_deck_json(
             'id', 'version', 'source', 'source_hash', 'source_provenance',
             'front_content_mode', 'back_content_mode',
         }
+        if schema_version >= 7:
+            expected_fields |= {'upper_header', 'lower_header'}
         for index, item in enumerate(template_items, start=1):
             if not isinstance(item, dict) or set(item) != expected_fields:
                 raise DeckTransferError(
@@ -165,6 +171,8 @@ def import_deck_json(
                     deck_id='import-source',
                     version=version,
                     source=item['source'],
+                    upper_header=item.get('upper_header', ''),
+                    lower_header=item.get('lower_header', ''),
                     source_hash=item['source_hash'],
                     provenance=TemplateProvenance.IMPORTED,
                     origin_template_id=template_id,

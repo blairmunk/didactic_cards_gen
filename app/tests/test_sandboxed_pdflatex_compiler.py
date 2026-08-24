@@ -11,6 +11,7 @@ from didactic_cards.adapters.sandboxed_pdflatex_compiler import (
 )
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.domain.entities import Card, CardDeck
+from didactic_cards.domain.rendering import DeckRenderSettings
 from didactic_cards.domain.trusted import (
     TrustedCompileJob,
     TrustedTemplateVersion,
@@ -209,7 +210,7 @@ def test_real_bwrap_compiles_without_home_project_or_network_mounts(tmp_path):
 
 
 @pytest.mark.integration
-def test_real_bwrap_compiles_trusted_card_template_with_raw_and_escaped_sides(
+def test_real_bwrap_compiles_advanced_template_with_contextual_headers(
     tmp_path,
 ):
     if not shutil.which('bwrap') or not shutil.which('pdflatex'):
@@ -222,17 +223,23 @@ def test_real_bwrap_compiles_trusted_card_template_with_raw_and_escaped_sides(
     template = TrustedTemplateVersion(
         deck_id='deck',
         version=1,
-        source=r'\vfill\centering {{ section }}: {{ content }}\vfill',
-        front_content_mode='escaped',
+        source=(
+            r'{{ upper_header }}\par\vfill\centering {{ content }}\vfill'
+            r'\par{{ lower_header }}'
+        ),
+        upper_header=r'\small {{ section }}',
+        lower_header='Карточка {{ card_number }}/{{ card_count }}',
+        front_content_mode='raw',
         back_content_mode='raw',
     )
     renderer = LatexRenderer(
         cards_per_row=1,
         rows_per_page=1,
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
         trusted_template=template,
     )
     latex = renderer.render(CardDeck([Card(
-        front='Стоимость 10% & ответ',
+        front=r'Стоимость 10\% \& ответ',
         back=r'\textbf{Жирный ответ}',
         section='Тема & раздел',
     )]))

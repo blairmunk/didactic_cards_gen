@@ -284,7 +284,7 @@ def test_schema_four_adds_section_layout_settings_without_changing_behavior(
             )
         }
         assert {'header_repeat', 'section_break'} <= columns
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 10
 
 
 def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
@@ -300,7 +300,7 @@ def test_schema_five_adds_empty_trusted_template_quarantine(tmp_path):
 
     assert migrated.list_trusted_templates(deck.id) == []
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 10
 
 
 def test_schema_six_adds_escaped_content_modes_without_activating_template(
@@ -351,7 +351,7 @@ def test_schema_six_adds_escaped_content_modes_without_activating_template(
     assert restored.back_content_mode.value == 'escaped'
     assert restored.status is TemplateStatus.QUARANTINED
     with closing(migrated._connect()) as connection:
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 10
 
 
 def test_schema_seven_adds_disabled_typography_without_changing_output(tmp_path):
@@ -373,7 +373,7 @@ def test_schema_seven_adds_disabled_typography_without_changing_output(tmp_path)
             )
         }
         assert 'typography_json' in columns
-        assert connection.execute('PRAGMA user_version').fetchone()[0] == 9
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 10
 
 
 def test_schema_eight_separates_safe_and_approved_advanced_decks(tmp_path):
@@ -411,6 +411,42 @@ def test_schema_eight_separates_safe_and_approved_advanced_decks(tmp_path):
     assert settings.authoring_mode.value == 'advanced'
     assert settings.header_position.value == 'top'
     assert settings.secondary_header_position.value == 'bottom'
+
+
+def test_schema_nine_adds_empty_advanced_header_fragments(tmp_path):
+    data_dir = tmp_path / 'schema-nine'
+    repository = SqliteRepository(data_dir)
+    deck = repository.create_deck(
+        'Existing advanced',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    template = repository.quarantine_trusted_template(
+        deck.id, '{{ content }}'
+    )
+    with closing(repository._connect()) as connection:
+        connection.execute(
+            'ALTER TABLE trusted_templates DROP COLUMN upper_header'
+        )
+        connection.execute(
+            'ALTER TABLE trusted_templates DROP COLUMN lower_header'
+        )
+        connection.execute('PRAGMA user_version = 9')
+        connection.commit()
+
+    migrated = SqliteRepository(data_dir)
+    restored = migrated.list_trusted_templates(deck.id)[0]
+
+    assert restored.id == template.id
+    assert restored.upper_header == ''
+    assert restored.lower_header == ''
+    with closing(migrated._connect()) as connection:
+        columns = {
+            row['name'] for row in connection.execute(
+                'PRAGMA table_info(trusted_templates)'
+            )
+        }
+        assert {'upper_header', 'lower_header'} <= columns
+        assert connection.execute('PRAGMA user_version').fetchone()[0] == 10
 
 
 def test_deck_and_ordered_card_round_trip(sqlite_repo):
@@ -503,7 +539,9 @@ def test_trusted_templates_are_versioned_quarantined_and_explicitly_approved(
     )
     second = sqlite_repo.quarantine_trusted_template(
         deck.id,
-        r'\raggedleft {{ content }}',
+        r'{{ upper_header }}\raggedleft {{ content }}{{ lower_header }}',
+        upper_header='Верх {{ card_number }}',
+        lower_header='Низ {{ card_count }}',
         front_content_mode='raw',
         back_content_mode='escaped',
     )
@@ -512,6 +550,8 @@ def test_trusted_templates_are_versioned_quarantined_and_explicitly_approved(
     assert first.status is TemplateStatus.QUARANTINED
     assert second.front_content_mode.value == 'raw'
     assert second.back_content_mode.value == 'escaped'
+    assert second.upper_header == 'Верх {{ card_number }}'
+    assert second.lower_header == 'Низ {{ card_count }}'
     approved_first = sqlite_repo.approve_trusted_template(deck.id, first.id)
     assert approved_first.status is TemplateStatus.APPROVED
     assert sqlite_repo.get_approved_trusted_template(deck.id).id == first.id
@@ -531,7 +571,10 @@ def test_cloned_trusted_history_never_inherits_approval(sqlite_repo):
         render_settings=DeckRenderSettings(authoring_mode='advanced'),
     )
     template = sqlite_repo.quarantine_trusted_template(
-        source.id, '{{ content }}'
+        source.id,
+        '{{ upper_header }}{{ content }}{{ lower_header }}',
+        upper_header='Clone top',
+        lower_header='Clone bottom',
     )
     sqlite_repo.approve_trusted_template(source.id, template.id)
 
@@ -542,6 +585,8 @@ def test_cloned_trusted_history_never_inherits_approval(sqlite_repo):
     assert cloned[0].status is TemplateStatus.QUARANTINED
     assert cloned[0].provenance.value == 'cloned'
     assert cloned[0].origin_template_id == template.id
+    assert cloned[0].upper_header == 'Clone top'
+    assert cloned[0].lower_header == 'Clone bottom'
     assert sqlite_repo.get_approved_trusted_template(clone.id) is None
 
 

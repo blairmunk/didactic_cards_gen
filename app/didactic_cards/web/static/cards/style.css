@@ -180,6 +180,13 @@ button:hover, .btn:hover,
     margin-top: 1rem;
 }
 
+.placeholder-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.35rem;
+}
+
 .settings-inactive {
     opacity: 0.55;
 }
@@ -589,6 +596,22 @@ summary {
 .secondary-header-align-left .preview-header-secondary { text-align: left; }
 .secondary-header-align-center .preview-header-secondary { text-align: center; }
 .secondary-header-align-right .preview-header-secondary { text-align: right; }
+.header-rule-thin .preview-header-primary { border-bottom: 1px solid currentColor; }
+.header-rule-medium .preview-header-primary { border-bottom: 2px solid currentColor; }
+.secondary-header-rule-thin .preview-header-secondary { border-top: 1px solid currentColor; }
+.secondary-header-rule-medium .preview-header-secondary { border-top: 2px solid currentColor; }
+.header-rule-thin.header-rule-spacing-compact .preview-header-primary,
+.header-rule-medium.header-rule-spacing-compact .preview-header-primary { padding-bottom: 0.2rem; }
+.header-rule-thin.header-rule-spacing-normal .preview-header-primary,
+.header-rule-medium.header-rule-spacing-normal .preview-header-primary { padding-bottom: 0.35rem; }
+.header-rule-thin.header-rule-spacing-relaxed .preview-header-primary,
+.header-rule-medium.header-rule-spacing-relaxed .preview-header-primary { padding-bottom: 0.55rem; }
+.secondary-header-rule-thin.secondary-header-rule-spacing-compact .preview-header-secondary,
+.secondary-header-rule-medium.secondary-header-rule-spacing-compact .preview-header-secondary { padding-top: 0.2rem; }
+.secondary-header-rule-thin.secondary-header-rule-spacing-normal .preview-header-secondary,
+.secondary-header-rule-medium.secondary-header-rule-spacing-normal .preview-header-secondary { padding-top: 0.35rem; }
+.secondary-header-rule-thin.secondary-header-rule-spacing-relaxed .preview-header-secondary,
+.secondary-header-rule-medium.secondary-header-rule-spacing-relaxed .preview-header-secondary { padding-top: 0.55rem; }
 
 .body-family-serif .preview-content { font-family: Georgia, serif; }
 .body-family-sans .preview-content { font-family: Arial, sans-serif; }

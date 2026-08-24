@@ -8,6 +8,7 @@ from didactic_cards.domain.rendering import (
     FontWeight,
     LineSpacing,
     ParagraphSpacing,
+    render_safe_header_template,
 )
 
 
@@ -133,3 +134,29 @@ def test_header_custom_text_has_a_bounded_string_contract(field):
         DeckRenderSettings(**{field: 42})
     with pytest.raises(ValueError, match='200'):
         DeckRenderSettings(**{field: 'x' * 201})
+
+
+def test_safe_header_template_supports_only_number_and_total():
+    assert render_safe_header_template(
+        'Явления · Карточка {{ card_number }}/{{ card_count }}',
+        card_number=7,
+        card_count=21,
+    ) == 'Явления · Карточка 7/21'
+
+    with pytest.raises(ValueError, match='unsupported'):
+        DeckRenderSettings(header_text='{{ section }}')
+    with pytest.raises(ValueError, match='malformed'):
+        DeckRenderSettings(header_text='{{ card_number }')
+
+
+def test_header_rules_are_allowlisted_and_round_trip():
+    settings = DeckRenderSettings(
+        header_rule='thin',
+        header_rule_spacing='compact',
+        secondary_header_rule='medium',
+        secondary_header_rule_spacing='relaxed',
+    )
+
+    assert DeckRenderSettings.from_dict(settings.to_dict()) == settings
+    with pytest.raises(ValueError, match='unsupported'):
+        DeckRenderSettings(header_rule=r'\hrulefill')

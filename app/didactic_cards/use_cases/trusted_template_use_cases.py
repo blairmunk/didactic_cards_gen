@@ -39,6 +39,8 @@ class TrustedTemplateService:
         deck_id: str,
         source: str,
         *,
+        upper_header: str = '',
+        lower_header: str = '',
         front_content_mode: ContentMode | str = ContentMode.RAW,
         back_content_mode: ContentMode | str = ContentMode.RAW,
     ) -> TrustedTemplateVersion:
@@ -52,6 +54,8 @@ class TrustedTemplateService:
         return self.repository.quarantine_trusted_template(
             deck_id,
             source,
+            upper_header=upper_header,
+            lower_header=lower_header,
             provenance=TemplateProvenance.LOCAL_AUTHOR,
             front_content_mode=front_content_mode,
             back_content_mode=back_content_mode,

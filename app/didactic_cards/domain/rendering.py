@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -48,6 +49,18 @@ class HeaderSource(str, Enum):
     SECTION = 'section'
     CARD_NUMBER = 'card-number'
     CUSTOM = 'custom'
+
+
+class HeaderRule(str, Enum):
+    NONE = 'none'
+    THIN = 'thin'
+    MEDIUM = 'medium'
+
+
+class HeaderRuleSpacing(str, Enum):
+    COMPACT = 'compact'
+    NORMAL = 'normal'
+    RELAXED = 'relaxed'
 
 
 class SectionBreak(str, Enum):
@@ -190,6 +203,8 @@ class DeckRenderSettings:
     header_font_size: FontSize | str = FontSize.SMALL
     header_font_weight: FontWeight | str = FontWeight.NORMAL
     header_font_style: FontStyle | str = FontStyle.UPRIGHT
+    header_rule: HeaderRule | str = HeaderRule.NONE
+    header_rule_spacing: HeaderRuleSpacing | str = HeaderRuleSpacing.NORMAL
     secondary_header_visibility: HeaderVisibility | str = HeaderVisibility.NONE
     secondary_header_position: HeaderPosition | str = HeaderPosition.BOTTOM
     secondary_header_alignment: HorizontalAlignment | str = HorizontalAlignment.RIGHT
@@ -200,6 +215,8 @@ class DeckRenderSettings:
     secondary_header_font_size: FontSize | str = FontSize.SMALL
     secondary_header_font_weight: FontWeight | str = FontWeight.NORMAL
     secondary_header_font_style: FontStyle | str = FontStyle.UPRIGHT
+    secondary_header_rule: HeaderRule | str = HeaderRule.NONE
+    secondary_header_rule_spacing: HeaderRuleSpacing | str = HeaderRuleSpacing.NORMAL
 
     def __post_init__(self) -> None:
         enum_fields = {
@@ -224,6 +241,8 @@ class DeckRenderSettings:
             'header_font_size': FontSize,
             'header_font_weight': FontWeight,
             'header_font_style': FontStyle,
+            'header_rule': HeaderRule,
+            'header_rule_spacing': HeaderRuleSpacing,
             'secondary_header_visibility': HeaderVisibility,
             'secondary_header_position': HeaderPosition,
             'secondary_header_alignment': HorizontalAlignment,
@@ -233,6 +252,8 @@ class DeckRenderSettings:
             'secondary_header_font_size': FontSize,
             'secondary_header_font_weight': FontWeight,
             'secondary_header_font_style': FontStyle,
+            'secondary_header_rule': HeaderRule,
+            'secondary_header_rule_spacing': HeaderRuleSpacing,
         }
         try:
             for field_name, enum_type in enum_fields.items():
@@ -252,6 +273,7 @@ class DeckRenderSettings:
                 raise ValueError(f'{field_name} must be a string')
             if len(value) > 200:
                 raise ValueError(f'{field_name} must not exceed 200 characters')
+            validate_safe_header_template(value)
 
     @classmethod
     def centered(cls) -> DeckRenderSettings:
@@ -324,3 +346,39 @@ class DeckRenderSettings:
                 + ', '.join(sorted(unknown_fields))
             )
         return cls(**data)
+
+
+SAFE_HEADER_PLACEHOLDERS = (
+    '{{ card_number }}',
+    '{{ card_count }}',
+)
+
+
+def validate_safe_header_template(source: str) -> None:
+    """Validate placeholders without interpreting ordinary safe text as TeX."""
+    tokens = re.findall(r'{{.*?}}', source, flags=re.DOTALL)
+    unknown = [token for token in tokens if token not in SAFE_HEADER_PLACEHOLDERS]
+    if unknown:
+        raise ValueError(f'unsupported header placeholder: {unknown[0]}')
+    without_tokens = source
+    for token in SAFE_HEADER_PLACEHOLDERS:
+        without_tokens = without_tokens.replace(token, '')
+    if '{{' in without_tokens or '}}' in without_tokens:
+        raise ValueError('malformed header placeholder')
+
+
+def render_safe_header_template(
+    source: str, *, card_number: int, card_count: int
+) -> str:
+    validate_safe_header_template(source)
+    if (
+        isinstance(card_number, bool)
+        or isinstance(card_count, bool)
+        or card_number < 1
+        or card_count < card_number
+    ):
+        raise ValueError('invalid card numbering context')
+    return (
+        source.replace('{{ card_number }}', str(card_number))
+        .replace('{{ card_count }}', str(card_count))
+    )

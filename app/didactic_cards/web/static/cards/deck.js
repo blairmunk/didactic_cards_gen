@@ -97,6 +97,17 @@ document.addEventListener('DOMContentLoaded', function() {
         const cards = document.querySelectorAll('#preview-grid .preview-card');
         cards.forEach((card, i) => {
             card.querySelector('.card-number').textContent = '#' + (i + 1);
+            card.querySelectorAll('.preview-header').forEach(function(header) {
+                const primary = header.classList.contains('preview-header-primary');
+                const dataPrefix = primary ? 'header' : 'secondaryHeader';
+                header.textContent = safeHeaderValue(
+                    document.body.dataset[dataPrefix + 'Source'],
+                    document.body.dataset[dataPrefix + 'Text'],
+                    card.dataset.section || '',
+                    i + 1,
+                    cards.length
+                );
+            });
         });
         refreshSectionHeaders();
     }
@@ -118,6 +129,14 @@ document.addEventListener('DOMContentLoaded', function() {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function safeHeaderValue(source, customText, section, number, count) {
+        if (source === 'section') return section || '';
+        if (source === 'card-number') return '№ ' + number;
+        return (customText || '')
+            .replaceAll('{{ card_number }}', String(number))
+            .replaceAll('{{ card_count }}', String(count));
     }
 
     const stylePreset = document.getElementById('style-preset');
@@ -170,6 +189,29 @@ document.addEventListener('DOMContentLoaded', function() {
         refreshCustomText();
     });
 
+    document.querySelectorAll('.header-placeholder-button').forEach(function(button) {
+        button.addEventListener('click', function() {
+            const input = document.getElementById(button.dataset.target);
+            if (!input) return;
+            if (input.readOnly) {
+                const sourceId = button.dataset.target === 'header-text'
+                    ? 'header-source' : 'secondary-header-source';
+                const source = document.getElementById(sourceId);
+                if (source) {
+                    source.value = 'custom';
+                    source.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                input.readOnly = false;
+                input.classList.remove('settings-input-inactive');
+            }
+            const start = input.selectionStart === null ? input.value.length : input.selectionStart;
+            const end = input.selectionEnd === null ? start : input.selectionEnd;
+            input.setRangeText(button.dataset.placeholder, start, end, 'end');
+            input.focus();
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    });
+
     const printProfile = document.getElementById('print-profile');
     document.querySelectorAll('.print-form').forEach(function(form) {
         form.addEventListener('submit', function() {
@@ -201,11 +243,6 @@ document.addEventListener('DOMContentLoaded', function() {
         div.className = 'preview-card';
         div.dataset.cardId = cardData.id;
         div.dataset.section = cardData.section || '';
-        function headerValue(source, customText) {
-            if (source === 'section') return cardData.section || '';
-            if (source === 'card-number') return '№ ' + (index + 1);
-            return customText || '';
-        }
         function headerHtml(prefix, side, position) {
             if (IS_ADVANCED) return '';
             const dataPrefix = prefix === 'primary' ? 'header' : 'secondaryHeader';
@@ -219,7 +256,13 @@ document.addEventListener('DOMContentLoaded', function() {
             const repeat = document.body.dataset[dataPrefix + 'Repeat'];
             return '<div class="preview-section preview-header preview-header-' + prefix +
                 '" data-repeat="' + repeat + '">' +
-                escapeHtml(headerValue(source, customText)) + '</div>';
+                escapeHtml(safeHeaderValue(
+                    source,
+                    customText,
+                    cardData.section || '',
+                    index + 1,
+                    document.querySelectorAll('#preview-grid .preview-card').length + 1
+                )) + '</div>';
         }
         function sideHtml(side, content, label) {
             return '<div class="preview-side preview-' + side + '">' +

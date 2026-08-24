@@ -86,6 +86,36 @@ def test_advanced_deck_renders_raw_content_without_optional_wrapper():
     assert r'\textbackslash{}vfill' not in source
 
 
+def test_advanced_wrapper_receives_headers_and_total_without_padding():
+    template = TrustedTemplateVersion(
+        deck_id='deck',
+        version=1,
+        source='{{ upper_header }} | {{ content }} | {{ lower_header }}',
+        upper_header='TOP {{ section }}',
+        lower_header='{{ card_number }}/{{ card_count }} {{ side }}',
+    )
+    renderer = LatexRenderer(
+        cards_per_row=2,
+        rows_per_page=1,
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+        trusted_template=template,
+    )
+    layout = renderer.prepare_print_layout(
+        CardDeck([
+            Card(front='Q1', section='S'),
+            Card(front='Q2', section='S'),
+            Card(front='Q3', section='T'),
+        ]),
+        2,
+    )
+
+    source = renderer.render_fronts(CardDeck(list(layout.cards)))
+
+    assert 'TOP S | Q1 | 1/3 front' in source
+    assert 'TOP T | Q3 | 3/3 front' in source
+    assert '/4 front' not in source
+
+
 def test_safe_deck_ignores_trusted_wrapper_even_if_passed_by_caller():
     template = TrustedTemplateVersion(
         deck_id='deck', version=1, source='WRAPPER {{ content }}'
@@ -433,6 +463,54 @@ class TestLatexRenderer:
 
         assert source.count(r'\checkedcardsecondaryheader') == 2
         assert r'\checkedcardsecondaryheader{0}' not in source
+
+    def test_custom_header_numbering_uses_real_card_count_and_escapes_text(self):
+        renderer = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                header_visibility='both',
+                header_source='custom',
+                header_text=(
+                    'Явления & карточка '
+                    '{{ card_number }}/{{ card_count }}'
+                ),
+            ),
+            cards_per_row=2,
+            rows_per_page=1,
+        )
+        layout = renderer.prepare_print_layout(
+            CardDeck([
+                Card(front='Q1'), Card(front='Q2'), Card(front='Q3'),
+            ]),
+            2,
+        )
+
+        source = renderer.render_fronts(CardDeck(list(layout.cards)))
+
+        assert r'Явления \& карточка 1/3' in source
+        assert r'Явления \& карточка 2/3' in source
+        assert r'Явления \& карточка 3/3' in source
+        assert 'карточка 0/3' not in source
+        assert 'карточка 4/3' not in source
+
+    def test_header_rules_are_renderer_owned_and_reduce_body_height(self):
+        source = LatexRenderer(
+            render_settings=DeckRenderSettings(
+                header_visibility='front',
+                header_rule='medium',
+                header_rule_spacing='relaxed',
+                secondary_header_visibility='front',
+                secondary_header_rule='thin',
+                secondary_header_rule_spacing='compact',
+            ),
+            cards_per_row=1,
+            rows_per_page=1,
+        ).render_fronts(CardDeck([Card(front='Q', section='Тема')]))
+
+        assert r'\hrule height 0.02cm' in source
+        assert r'\hrule height 0.01cm' in source
+        assert r'\vspace*{0.095cm}' in source
+        assert r'\vspace*{0.035cm}' in source
+        assert r'\checkedcardcontent{1}{front}{4.459548cm}' in source
 
     def test_genuine_empty_card_keeps_its_logical_number(self):
         source = LatexRenderer(
@@ -935,13 +1013,19 @@ def test_real_pdf_compiles_custom_typography_and_two_header_bands():
         paragraph_spacing='medium',
         header_visibility='both',
         header_source='section',
+        header_rule='thin',
+        header_rule_spacing='compact',
         header_font_family='serif',
         header_font_style='italic',
         secondary_header_visibility='both',
         secondary_header_position='bottom',
         secondary_header_source='custom',
-        secondary_header_text='Курс & группа',
+        secondary_header_text=(
+            'Курс & группа {{ card_number }}/{{ card_count }}'
+        ),
         secondary_header_font_family='mono',
+        secondary_header_rule='medium',
+        secondary_header_rule_spacing='relaxed',
     )
     source = LatexRenderer(
         cards_per_row=1,

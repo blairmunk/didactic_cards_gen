@@ -34,6 +34,15 @@ async def capture(
         await page.screenshot({"path": str(output_dir / "decks.png"), "fullPage": True})
 
         await page.goto(f"{base_url}/deck/{deck_id}", {"waitUntil": "domcontentloaded"})
+        await page.evaluate(
+            """() => {
+                const sections = document.querySelectorAll(
+                    'details.typography-settings'
+                );
+                if (sections[1]) sections[1].open = true;
+                if (sections[2]) sections[2].open = true;
+            }"""
+        )
         await page.screenshot({"path": str(output_dir / "deck-editor.png"), "fullPage": True})
 
         if advanced_deck_id is not None:

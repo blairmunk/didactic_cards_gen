@@ -60,6 +60,32 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
         await page.select('#header-visibility', 'both')
         await page.select('#header-alignment', 'center')
         await page.select('#header-repeat', 'section-start')
+        await page.evaluate(
+            "() => { document.querySelectorAll('details.typography-settings')"
+            ".forEach(details => { details.open = true; }); }"
+        )
+        await page.select('#secondary-header-visibility', 'both')
+        await page.select('#secondary-header-source', 'custom')
+        await page.evaluate(
+            "() => { const input = document.getElementById('secondary-header-text'); "
+            "input.value = 'Карточка '; input.setSelectionRange(input.value.length, input.value.length); }"
+        )
+        await page.click(
+            '#secondary-header-text + .placeholder-actions button:first-child'
+        )
+        await page.type('#secondary-header-text', '/')
+        await page.click(
+            '#secondary-header-text + .placeholder-actions button:last-child'
+        )
+        assert await page.Jeval(
+            '#secondary-header-text',
+            'element => ({value: element.value, readOnly: element.readOnly})',
+        ) == {
+            'value': 'Карточка {{ card_number }}/{{ card_count }}',
+            'readOnly': False,
+        }
+        await page.select('#secondary-header-rule', 'thin')
+        await page.select('#secondary-header-rule-spacing', 'compact')
         await page.select('#section-break', 'new-row')
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
@@ -104,6 +130,14 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             '.preview-card:nth-child(2) .preview-section',
             'element => getComputedStyle(element).display',
         ) == 'none'
+        assert await page.Jeval(
+            '.preview-card:nth-child(2) .preview-header-secondary',
+            'element => element.textContent',
+        ) == 'Карточка 2/2'
+        assert await page.Jeval(
+            '.preview-card:nth-child(2) .preview-header-secondary',
+            'element => getComputedStyle(element).borderTopStyle',
+        ) == 'solid'
         await page.click('#btn-view-table')
 
         handles = await page.querySelectorAll('.drag-handle')
@@ -249,7 +283,18 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
         )
         await page.evaluate(
             "value => document.getElementById('trusted-source').value = value",
-            r'\begin{center}{{ content }}\end{center}',
+            (
+                r'{{ upper_header }}\begin{center}{{ content }}\end{center}'
+                r'{{ lower_header }}'
+            ),
+        )
+        await page.evaluate(
+            "value => document.getElementById('trusted-upper-header').value = value",
+            r'\small Раздел {{ section }}',
+        )
+        await page.evaluate(
+            "value => document.getElementById('trusted-lower-header').value = value",
+            'Карточка {{ card_number }}/{{ card_count }}',
         )
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
@@ -261,6 +306,9 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             page.click('.trusted-version form button[type="submit"]'),
         )
         assert 'Активная версия' in await page.Jeval(
+            '.trusted-version', 'element => element.textContent'
+        )
+        assert 'Карточка {{ card_number }}/{{ card_count }}' in await page.Jeval(
             '.trusted-version', 'element => element.textContent'
         )
 
