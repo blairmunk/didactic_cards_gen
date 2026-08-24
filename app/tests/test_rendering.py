@@ -12,16 +12,12 @@ from didactic_cards.domain.rendering import (
 )
 
 
-def test_render_settings_centered_and_legacy_presets_are_explicit():
+def test_render_settings_centered_preset_is_explicit():
     centered = DeckRenderSettings.centered()
-    legacy = DeckRenderSettings.legacy()
 
     assert centered.preset.value == 'centered'
     assert centered.horizontal_alignment.value == 'center'
     assert centered.vertical_alignment.value == 'center'
-    assert legacy.preset.value == 'legacy-top-left'
-    assert legacy.horizontal_alignment.value == 'left'
-    assert legacy.vertical_alignment.value == 'top'
     assert centered.authoring_mode.value == 'safe'
 
 
@@ -142,6 +138,9 @@ def test_safe_header_template_supports_only_number_and_total():
         card_number=7,
         card_count=21,
     ) == 'Явления · Карточка 7/21'
+
+    with pytest.raises(ValueError, match='numbering context'):
+        render_safe_header_template('', card_number=True, card_count=1)
 
     with pytest.raises(ValueError, match='unsupported'):
         DeckRenderSettings(header_text='{{ section }}')

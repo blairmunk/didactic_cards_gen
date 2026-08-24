@@ -30,8 +30,6 @@ def test_trusted_template_replaces_builtin_body_and_keeps_context_typed():
             r'\raggedleft '
             r'{{ section }} / {{ card_number }} / {{ side }}: {{ content }}'
         ),
-        front_content_mode='escaped',
-        back_content_mode='raw',
     )
     renderer = LatexRenderer(
         cards_per_row=1,
@@ -342,15 +340,6 @@ class TestLatexRenderer:
 
         assert rf'\begin{{minipage}}[t][#3][{position}]' in source
 
-    def test_legacy_settings_keep_top_left_body_without_wrapper(self):
-        source = LatexRenderer(
-            render_settings=DeckRenderSettings.legacy(),
-            cards_per_row=1,
-            rows_per_page=1,
-        ).render_fronts(self.make_deck(1))
-
-        assert r'\legacycheckedcardcontent{1}{front}{Q1}' in source
-
     def test_header_visibility_and_position_are_side_specific_and_escaped(self):
         deck = CardDeck([
             Card(front='Q', back='A', section='Тема & раздел')
@@ -533,14 +522,15 @@ class TestLatexRenderer:
             cards_per_row=1, rows_per_page=1
         ).render_fronts(CardDeck([Card()]))
 
-        assert r'\legacycheckedcardcontent{1}{front}{\mbox{}}' in source
+        assert r'\checkedcardcontent{1}{front}' in source
+        assert r'{\mbox{}}' in source
 
     def test_renderer_copy_applies_deck_settings_without_mutating_base(self):
         base = LatexRenderer(cards_per_row=1, rows_per_page=1)
         configured = base.with_render_settings(DeckRenderSettings.centered())
 
         assert configured is not base
-        assert base.render_settings == DeckRenderSettings.legacy()
+        assert base.render_settings == DeckRenderSettings.centered()
         assert configured.render_settings == DeckRenderSettings.centered()
 
     def test_print_layout_capacity_must_match_renderer_grid(self):

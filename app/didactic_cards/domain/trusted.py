@@ -45,11 +45,6 @@ class TemplateStatus(str, Enum):
     REVOKED = 'revoked'
 
 
-class ContentMode(str, Enum):
-    ESCAPED = 'escaped'
-    RAW = 'raw'
-
-
 @dataclass(frozen=True)
 class TrustedTemplateVersion:
     deck_id: str
@@ -58,8 +53,6 @@ class TrustedTemplateVersion:
     version: int
     provenance: TemplateProvenance | str = TemplateProvenance.LOCAL_AUTHOR
     status: TemplateStatus | str = TemplateStatus.QUARANTINED
-    front_content_mode: ContentMode | str = ContentMode.ESCAPED
-    back_content_mode: ContentMode | str = ContentMode.ESCAPED
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     source_hash: str = ''
     origin_template_id: str | None = None
@@ -85,12 +78,6 @@ class TrustedTemplateVersion:
             self, 'provenance', TemplateProvenance(self.provenance)
         )
         object.__setattr__(self, 'status', TemplateStatus(self.status))
-        object.__setattr__(
-            self, 'front_content_mode', ContentMode(self.front_content_mode)
-        )
-        object.__setattr__(
-            self, 'back_content_mode', ContentMode(self.back_content_mode)
-        )
         expected_hash = _sha256('\x00'.join((
             self.front_source, self.back_source
         )))

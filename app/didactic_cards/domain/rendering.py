@@ -6,7 +6,6 @@ from enum import Enum
 
 
 class StylePreset(str, Enum):
-    LEGACY_TOP_LEFT = 'legacy-top-left'
     CENTERED = 'centered'
     CUSTOM = 'custom'
 
@@ -279,14 +278,6 @@ class DeckRenderSettings:
     def centered(cls) -> DeckRenderSettings:
         return cls()
 
-    @classmethod
-    def legacy(cls) -> DeckRenderSettings:
-        return cls(
-            preset=StylePreset.LEGACY_TOP_LEFT,
-            horizontal_alignment=HorizontalAlignment.LEFT,
-            vertical_alignment=VerticalAlignment.TOP,
-        )
-
     @property
     def typography(self) -> ResolvedTypography | None:
         if self.typography_profile is TypographyProfile.OFF:
@@ -317,14 +308,14 @@ class DeckRenderSettings:
         )
 
     def typography_dict(self) -> dict[str, str]:
-        legacy_fields = {
+        structured_fields = {
             'preset', 'horizontal_alignment', 'vertical_alignment',
             'header_visibility', 'header_position', 'header_alignment',
             'header_repeat', 'section_break',
         }
         return {
             key: value for key, value in self.to_dict().items()
-            if key not in legacy_fields
+            if key not in structured_fields
         }
 
     def to_dict(self) -> dict[str, str]:

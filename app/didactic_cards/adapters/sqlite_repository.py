@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -9,46 +11,69 @@ from typing import Callable, Iterator, Optional, TypeVar
 
 from ..domain.entities import Card, CardDeck, Deck
 from ..domain.interfaces import (
-    CardRepository,
     ConcurrentModificationError,
     DeckRepository,
 )
 from ..domain.printing import PrinterProfile
 from ..domain.rendering import AuthoringMode, DeckRenderSettings
 from ..domain.trusted import (
-    ContentMode,
     PrintJobSnapshot,
     TemplateProvenance,
     TemplateStatus,
     TrustedTemplateVersion,
 )
-from .json_repository import DeckNotFoundError, JsonRepository
+from .repository_errors import DeckNotFoundError
+from .sqlite_schema import (
+    MINIMUM_MIGRATABLE_SCHEMA_VERSION,
+    SQLITE_SCHEMA_VERSION,
+    initialize_current_schema,
+    migrate_to_current,
+    schema_structure_issues,
+    user_tables,
+)
+from .sqlite_storage import (
+    RuntimeStorageLease,
+    connection_validation_issues,
+    ensure_pre_migration_backup,
+    exclusive_runtime_lock,
+    exclusive_schema_lock,
+)
 
 
 MutationResult = TypeVar('MutationResult')
-SQLITE_SCHEMA_VERSION = 11
-
-
-class LegacyMigrationError(ValueError):
-    """Raised when legacy JSON cannot be imported without guessing."""
 
 
 class UnsupportedSqliteSchemaError(ValueError):
     """Raised instead of opening a database from a newer application version."""
 
 
-class SqliteRepository(DeckRepository, CardRepository):
+class SqliteRepository(DeckRepository):
     """Transactional SQLite persistence with ordered deck membership."""
 
     def __init__(self, data_dir: str | Path, database_name: str = 'cards.sqlite3'):
         self.data_dir = Path(data_dir).expanduser().resolve()
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        data_dir_existed = self.data_dir.exists()
+        self.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if not data_dir_existed:
+            os.chmod(self.data_dir, 0o700)
         self.database_file = self.data_dir / database_name
-        self.legacy_backup_dir = self.data_dir / 'legacy-json-backup-v1'
+        self._runtime_lease: RuntimeStorageLease | None = None
+        self._closed = False
         self._initialize_database()
-        self._migrate_legacy_json_once()
+
+    def close(self) -> None:
+        lease = getattr(self, '_runtime_lease', None)
+        if lease is not None:
+            lease.close()
+            self._runtime_lease = None
+        self._closed = True
+
+    def __del__(self) -> None:
+        self.close()
 
     def _connect(self) -> sqlite3.Connection:
+        if self._closed:
+            raise RuntimeError('SQLite repository is closed')
         connection = sqlite3.connect(self.database_file, timeout=30)
         connection.row_factory = sqlite3.Row
         connection.execute('PRAGMA foreign_keys = ON')
@@ -59,390 +84,119 @@ class SqliteRepository(DeckRepository, CardRepository):
     def _transaction(self, *, write: bool = False) -> Iterator[sqlite3.Connection]:
         connection = self._connect()
         try:
-            if write:
-                connection.execute('BEGIN IMMEDIATE')
+            connection.execute('BEGIN IMMEDIATE' if write else 'BEGIN')
             yield connection
-            if write:
-                connection.commit()
+            connection.commit()
         except Exception:
-            if write:
+            if connection.in_transaction:
                 connection.rollback()
             raise
         finally:
             connection.close()
 
     def _initialize_database(self) -> None:
-        with self._transaction(write=True) as connection:
-            version = connection.execute('PRAGMA user_version').fetchone()[0]
-            if version not in {
-                0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, SQLITE_SCHEMA_VERSION
-            }:
+        with exclusive_schema_lock(self.data_dir):
+            connection = self._connect()
+            try:
+                version = connection.execute(
+                    'PRAGMA user_version'
+                ).fetchone()[0]
+                tables = user_tables(connection)
+            finally:
+                connection.close()
+
+            if version == 0:
+                if tables:
+                    raise UnsupportedSqliteSchemaError(
+                        'Unsupported unrecognized schema 0; existing database '
+                        'is not empty'
+                    )
+                with exclusive_runtime_lock(self.database_file):
+                    connection = self._connect()
+                    try:
+                        connection.execute('BEGIN IMMEDIATE')
+                        initialize_current_schema(connection)
+                        issues = schema_structure_issues(connection)
+                        if issues:
+                            raise UnsupportedSqliteSchemaError(
+                                'SQLite schema validation failed during '
+                                'initialization: ' + '; '.join(issues)
+                            )
+                        connection.commit()
+                    except Exception:
+                        if connection.in_transaction:
+                            connection.rollback()
+                        raise
+                    finally:
+                        connection.close()
+            elif version == SQLITE_SCHEMA_VERSION:
+                connection = self._connect()
+                try:
+                    issues = schema_structure_issues(connection)
+                finally:
+                    connection.close()
+                if issues:
+                    raise UnsupportedSqliteSchemaError(
+                        'SQLite schema validation failed: ' + '; '.join(issues)
+                    )
+            elif MINIMUM_MIGRATABLE_SCHEMA_VERSION <= version < SQLITE_SCHEMA_VERSION:
+                connection = self._connect()
+                try:
+                    issues = schema_structure_issues(
+                        connection, expected_version=version
+                    )
+                finally:
+                    connection.close()
+                if issues:
+                    raise UnsupportedSqliteSchemaError(
+                        'SQLite schema validation failed before migration: '
+                        + '; '.join(issues)
+                    )
+                with exclusive_runtime_lock(self.database_file):
+                    ensure_pre_migration_backup(self.database_file, version)
+                    connection = self._connect()
+                    try:
+                        connection.execute('BEGIN IMMEDIATE')
+                        migrate_to_current(connection, version)
+                        issues = schema_structure_issues(connection)
+                        if issues:
+                            raise UnsupportedSqliteSchemaError(
+                                'SQLite schema validation failed during '
+                                'migration: ' + '; '.join(issues)
+                            )
+                        connection.commit()
+                    except Exception:
+                        if connection.in_transaction:
+                            connection.rollback()
+                        raise
+                    finally:
+                        connection.close()
+            else:
                 raise UnsupportedSqliteSchemaError(
                     f'Unsupported SQLite schema {version}; '
                     f'expected {SQLITE_SCHEMA_VERSION}'
                 )
-            connection.executescript(
-                '''
-                CREATE TABLE IF NOT EXISTS repository_meta (
-                    key TEXT PRIMARY KEY,
-                    value TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS decks (
-                    id TEXT PRIMARY KEY,
-                    parent_id TEXT,
-                    name TEXT NOT NULL,
-                    description TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0)
-                );
-                CREATE TABLE IF NOT EXISTS cards (
-                    id TEXT PRIMARY KEY,
-                    parent_id TEXT,
-                    front TEXT NOT NULL,
-                    back TEXT NOT NULL,
-                    section TEXT NOT NULL DEFAULT '',
-                    upper_header TEXT NOT NULL DEFAULT '',
-                    lower_header TEXT NOT NULL DEFAULT '',
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL,
-                    version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0)
-                );
-                CREATE TABLE IF NOT EXISTS deck_cards (
-                    deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
-                    card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
-                    position INTEGER NOT NULL CHECK (position >= 0),
-                    PRIMARY KEY (deck_id, card_id),
-                    UNIQUE (deck_id, position)
-                );
-                CREATE INDEX IF NOT EXISTS idx_deck_cards_position
-                    ON deck_cards(deck_id, position);
-                CREATE TABLE IF NOT EXISTS deck_render_settings (
-                    deck_id TEXT PRIMARY KEY
-                        REFERENCES decks(id) ON DELETE CASCADE,
-                    preset TEXT NOT NULL CHECK (
-                        preset IN ('legacy-top-left', 'centered', 'custom')
-                    ),
-                    horizontal_alignment TEXT NOT NULL CHECK (
-                        horizontal_alignment IN ('left', 'center', 'right')
-                    ),
-                    vertical_alignment TEXT NOT NULL CHECK (
-                        vertical_alignment IN ('top', 'center', 'bottom')
-                    ),
-                    header_visibility TEXT NOT NULL CHECK (
-                        header_visibility IN ('none', 'front', 'back', 'both')
-                    ),
-                    header_position TEXT NOT NULL CHECK (
-                        header_position IN ('top', 'bottom')
-                    ),
-                    header_alignment TEXT NOT NULL CHECK (
-                        header_alignment IN ('left', 'center', 'right')
-                    ),
-                    header_repeat TEXT NOT NULL DEFAULT 'every-card' CHECK (
-                        header_repeat IN ('every-card', 'section-start')
-                    ),
-                    section_break TEXT NOT NULL DEFAULT 'continuous' CHECK (
-                        section_break IN ('continuous', 'new-row', 'new-sheet')
-                    ),
-                    typography_json TEXT NOT NULL DEFAULT '{}'
-                );
-                CREATE TABLE IF NOT EXISTS printer_profiles (
-                    key TEXT PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    duplex_mode TEXT NOT NULL
-                        CHECK (duplex_mode IN ('long-edge', 'short-edge')),
-                    back_rotation_deg INTEGER NOT NULL DEFAULT 180
-                        CHECK (back_rotation_deg IN (0, 180)),
-                    front_offset_x_mm REAL NOT NULL,
-                    front_offset_y_mm REAL NOT NULL,
-                    back_offset_x_mm REAL NOT NULL,
-                    back_offset_y_mm REAL NOT NULL,
-                    back_border INTEGER NOT NULL CHECK (back_border IN (0, 1)),
-                    registration_marks INTEGER NOT NULL
-                        CHECK (registration_marks IN (0, 1))
-                );
-                CREATE TABLE IF NOT EXISTS trusted_templates (
-                    id TEXT PRIMARY KEY,
-                    deck_id TEXT NOT NULL REFERENCES decks(id) ON DELETE CASCADE,
-                    version INTEGER NOT NULL CHECK (version > 0),
-                    source TEXT NOT NULL,
-                    source_hash TEXT NOT NULL,
-                    upper_header TEXT NOT NULL DEFAULT '',
-                    lower_header TEXT NOT NULL DEFAULT '',
-                    front_source TEXT NOT NULL DEFAULT '',
-                    back_source TEXT NOT NULL DEFAULT '',
-                    front_content_mode TEXT NOT NULL DEFAULT 'escaped' CHECK (
-                        front_content_mode IN ('escaped', 'raw')
-                    ),
-                    back_content_mode TEXT NOT NULL DEFAULT 'escaped' CHECK (
-                        back_content_mode IN ('escaped', 'raw')
-                    ),
-                    provenance TEXT NOT NULL CHECK (
-                        provenance IN ('local-author', 'imported', 'cloned')
-                    ),
-                    status TEXT NOT NULL CHECK (
-                        status IN ('quarantined', 'approved', 'revoked')
-                    ),
-                    origin_template_id TEXT,
-                    created_at TEXT NOT NULL,
-                    approved_at TEXT,
-                    UNIQUE(deck_id, version)
-                );
-                CREATE UNIQUE INDEX IF NOT EXISTS
-                    idx_trusted_templates_one_approved
-                    ON trusted_templates(deck_id) WHERE status = 'approved';
-                '''
-            )
-            profile_columns = {
-                row['name'] for row in connection.execute(
-                    'PRAGMA table_info(printer_profiles)'
-                )
-            }
-            if 'back_rotation_deg' not in profile_columns:
-                connection.execute(
-                    '''
-                    ALTER TABLE printer_profiles
-                    ADD COLUMN back_rotation_deg INTEGER NOT NULL DEFAULT 0
-                        CHECK (back_rotation_deg IN (0, 180))
-                    '''
-                )
-                connection.execute(
-                    '''
-                    UPDATE printer_profiles SET back_rotation_deg = 180
-                    WHERE duplex_mode = 'long-edge'
-                    '''
-                )
-            card_columns = {
-                row['name'] for row in connection.execute(
-                    'PRAGMA table_info(cards)'
-                )
-            }
-            if 'section' not in card_columns:
-                connection.execute(
-                    "ALTER TABLE cards ADD COLUMN section TEXT NOT NULL DEFAULT ''"
-                )
-            for column in ('upper_header', 'lower_header'):
-                if column not in card_columns:
-                    connection.execute(
-                        f"ALTER TABLE cards ADD COLUMN {column} "
-                        "TEXT NOT NULL DEFAULT ''"
-                    )
-            if version < 4:
-                legacy = DeckRenderSettings.legacy()
-                connection.execute(
-                    '''
-                    INSERT OR IGNORE INTO deck_render_settings(
-                        deck_id, preset, horizontal_alignment,
-                        vertical_alignment, header_visibility,
-                        header_position, header_alignment
-                    )
-                    SELECT id, ?, ?, ?, ?, ?, ? FROM decks
-                    ''',
-                    (
-                        legacy.preset.value,
-                        legacy.horizontal_alignment.value,
-                        legacy.vertical_alignment.value,
-                        legacy.header_visibility.value,
-                        legacy.header_position.value,
-                        legacy.header_alignment.value,
-                    ),
-                )
-            settings_columns = {
-                row['name'] for row in connection.execute(
-                    'PRAGMA table_info(deck_render_settings)'
-                )
-            }
-            if 'header_repeat' not in settings_columns:
-                connection.execute(
-                    """
-                    ALTER TABLE deck_render_settings
-                    ADD COLUMN header_repeat TEXT NOT NULL DEFAULT 'every-card'
-                        CHECK (header_repeat IN ('every-card', 'section-start'))
-                    """
-                )
-            if 'section_break' not in settings_columns:
-                connection.execute(
-                    """
-                    ALTER TABLE deck_render_settings
-                    ADD COLUMN section_break TEXT NOT NULL DEFAULT 'continuous'
-                        CHECK (section_break IN ('continuous', 'new-row', 'new-sheet'))
-                    """
-                )
-            if 'typography_json' not in settings_columns:
-                connection.execute(
-                    """
-                    ALTER TABLE deck_render_settings
-                    ADD COLUMN typography_json TEXT NOT NULL DEFAULT '{}'
-                    """
-                )
-            template_columns = {
-                row['name'] for row in connection.execute(
-                    'PRAGMA table_info(trusted_templates)'
-                )
-            }
-            for column in ('front_content_mode', 'back_content_mode'):
-                if column not in template_columns:
-                    connection.execute(
-                        f"""
-                        ALTER TABLE trusted_templates
-                        ADD COLUMN {column} TEXT NOT NULL DEFAULT 'escaped'
-                            CHECK ({column} IN ('escaped', 'raw'))
-                        """
-                    )
-            for column in ('upper_header', 'lower_header'):
-                if column not in template_columns:
-                    connection.execute(
-                        f"""
-                        ALTER TABLE trusted_templates
-                        ADD COLUMN {column} TEXT NOT NULL DEFAULT ''
-                        """
-                    )
-            for column in ('front_source', 'back_source'):
-                if column not in template_columns:
-                    connection.execute(
-                        f"ALTER TABLE trusted_templates ADD COLUMN {column} "
-                        "TEXT NOT NULL DEFAULT ''"
-                    )
-            if 0 < version < 11:
-                rows = connection.execute(
-                    'SELECT id, source, upper_header, lower_header '
-                    'FROM trusted_templates'
-                ).fetchall()
-                for row in rows:
-                    migrated_source = (
-                        row['source']
-                        .replace('{{ upper_header }}', row['upper_header'])
-                        .replace('{{ lower_header }}', row['lower_header'])
-                    )
-                    migrated = TrustedTemplateVersion(
-                        deck_id='migration',
-                        version=1,
-                        front_source=migrated_source,
-                        back_source=migrated_source,
-                    )
-                    connection.execute(
-                        '''
-                        UPDATE trusted_templates
-                        SET front_source = ?, back_source = ?, source_hash = ?
-                        WHERE id = ?
-                        ''',
-                        (
-                            migrated.front_source,
-                            migrated.back_source,
-                            migrated.source_hash,
-                            row['id'],
-                        ),
-                    )
-            if 0 < version < 9:
-                approved_deck_ids = {
-                    row['deck_id'] for row in connection.execute(
-                        "SELECT deck_id FROM trusted_templates "
-                        "WHERE status = 'approved'"
-                    )
-                }
-                rows = connection.execute(
-                    'SELECT deck_id, typography_json '
-                    'FROM deck_render_settings'
-                ).fetchall()
-                for row in rows:
-                    typography_data = json.loads(row['typography_json'])
-                    typography_data['authoring_mode'] = (
-                        'advanced'
-                        if row['deck_id'] in approved_deck_ids
-                        else 'safe'
-                    )
-                    typography_data['secondary_header_position'] = 'bottom'
-                    connection.execute(
-                        '''
-                        UPDATE deck_render_settings
-                        SET header_position = 'top', typography_json = ?
-                        WHERE deck_id = ?
-                        ''',
-                        (
-                            json.dumps(typography_data, ensure_ascii=False),
-                            row['deck_id'],
-                        ),
-                    )
-            if version < SQLITE_SCHEMA_VERSION:
-                connection.execute(f'PRAGMA user_version = {SQLITE_SCHEMA_VERSION}')
-        connection = self._connect()
-        try:
-            connection.execute('PRAGMA journal_mode = WAL')
-        finally:
-            connection.close()
 
-    def _meta(self, connection: sqlite3.Connection, key: str) -> str | None:
-        row = connection.execute(
-            'SELECT value FROM repository_meta WHERE key = ?', (key,)
-        ).fetchone()
-        return row['value'] if row else None
-
-    def _set_meta(self, connection: sqlite3.Connection, key: str, value: str) -> None:
-        connection.execute(
-            '''
-            INSERT INTO repository_meta(key, value) VALUES (?, ?)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value
-            ''',
-            (key, value),
-        )
-
-    def _backup_legacy_json(self, legacy: JsonRepository) -> None:
-        self.legacy_backup_dir.mkdir(parents=True, exist_ok=True)
-        sources = [legacy.decks_file, legacy.manifest_file]
-        sources.extend(sorted(legacy.cards_dir.glob('*.json')))
-        with legacy._transaction():
-            for source in sources:
-                relative = source.relative_to(legacy.data_dir)
-                destination = self.legacy_backup_dir / relative
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                legacy._copy_once(source, destination)
-
-    def _migrate_legacy_json_once(self) -> None:
-        legacy_decks = self.data_dir / 'decks.json'
-        with self._transaction() as connection:
-            already_migrated = self._meta(connection, 'legacy_json_migrated_at')
-        if already_migrated or not legacy_decks.exists():
-            return
-
-        legacy = JsonRepository(self.data_dir)
-        report = legacy.scan_integrity()
-        issue_codes = {issue.code for issue in report.issues}
-        blocking_codes = issue_codes - {'card-id-mismatch'}
-        if blocking_codes:
-            codes = ', '.join(sorted(blocking_codes))
-            raise LegacyMigrationError(
-                f'Legacy JSON integrity check failed ({codes}); SQLite import aborted'
-            )
-        decks = legacy.list_decks()
-        self._backup_legacy_json(legacy)
-        cards_by_deck = {
-            deck.id: CardDeck.from_list(
-                legacy._read_json(legacy._cards_path(deck.id))
-            )
-            for deck in decks
-        }
-
-        with self._transaction(write=True) as connection:
-            if self._meta(connection, 'legacy_json_migrated_at'):
-                return
-            if connection.execute('SELECT COUNT(*) FROM decks').fetchone()[0]:
-                raise LegacyMigrationError(
-                    'SQLite already contains decks; automatic legacy import aborted'
+            connection = self._connect()
+            try:
+                issues = schema_structure_issues(connection)
+                if issues:
+                    raise UnsupportedSqliteSchemaError(
+                        'SQLite schema validation failed: ' + '; '.join(issues)
+                    )
+                os.chmod(self.database_file, 0o600)
+                connection.execute('PRAGMA journal_mode = WAL')
+            finally:
+                connection.close()
+            for suffix in ('', '-wal', '-shm'):
+                family_member = self.database_file.with_name(
+                    f'{self.database_file.name}{suffix}'
                 )
-            for deck in decks:
-                self._insert_deck(connection, deck)
-                self._replace_cards(connection, deck.id, cards_by_deck[deck.id])
-            self._set_meta(
-                connection,
-                'legacy_json_migrated_at',
-                datetime.now(timezone.utc).isoformat(),
-            )
-            if issue_codes:
-                self._set_meta(
-                    connection,
-                    'legacy_json_migration_warnings',
-                    ','.join(sorted(issue_codes)),
-                )
+                if family_member.exists():
+                    os.chmod(family_member, 0o600)
+            # Acquire the process-lifetime lease while schema.lock is still
+            # held, leaving no gap in which an offline restore can win.
+            self._runtime_lease = RuntimeStorageLease(self.database_file)
 
     @staticmethod
     def _settings_from_row(row: sqlite3.Row) -> DeckRenderSettings:
@@ -530,8 +284,6 @@ class SqliteRepository(DeckRepository, CardRepository):
             front_source=row['front_source'],
             back_source=row['back_source'],
             source_hash=row['source_hash'],
-            front_content_mode=row['front_content_mode'],
-            back_content_mode=row['back_content_mode'],
             provenance=row['provenance'],
             status=row['status'],
             origin_template_id=row['origin_template_id'],
@@ -550,17 +302,15 @@ class SqliteRepository(DeckRepository, CardRepository):
         connection.execute(
             '''
             INSERT INTO trusted_templates(
-                id, deck_id, version, source, source_hash, provenance,
-                status, origin_template_id, created_at, approved_at,
-                front_content_mode, back_content_mode, upper_header,
-                lower_header, front_source, back_source
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                id, deck_id, version, source_hash, provenance, status,
+                origin_template_id, created_at, approved_at, front_source,
+                back_source
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''',
             (
                 template.id,
                 template.deck_id,
                 template.version,
-                template.front_source,
                 template.source_hash,
                 template.provenance.value,
                 template.status.value,
@@ -568,10 +318,6 @@ class SqliteRepository(DeckRepository, CardRepository):
                 template.created_at.isoformat(),
                 template.approved_at.isoformat()
                 if template.approved_at else None,
-                template.front_content_mode.value,
-                template.back_content_mode.value,
-                '',
-                '',
                 template.front_source,
                 template.back_source,
             ),
@@ -836,8 +582,6 @@ class SqliteRepository(DeckRepository, CardRepository):
                         version=version,
                         front_source=row['front_source'],
                         back_source=row['back_source'],
-                        front_content_mode=row['front_content_mode'],
-                        back_content_mode=row['back_content_mode'],
                         provenance=TemplateProvenance.CLONED,
                         origin_template_id=row['id'],
                     ),
@@ -903,8 +647,6 @@ class SqliteRepository(DeckRepository, CardRepository):
                         source_hash=template.source_hash,
                         provenance=TemplateProvenance.IMPORTED,
                         origin_template_id=template.origin_template_id,
-                        front_content_mode=template.front_content_mode,
-                        back_content_mode=template.back_content_mode,
                     ),
                 )
             return self._get_deck(connection, deck.id)
@@ -985,12 +727,6 @@ class SqliteRepository(DeckRepository, CardRepository):
             if changed:
                 self._replace_cards(connection, deck_id, card_deck)
             return result
-
-    def load(self, deck_id: str = 'default') -> CardDeck:
-        return self.load_cards(deck_id)
-
-    def save(self, deck: CardDeck, deck_id: str = 'default') -> None:
-        self.save_cards(deck_id, deck)
 
     @staticmethod
     def _profile_from_row(row: sqlite3.Row) -> PrinterProfile:
@@ -1080,8 +816,6 @@ class SqliteRepository(DeckRepository, CardRepository):
         *,
         provenance: TemplateProvenance | str = TemplateProvenance.LOCAL_AUTHOR,
         origin_template_id: str | None = None,
-        front_content_mode: ContentMode | str = ContentMode.ESCAPED,
-        back_content_mode: ContentMode | str = ContentMode.ESCAPED,
     ) -> TrustedTemplateVersion:
         with self._transaction(write=True) as connection:
             if self._get_deck(connection, deck_id) is None:
@@ -1102,8 +836,6 @@ class SqliteRepository(DeckRepository, CardRepository):
                 version=version,
                 provenance=provenance,
                 origin_template_id=origin_template_id,
-                front_content_mode=front_content_mode,
-                back_content_mode=back_content_mode,
             )
             self._insert_trusted_template(connection, template)
             return template
@@ -1213,49 +945,34 @@ class SqliteRepository(DeckRepository, CardRepository):
                 ),
             )
 
-    def integrity_check(self) -> list[str]:
-        with self._transaction() as connection:
-            issues = [row[0] for row in connection.execute('PRAGMA integrity_check')]
-            foreign_keys = connection.execute('PRAGMA foreign_key_check').fetchall()
-            missing_settings = connection.execute(
-                '''
-                SELECT decks.id FROM decks
-                LEFT JOIN deck_render_settings
-                    ON deck_render_settings.deck_id = decks.id
-                WHERE deck_render_settings.deck_id IS NULL
-                ORDER BY decks.id
-                '''
-            ).fetchall()
-            trusted_rows = connection.execute(
-                'SELECT * FROM trusted_templates ORDER BY id'
-            ).fetchall()
-            settings_rows = connection.execute(
-                'SELECT * FROM deck_render_settings ORDER BY deck_id'
-            ).fetchall()
-        if issues == ['ok']:
-            issues = []
-        issues.extend(f'foreign-key: {tuple(row)}' for row in foreign_keys)
-        issues.extend(
-            f"missing-render-settings: {row['id']}" for row in missing_settings
-        )
-        for row in settings_rows:
-            try:
-                self._settings_from_row(row)
-            except (TypeError, ValueError):
-                issues.append(f"invalid-render-settings: {row['deck_id']}")
-        for row in trusted_rows:
-            try:
-                self._trusted_template_from_row(row)
-            except (TypeError, ValueError):
-                issues.append(f"invalid-trusted-template: {row['id']}")
-        return issues
+    def integrity_check(self, *, quick: bool = False) -> list[str]:
+        try:
+            with self._transaction() as connection:
+                if quick:
+                    deadline = time.monotonic() + 1.0
+                    connection.execute('PRAGMA busy_timeout = 500')
+                    connection.set_progress_handler(
+                        lambda: int(time.monotonic() >= deadline), 1000
+                    )
+                try:
+                    return connection_validation_issues(
+                        connection, quick=quick
+                    )
+                finally:
+                    if quick:
+                        connection.set_progress_handler(None, 0)
+        except sqlite3.OperationalError:
+            if quick:
+                return ['readiness-check-timeout']
+            raise
 
     def readiness_check(self) -> list[str]:
-        issues = self.integrity_check()
+        issues = self.integrity_check(quick=True)
         if issues:
             return issues
         connection = self._connect()
         try:
+            connection.execute('PRAGMA busy_timeout = 500')
             connection.execute('BEGIN IMMEDIATE')
             connection.rollback()
         except sqlite3.Error:

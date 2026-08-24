@@ -154,10 +154,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const custom = stylePreset.value === 'custom';
         horizontalAlignment.disabled = !custom;
         verticalAlignment.disabled = !custom;
-        if (stylePreset.value === 'legacy-top-left') {
-            horizontalAlignment.value = 'left';
-            verticalAlignment.value = 'top';
-        } else if (stylePreset.value === 'centered') {
+        if (stylePreset.value === 'centered') {
             horizontalAlignment.value = 'center';
             verticalAlignment.value = 'center';
         }
@@ -444,7 +441,6 @@ document.addEventListener('DOMContentLoaded', function() {
         const metadata = [];
         if (data.encoding) metadata.push('кодировка: ' + data.encoding);
         if (data.delimiter) metadata.push('разделитель: ' + JSON.stringify(data.delimiter));
-        metadata.push('схема: ' + data.schema_mode);
         summary.textContent = 'Принято: ' + data.accepted_count +
             '; отклонено строк: ' + data.rejected_count +
             '; ошибок: ' + data.error_count +

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from ..domain.trusted import (
-    ContentMode,
     TemplateProvenance,
     TrustedTemplateVersion,
 )
@@ -39,26 +38,16 @@ class TrustedTemplateService:
         deck_id: str,
         front_source: str,
         back_source: str | None = None,
-        *,
-        front_content_mode: ContentMode | str = ContentMode.RAW,
-        back_content_mode: ContentMode | str = ContentMode.RAW,
     ) -> TrustedTemplateVersion:
         self._require_enabled()
         self._require_advanced_deck(deck_id)
         if back_source is None:
             back_source = front_source
-        if (
-            ContentMode(front_content_mode) is not ContentMode.RAW
-            or ContentMode(back_content_mode) is not ContentMode.RAW
-        ):
-            raise ValueError('advanced wrapper content mode must be raw')
         return self.repository.quarantine_trusted_template(
             deck_id,
             front_source,
             back_source,
             provenance=TemplateProvenance.LOCAL_AUTHOR,
-            front_content_mode=front_content_mode,
-            back_content_mode=back_content_mode,
         )
 
     def approve(

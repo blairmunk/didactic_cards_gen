@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 
 from ..domain.interfaces import (
-    CardRepository, DeckRepository,
+    DeckRepository,
     DocumentRenderer, PdfCompiler, CompileResult,
 )
 from ..domain.entities import Card, CardDeck
@@ -13,7 +13,6 @@ from ..domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
 from .card_import import (
     BulkImportPreview,
     CsvImportPreview,
-    _parse_legacy_bulk_line as _parse_bulk_line,
     preview_bulk_import,
     preview_csv_import,
 )
@@ -170,14 +169,12 @@ class AddCardsBulk:
     def execute(
         self, deck_id: str, bulk_text: str, expected_version: int | None = None,
         section: str = '',
-        schema_mode: str = 'legacy',
     ) -> int:
         mode = self.repo.get_render_settings(deck_id).authoring_mode
         preview = preview_bulk_import(
             bulk_text,
             mode,
             section=section,
-            schema_mode=schema_mode,
             existing_cards=self.repo.load_cards(deck_id).cards,
         )
         if preview.errors:
@@ -203,17 +200,13 @@ class ImportCsv:
         self, deck_id: str, file_bytes: bytes,
         expected_version: int | None = None,
         delimiter: str = 'auto',
-        has_header: bool = False,
-        schema_mode: str | None = None,
         encoding: str = 'utf-8',
     ) -> int:
         mode = self.repo.get_render_settings(deck_id).authoring_mode
         preview = preview_csv_import(
             file_bytes,
             delimiter,
-            has_header,
             authoring_mode=mode,
-            schema_mode=schema_mode,
             encoding=encoding,
             existing_cards=self.repo.load_cards(deck_id).cards,
         )

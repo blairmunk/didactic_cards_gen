@@ -164,11 +164,9 @@ class Deck:
     @staticmethod
     def from_dict(data: dict) -> Deck:
         settings_data = data.get('render_settings')
-        settings = (
-            DeckRenderSettings.from_dict(settings_data)
-            if settings_data is not None
-            else DeckRenderSettings.legacy()
-        )
+        if settings_data is None:
+            raise ValueError('render_settings is required')
+        settings = DeckRenderSettings.from_dict(settings_data)
         return Deck(
             id=data.get('id', _new_id()),
             parent_id=data.get('parent_id'),

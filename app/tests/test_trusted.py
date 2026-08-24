@@ -9,7 +9,6 @@ from didactic_cards.domain.trusted import (
     MAX_TRUSTED_JOB_BYTES,
     MAX_TRUSTED_TEMPLATE_BYTES,
     TemplateStatus,
-    ContentMode,
     PrintJobSnapshot,
     TrustedCompileJob,
     TrustedTemplateVersion,
@@ -144,14 +143,20 @@ def test_template_render_context_is_typed(kwargs, message):
         render_trusted_template('{{ content }}', **context)
 
 
+def test_template_rejects_total_smaller_than_card_number():
+    with pytest.raises(ValueError, match='include card_number'):
+        render_trusted_template(
+            '{{ content }}', content='Q', section='', card_number=2,
+            card_count=1, side='front',
+        )
+
+
 def test_template_record_is_hashed_and_approval_is_explicit():
     template = TrustedTemplateVersion(
         deck_id='deck', front_source='{{ content }}', back_source='{{ content }}', version=1
     )
 
     assert template.status is TemplateStatus.QUARANTINED
-    assert template.front_content_mode is ContentMode.ESCAPED
-    assert template.back_content_mode is ContentMode.ESCAPED
     assert len(template.source_hash) == 64
     approved = template.approved()
     assert approved.status is TemplateStatus.APPROVED
@@ -204,19 +209,6 @@ def test_template_record_rejects_invalid_identity_and_source(kwargs, message):
     values.update(kwargs)
     with pytest.raises(ValueError, match=message):
         TrustedTemplateVersion(**values)
-
-
-def test_template_record_validates_independent_content_modes():
-    template = TrustedTemplateVersion(
-        deck_id='deck',
-        front_source='{{ content }}', back_source='{{ content }}',
-        version=1,
-        front_content_mode='raw',
-        back_content_mode='escaped',
-    )
-    assert template.front_content_mode is ContentMode.RAW
-    with pytest.raises(ValueError):
-        replace(template, back_content_mode='automatic')
 
 
 def test_template_and_job_size_limits_are_utf8_byte_limits():

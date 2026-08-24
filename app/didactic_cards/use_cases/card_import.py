@@ -98,16 +98,10 @@ class CardImportPreview:
     issues: tuple[ImportIssue, ...]
     source: str
     authoring_mode: str
-    schema_mode: str
     columns: tuple[str, ...]
     delimiter: str | None = None
     encoding: str | None = None
     skipped_count: int = 0
-
-    @property
-    def cards(self) -> tuple[CardImportRow, ...]:
-        """Compatibility alias without allocating domain Card IDs."""
-        return self.rows
 
     @property
     def errors(self) -> tuple[ImportIssue, ...]:
@@ -148,7 +142,6 @@ class CardImportPreview:
             'skipped_count': self.skipped_count,
             'source': self.source,
             'authoring_mode': self.authoring_mode,
-            'schema_mode': self.schema_mode,
             'columns': list(self.columns),
             'delimiter': self.delimiter,
             'encoding': self.encoding,
@@ -229,16 +222,25 @@ def _first_record(text: str, delimiter: str) -> list[str] | None:
         return None
 
 
-def _select_delimiter(text: str, delimiter: str) -> str:
+def _select_delimiter(text: str, delimiter: str, mode: str) -> str:
     if delimiter != 'auto':
         if delimiter not in CSV_DELIMITERS:
             raise ValueError('Unsupported CSV delimiter')
         return CSV_DELIMITERS[delimiter]
-    candidates = []
+    allowed = set(
+        ADVANCED_COLUMNS
+        if mode == AuthoringMode.ADVANCED.value
+        else SAFE_COLUMNS
+    )
+    header_candidates = []
+    structural_candidates = []
     for candidate in CSV_DELIMITERS.values():
         first = _first_record(text, candidate)
         if first is not None and len(first) >= 2:
-            candidates.append(candidate)
+            structural_candidates.append(candidate)
+            if REQUIRED_COLUMNS <= set(first) <= allowed:
+                header_candidates.append(candidate)
+    candidates = header_candidates or structural_candidates
     if len(candidates) != 1:
         raise ValueError(
             'Не удалось однозначно определить разделитель CSV; выберите его вручную'
@@ -304,33 +306,28 @@ def _duplicate_warnings(
 def preview_csv_import(
     file_bytes: bytes,
     delimiter: str = 'auto',
-    has_header: bool = False,
     *,
     authoring_mode: AuthoringMode | str = AuthoringMode.SAFE,
-    schema_mode: str | None = None,
     encoding: str = 'utf-8',
     existing_cards: Iterable[Card] = (),
 ) -> CsvImportPreview:
     mode = _mode_value(authoring_mode)
-    schema = schema_mode or ('header' if has_header else 'legacy')
-    if schema not in {'header', 'legacy'}:
-        raise ValueError('Unsupported CSV schema mode')
     text, selected_encoding = _decode_csv(file_bytes, encoding)
     if not text:
         return CardImportPreview(
             (),
             (ImportIssue(1, 'empty_file', 'CSV-файл пуст'),),
-            'csv', mode, schema, (),
+            'csv', mode, (),
             encoding=selected_encoding,
         )
     try:
-        selected_delimiter = _select_delimiter(text, delimiter)
+        selected_delimiter = _select_delimiter(text, delimiter, mode)
     except ValueError:
         if not text.strip():
             return CardImportPreview(
                 (),
                 (ImportIssue(1, 'empty_file', 'CSV-файл пуст'),),
-                'csv', mode, schema, (),
+                'csv', mode, (),
                 encoding=selected_encoding,
             )
         raise
@@ -344,7 +341,7 @@ def preview_csv_import(
                 'malformed_csv',
                 f'Некорректное quoting CSV: {error.detail}',
             ),),
-            'csv', mode, schema, (), selected_delimiter, selected_encoding,
+            'csv', mode, (), selected_delimiter, selected_encoding,
         )
 
     issues: list[ImportIssue] = []
@@ -352,77 +349,54 @@ def preview_csv_import(
     skipped = 0
     columns: tuple[str, ...]
     data_records = records
-    if schema == 'header':
-        if not records or _row_is_empty(records[0][1]):
-            issues.append(ImportIssue(
-                1, 'missing_header', 'CSV не содержит строку заголовка'
-            ))
-            columns = ()
-            data_records = ()
-        else:
-            header_row, header = records[0]
-            columns = tuple(header)
-            data_records = records[1:]
-            allowed = set(
-                ADVANCED_COLUMNS
-                if mode == AuthoringMode.ADVANCED.value
-                else SAFE_COLUMNS
-            )
-            duplicates = {
-                name for name in columns if columns.count(name) > 1
-            }
-            for name in sorted(duplicates):
-                issues.append(ImportIssue(
-                    header_row,
-                    'duplicate_column',
-                    f'Колонка {name!r} указана несколько раз',
-                    name,
-                ))
-            for name in columns:
-                if not name:
-                    issues.append(ImportIssue(
-                        header_row,
-                        'empty_column',
-                        'Имя колонки не может быть пустым',
-                    ))
-                elif name not in allowed:
-                    issues.append(ImportIssue(
-                        header_row,
-                        'unknown_column',
-                        f'Неизвестная колонка {name!r} для режима {mode}',
-                        name,
-                    ))
-            for name in sorted(REQUIRED_COLUMNS - set(columns)):
-                issues.append(ImportIssue(
-                    header_row,
-                    'missing_column',
-                    f'Отсутствует обязательная колонка {name!r}',
-                    name,
-                ))
-            if issues:
-                data_records = ()
-    else:
+    if not records or _row_is_empty(records[0][1]):
+        issues.append(ImportIssue(
+            1, 'missing_header', 'CSV не содержит строку заголовка'
+        ))
         columns = ()
-        widths = {
-            len(row) for _, row in records if not _row_is_empty(row)
+        data_records = ()
+    else:
+        header_row, header = records[0]
+        columns = tuple(header)
+        data_records = records[1:]
+        allowed = set(
+            ADVANCED_COLUMNS
+            if mode == AuthoringMode.ADVANCED.value
+            else SAFE_COLUMNS
+        )
+        duplicates = {
+            name for name in columns if columns.count(name) > 1
         }
-        if not widths:
-            issues.append(ImportIssue(1, 'empty_file', 'CSV-файл не содержит данных'))
-            data_records = ()
-        elif len(widths) != 1 or next(iter(widths)) not in {2, 3}:
+        for name in sorted(duplicates):
             issues.append(ImportIssue(
-                records[0][0] if records else 1,
-                'inconsistent_columns',
-                'Legacy CSV должен иметь ровно две или три колонки во всех строках',
+                header_row,
+                'duplicate_column',
+                f'Колонка {name!r} указана несколько раз',
+                name,
             ))
+        for name in columns:
+            if not name:
+                issues.append(ImportIssue(
+                    header_row,
+                    'empty_column',
+                    'Имя колонки не может быть пустым',
+                ))
+            elif name not in allowed:
+                issues.append(ImportIssue(
+                    header_row,
+                    'unknown_column',
+                    f'Неизвестная колонка {name!r} для режима {mode}',
+                    name,
+                ))
+        for name in sorted(REQUIRED_COLUMNS - set(columns)):
+            issues.append(ImportIssue(
+                header_row,
+                'missing_column',
+                f'Отсутствует обязательная колонка {name!r}',
+                name,
+            ))
+        if issues:
             data_records = ()
-        else:
-            width = next(iter(widths))
-            columns = (
-                ('front', 'back')
-                if width == 2
-                else ('section', 'front', 'back')
-            )
 
     for row_number, values in data_records:
         if _row_is_empty(values):
@@ -469,32 +443,12 @@ def preview_csv_import(
         ))
     issues.extend(_duplicate_warnings(rows, existing_cards))
     return CardImportPreview(
-        tuple(rows), tuple(issues), 'csv', mode, schema, columns,
+        tuple(rows), tuple(issues), 'csv', mode, columns,
         selected_delimiter, selected_encoding, skipped,
     )
 
 
-def _parse_legacy_bulk_line(line: str) -> tuple[str, str]:
-    sides: list[list[str]] = [[], []]
-    side = 0
-    index = 0
-    while index < len(line):
-        if line.startswith(r'\||', index):
-            sides[side].append('||')
-            index += 3
-        elif line.startswith(r'\\', index):
-            sides[side].append('\\')
-            index += 2
-        elif side == 0 and line.startswith('||', index):
-            side = 1
-            index += 2
-        else:
-            sides[side].append(line[index])
-            index += 1
-    return ''.join(sides[0]).strip(), ''.join(sides[1]).strip()
-
-
-def parse_bulk_v2_line(line: str) -> list[str]:
+def parse_bulk_line(line: str) -> list[str]:
     fields: list[str] = []
     current: list[str] = []
     in_quotes = False
@@ -549,15 +503,12 @@ def preview_bulk_import(
     authoring_mode: AuthoringMode | str = AuthoringMode.SAFE,
     *,
     section: str = '',
-    schema_mode: str = 'v2',
     existing_cards: Iterable[Card] = (),
 ) -> BulkImportPreview:
     mode = _mode_value(authoring_mode)
-    if schema_mode not in {'v2', 'legacy'}:
-        raise ValueError('Unsupported bulk schema mode')
     columns = (
         ('front', 'back', 'upper_header', 'lower_header')
-        if mode == AuthoringMode.ADVANCED.value and schema_mode == 'v2'
+        if mode == AuthoringMode.ADVANCED.value
         else ('front', 'back')
     )
     rows: list[CardImportRow] = []
@@ -567,17 +518,13 @@ def preview_bulk_import(
         if not line.strip():
             skipped += 1
             continue
-        if schema_mode == 'legacy':
-            front, back = _parse_legacy_bulk_line(line.strip())
-            values = [front, back]
-        else:
-            try:
-                values = parse_bulk_v2_line(line)
-            except ValueError as error:
-                issues.append(ImportIssue(
-                    row_number, 'malformed_bulk', str(error)
-                ))
-                continue
+        try:
+            values = parse_bulk_line(line)
+        except ValueError as error:
+            issues.append(ImportIssue(
+                row_number, 'malformed_bulk', str(error)
+            ))
+            continue
         if len(values) != len(columns):
             issues.append(ImportIssue(
                 row_number,
@@ -600,19 +547,12 @@ def preview_bulk_import(
             ))
             continue
         rows.append(row)
-    if schema_mode == 'legacy' and rows:
-        issues.append(ImportIssue(
-            0,
-            'legacy_bulk',
-            'Legacy-режим преобразует \\|| и двойные обратные слэши',
-            severity='warning',
-        ))
     if not rows and not issues:
         issues.append(ImportIssue(
             1, 'empty_input', 'Пакетный ввод не содержит карточек'
         ))
     issues.extend(_duplicate_warnings(rows, existing_cards))
     return CardImportPreview(
-        tuple(rows), tuple(issues), 'bulk', mode, schema_mode, columns,
+        tuple(rows), tuple(issues), 'bulk', mode, columns,
         delimiter='||', skipped_count=skipped,
     )

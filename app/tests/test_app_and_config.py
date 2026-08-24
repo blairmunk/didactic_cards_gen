@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import stat
 
 import pytest
 
@@ -151,7 +152,53 @@ def test_app_factory_accepts_configuration_override(tmp_path):
     assert app.config['REPO'].data_dir == Path(tmp_path / 'data')
 
 
-def test_builtin_profiles_restore_legacy_long_edge_rotation():
+def test_local_secret_is_shared_between_app_workers(tmp_path):
+    data_dir = tmp_path / 'shared-data'
+
+    first_app = create_app(config=AppConfig(secret_key=None), data_dir=data_dir)
+    second_app = create_app(config=AppConfig(secret_key=None), data_dir=data_dir)
+
+    assert first_app.secret_key == second_app.secret_key
+    assert first_app.secret_key
+    secret_file = data_dir / '.secret_key'
+    assert secret_file.read_text(encoding='utf-8') == first_app.secret_key
+    assert stat.S_IMODE(secret_file.stat().st_mode) == 0o600
+    assert stat.S_IMODE(data_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(
+        first_app.config['REPO'].database_file.stat().st_mode
+    ) == 0o600
+
+
+def test_local_secret_keeps_csrf_session_valid_between_app_workers(tmp_path):
+    data_dir = tmp_path / 'shared-data'
+    first_app = create_app(config=AppConfig(secret_key=None), data_dir=data_dir)
+    second_app = create_app(config=AppConfig(secret_key=None), data_dir=data_dir)
+    first_app.config['TESTING'] = True
+    second_app.config['TESTING'] = True
+
+    first_client = first_app.test_client()
+    with first_client.session_transaction() as flask_session:
+        flask_session['_csrf_token'] = 'shared-csrf-token'
+    session_cookie = first_client.get_cookie('session')
+    assert session_cookie is not None
+
+    second_client = second_app.test_client()
+    second_client.set_cookie('session', session_cookie.value)
+    response = second_client.post(
+        '/create_deck',
+        data={'name': 'Между workers', '_csrf_token': 'shared-csrf-token'},
+    )
+
+    assert response.status_code == 302
+    assert len(second_app.config['REPO'].list_decks()) == 1
+
+
+def test_empty_configured_secret_is_rejected():
+    with pytest.raises(ValueError, match='must not be empty'):
+        AppConfig(secret_key='')
+
+
+def test_builtin_profiles_define_long_edge_rotation_explicitly():
     profiles = {profile.key: profile for profile in AppConfig().printer_profiles}
     assert profiles['standard-long-edge'].back_rotation_deg == 180
     assert profiles['calibration-long-edge'].back_rotation_deg == 180

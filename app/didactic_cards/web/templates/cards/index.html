@@ -80,7 +80,6 @@
                 <div>
                     <label for="style-preset">Режим:</label>
                     <select name="preset" id="style-preset">
-                        <option value="legacy-top-left" {% if deck.render_settings.preset.value == 'legacy-top-left' %}selected{% endif %}>Legacy: сверху слева</option>
                         <option value="centered" {% if deck.render_settings.preset.value == 'centered' %}selected{% endif %}>По центру</option>
                         <option value="custom" {% if deck.render_settings.preset.value == 'custom' %}selected{% endif %}>Настроить вручную</option>
                     </select>
@@ -262,11 +261,6 @@
             <input type="hidden" name="preview_token" id="bulk-preview-token" value="">
             <label for="bulk-section">Секция / тема для всей пачки:</label>
             <input type="text" name="section" id="bulk-section" placeholder="Можно оставить пустым">
-            <label for="bulk-schema-mode">Формат:</label>
-            <select name="schema_mode" id="bulk-schema-mode">
-                <option value="v2">Строгий v2 — без преобразования обратных слэшей</option>
-                <option value="legacy">Legacy — совместимость со старыми escapes</option>
-            </select>
             {% if is_advanced %}
             <p class="preview-notice">Одна строка: <code>front||back||upper_header||lower_header</code>. Поле с буквальным <code>||</code> заключите в двойные кавычки. Для многострочного или сгенерированного TeX используйте CSV.</p>
             {% else %}
@@ -292,11 +286,7 @@
             <p><a href="{{ url_for('cards.download_card_csv_template', deck_id=deck.id) }}" download>Скачать шаблон CSV для {{ 'Advanced' if is_advanced else 'обычной' }} колоды</a></p>
             <label for="csv_file">Файл CSV ({% if is_advanced %}<code>section;front;back;upper_header;lower_header</code>{% else %}<code>section;front;back</code>{% endif %}):</label>
             <input type="file" name="csv_file" id="csv_file" accept=".csv">
-            <label for="csv-schema-mode">Схема:</label>
-            <select name="schema_mode" id="csv-schema-mode">
-                <option value="header">Строгая — canonical-заголовок</option>
-                <option value="legacy">Legacy без заголовка — ровно 2 или 3 колонки</option>
-            </select>
+            <p class="preview-notice">Первая строка всегда является заголовком. Поля с выбранным разделителем, кавычками или переносами строк заключайте в двойные кавычки; двойную кавычку внутри поля записывайте как <code>""</code>. Скачанный шаблон уже использует корректный формат.</p>
             <label for="delimiter">Разделитель:</label>
             <select name="delimiter" id="delimiter">
                 <option value="auto">Определить автоматически</option>

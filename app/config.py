@@ -3,6 +3,9 @@ import math
 import os
 from pathlib import Path
 import secrets
+import stat
+
+import fcntl
 
 from didactic_cards.domain.printing import DuplexMode, PrinterProfile
 
@@ -17,6 +20,40 @@ def _environment_bool(name: str, default: bool = False) -> bool:
     if normalized in {'0', 'false', 'no', 'off'}:
         return False
     raise ValueError(f'{name} must be a boolean value')
+
+
+def load_or_create_local_secret(data_dir: Path) -> str:
+    """Return one process-safe local secret for every app worker.
+
+    Production deployments should provide ``DIDACTIC_CARDS_SECRET_KEY``. The
+    file fallback keeps the zero-configuration local launch usable with more
+    than one WSGI worker without weakening CSRF/session consistency.
+    """
+    data_dir_existed = data_dir.exists()
+    data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if not data_dir_existed:
+        os.chmod(data_dir, 0o700)
+    secret_file = data_dir / '.secret_key'
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    file_descriptor = os.open(secret_file, flags, 0o600)
+    with os.fdopen(file_descriptor, 'r+', encoding='utf-8') as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        file_mode = os.fstat(handle.fileno()).st_mode
+        if not stat.S_ISREG(file_mode):
+            raise RuntimeError('local secret path must be a regular file')
+        os.fchmod(handle.fileno(), 0o600)
+        handle.seek(0)
+        secret = handle.read().strip()
+        if not secret:
+            secret = secrets.token_urlsafe(32)
+            handle.seek(0)
+            handle.truncate()
+            handle.write(secret)
+            handle.flush()
+            os.fsync(handle.fileno())
+        return secret
 
 
 @dataclass
@@ -118,8 +155,8 @@ class AppConfig:
             Path(__file__).resolve().parent / 'data',
         )
     ).expanduser().resolve())
-    secret_key: str = field(default_factory=lambda: os.environ.get(
-        'DIDACTIC_CARDS_SECRET_KEY', secrets.token_urlsafe(32)
+    secret_key: str | None = field(default_factory=lambda: os.environ.get(
+        'DIDACTIC_CARDS_SECRET_KEY'
     ))
     pdflatex_path: str = 'pdflatex'
     pdflatex_timeout: int = 30
@@ -132,7 +169,7 @@ class AppConfig:
         )
     )
     bwrap_path: str = '/usr/bin/bwrap'
-    trusted_pdflatex_timeout: int = 10
+    trusted_pdflatex_timeout: int = 30
     debug: bool = field(
         default_factory=lambda: _environment_bool('DIDACTIC_CARDS_DEBUG')
     )
@@ -142,6 +179,8 @@ class AppConfig:
     )
 
     def __post_init__(self) -> None:
+        if self.secret_key is not None and not self.secret_key:
+            raise ValueError('DIDACTIC_CARDS_SECRET_KEY must not be empty')
         if not isinstance(self.debug, bool):
             raise ValueError('debug must be boolean')
         if not isinstance(self.trusted_latex_enabled, bool):

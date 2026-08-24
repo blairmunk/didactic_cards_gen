@@ -180,7 +180,7 @@
         </select>
         <label for="profile-back-rotation">Поворот содержимого оборота</label>
         <select id="profile-back-rotation" name="back_rotation_deg">
-            <option value="180" {% if not edit_profile or edit_profile.back_rotation_deg == 180 %}selected{% endif %}>180° — legacy long-edge</option>
+            <option value="180" {% if not edit_profile or edit_profile.back_rotation_deg == 180 %}selected{% endif %}>180° — переворот по длинному краю</option>
             <option value="0" {% if edit_profile and edit_profile.back_rotation_deg == 0 %}selected{% endif %}>0° — без поворота</option>
         </select>
         <small>

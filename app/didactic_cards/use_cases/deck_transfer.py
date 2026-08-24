@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import hashlib
 import io
 import json
 from datetime import datetime, timezone
@@ -16,9 +15,7 @@ from ..domain.trusted import (
 
 
 DECK_EXPORT_SCHEMA_VERSION = 8
-SUPPORTED_DECK_EXPORT_SCHEMAS = {
-    1, 2, 3, 4, 5, 6, 7, DECK_EXPORT_SCHEMA_VERSION,
-}
+SUPPORTED_DECK_EXPORT_SCHEMAS = {DECK_EXPORT_SCHEMA_VERSION}
 
 
 class DeckTransferError(ValueError):
@@ -46,8 +43,6 @@ def export_deck_json(repo: DeckRepository, deck_id: str) -> bytes:
                 'back_source': template.back_source,
                 'source_hash': template.source_hash,
                 'source_provenance': template.provenance.value,
-                'front_content_mode': template.front_content_mode.value,
-                'back_content_mode': template.back_content_mode.value,
             }
             for template in list_templates(deck_id)
         ]
@@ -123,14 +118,13 @@ def import_deck_json(
         raise DeckTransferError('ID исходной колоды должен быть строкой')
     settings_data = deck_data.get('render_settings')
     if settings_data is None:
-        render_settings = DeckRenderSettings.legacy()
-    else:
-        try:
-            render_settings = DeckRenderSettings.from_dict(settings_data)
-        except (TypeError, ValueError) as error:
-            raise DeckTransferError(
-                f'Некорректные настройки оформления: {error}'
-            ) from error
+        raise DeckTransferError('Export не содержит настройки оформления')
+    try:
+        render_settings = DeckRenderSettings.from_dict(settings_data)
+    except (TypeError, ValueError) as error:
+        raise DeckTransferError(
+            f'Некорректные настройки оформления: {error}'
+        ) from error
     if max_cards is not None and len(card_items) > max_cards:
         raise DeckTransferError(f'Максимум карточек в колоде: {max_cards}')
 
@@ -168,81 +162,47 @@ def import_deck_json(
             parent_id=source_card_id,
         ))
 
+    template_items = payload.get('trusted_templates')
+    if not isinstance(template_items, list):
+        raise DeckTransferError('Export должен содержать trusted_templates')
     trusted_templates: list[TrustedTemplateVersion] = []
-    if schema_version >= 4:
-        template_items = payload.get('trusted_templates')
-        if not isinstance(template_items, list):
+    template_ids: set[str] = set()
+    template_versions: set[int] = set()
+    expected_fields = {
+        'id', 'version', 'source_hash', 'source_provenance',
+        'front_source', 'back_source',
+    }
+    for index, item in enumerate(template_items, start=1):
+        if not isinstance(item, dict) or set(item) != expected_fields:
             raise DeckTransferError(
-                'Export schema 4+ должен содержать trusted_templates'
+                f'Trusted-шаблон {index} имеет неверные поля'
             )
-        template_ids: set[str] = set()
-        template_versions: set[int] = set()
-        expected_fields = {
-            'id', 'version', 'source_hash', 'source_provenance',
-            'front_content_mode', 'back_content_mode',
-        }
-        if schema_version >= 8:
-            expected_fields |= {'front_source', 'back_source'}
-        else:
-            expected_fields |= {'source'}
-            if schema_version >= 7:
-                expected_fields |= {'upper_header', 'lower_header'}
-        for index, item in enumerate(template_items, start=1):
-            if not isinstance(item, dict) or set(item) != expected_fields:
-                raise DeckTransferError(
-                    f'Trusted-шаблон {index} имеет неверные поля'
-                )
-            template_id = item['id']
-            version = item['version']
-            if not isinstance(template_id, str) or not template_id:
-                raise DeckTransferError(
-                    f'Trusted-шаблон {index}: неверный ID'
-                )
-            if template_id in template_ids or version in template_versions:
-                raise DeckTransferError('Повтор trusted-шаблона или версии')
-            try:
-                TemplateProvenance(item['source_provenance'])
-                if schema_version >= 8:
-                    front_source = item['front_source']
-                    back_source = item['back_source']
-                    source_hash = item['source_hash']
-                else:
-                    legacy_source = item['source']
-                    legacy_hash = hashlib.sha256(
-                        legacy_source.encode('utf-8')
-                    ).hexdigest()
-                    if item['source_hash'] != legacy_hash:
-                        raise ValueError('trusted template source hash mismatch')
-                    migrated_source = (
-                        legacy_source
-                        .replace(
-                            '{{ upper_header }}', item.get('upper_header', '')
-                        )
-                        .replace(
-                            '{{ lower_header }}', item.get('lower_header', '')
-                        )
-                    )
-                    front_source = migrated_source
-                    back_source = migrated_source
-                    source_hash = ''
-                template = TrustedTemplateVersion(
-                    deck_id='import-source',
-                    version=version,
-                    front_source=front_source,
-                    back_source=back_source,
-                    source_hash=source_hash,
-                    provenance=TemplateProvenance.IMPORTED,
-                    origin_template_id=template_id,
-                    front_content_mode=item['front_content_mode'],
-                    back_content_mode=item['back_content_mode'],
-                )
-            except (TypeError, ValueError) as error:
-                raise DeckTransferError(
-                    f'Некорректный trusted-шаблон {index}: {error}'
-                ) from error
-            template_ids.add(template_id)
-            template_versions.add(version)
-            trusted_templates.append(template)
+        template_id = item['id']
+        version = item['version']
+        if not isinstance(template_id, str) or not template_id:
+            raise DeckTransferError(
+                f'Trusted-шаблон {index}: неверный ID'
+            )
+        if template_id in template_ids or version in template_versions:
+            raise DeckTransferError('Повтор trusted-шаблона или версии')
+        try:
+            TemplateProvenance(item['source_provenance'])
+            template = TrustedTemplateVersion(
+                deck_id='import-source',
+                version=version,
+                front_source=item['front_source'],
+                back_source=item['back_source'],
+                source_hash=item['source_hash'],
+                provenance=TemplateProvenance.IMPORTED,
+                origin_template_id=template_id,
+            )
+        except (TypeError, ValueError) as error:
+            raise DeckTransferError(
+                f'Некорректный trusted-шаблон {index}: {error}'
+            ) from error
+        template_ids.add(template_id)
+        template_versions.add(version)
+        trusted_templates.append(template)
 
     if trusted_templates:
         render_settings = DeckRenderSettings.from_dict({

@@ -128,9 +128,9 @@ class TestDeck:
         assert restored.card_ids == deck.card_ids
         assert restored.render_settings == deck.render_settings
 
-    def test_legacy_dict_without_render_settings_keeps_old_layout(self):
-        restored = Deck.from_dict({'name': 'Legacy'})
-        assert restored.render_settings == DeckRenderSettings.legacy()
+    def test_dict_without_render_settings_is_rejected(self):
+        with pytest.raises(ValueError, match='render_settings'):
+            Deck.from_dict({'name': 'Incomplete'})
 
 
 class TestCardDeck:

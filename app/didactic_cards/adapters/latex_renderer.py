@@ -265,7 +265,7 @@ class LatexRenderer(DocumentRenderer):
         self.render_settings = (
             render_settings
             if render_settings is not None
-            else DeckRenderSettings.legacy()
+            else DeckRenderSettings.centered()
         )
         if not isinstance(self.render_settings, DeckRenderSettings):
             raise TypeError('render_settings must be DeckRenderSettings')
@@ -575,10 +575,6 @@ class LatexRenderer(DocumentRenderer):
 \newcommand{{\fitcardcontent}}[4]{{%
     \setcardcontentbox{{\cardbodyfont}}{{#4}}{{#1}}{{#2}}%{fit_logic}
 }}
-\newcommand{{\legacycheckedcardcontent}}[3]{{%
-    \fitcardcontent{{#1}}{{#2}}{{\cardcontentheight}}{{#3}}%
-    \box\cardcontentbox
-}}
 \newcommand{{\checkedcardcontent}}[4]{{%
     \fitcardcontent{{#1}}{{#2}}{{#3}}{{#4}}%
     \begin{{minipage}}[t][#3][{vertical_position}]{{\cardcontentwidth}}%
@@ -785,21 +781,7 @@ class LatexRenderer(DocumentRenderer):
                 + f'\n\\typeout{{DIDACTIC-CARDS-HBOX-END:{card_number}:{side}:body}}'
             )
         settings = self.render_settings
-        legacy_layout = (
-            settings.preset is StylePreset.LEGACY_TOP_LEFT
-            and settings.horizontal_alignment is HorizontalAlignment.LEFT
-            and settings.vertical_alignment is VerticalAlignment.TOP
-            and settings.header_visibility is HeaderVisibility.NONE
-            and settings.secondary_header_visibility is HeaderVisibility.NONE
-            and settings.typography is None
-        )
         content = _card_content(text)
-        if legacy_layout:
-            return (
-                r'\legacycheckedcardcontent'
-                f'{{{card_number}}}{{{side}}}{{{content}}}'
-            )
-
         header_visible = bool(card_number) and self._header_is_visible(
             side,
             visibility=settings.header_visibility,

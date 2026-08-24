@@ -231,8 +231,6 @@ def test_real_bwrap_compiles_advanced_template_with_contextual_headers(
             r'{{ upper_header }}\par\vfill\centering {{ content }}\vfill'
             r'\par{{ lower_header }}'
         ),
-        front_content_mode='raw',
-        back_content_mode='raw',
     )
     renderer = LatexRenderer(
         cards_per_row=1,

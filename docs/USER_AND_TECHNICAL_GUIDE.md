@@ -10,6 +10,8 @@
 
 ### Системные требования
 
+- Linux и локальная POSIX-файловая система одного host; Windows, NFS/SMB и
+  multi-host shared volumes не поддерживаются;
 - Python 3.11 или новее (аудит выполнен на Python 3.13.5);
 - Flask 3.1;
 - `pdflatex` и LaTeX-пакеты `extarticle`, `amsmath`, `mathtext`, `babel` с русским языком, `geometry`, `graphicx`, `enumitem`, `multicol`, `xcolor`;
@@ -25,6 +27,12 @@ python -m pip install -r requirements.txt
 export DIDACTIC_CARDS_SECRET_KEY='replace-with-a-long-random-value'
 python app/run.py
 ```
+
+Если ключ не задан при локальном запуске, приложение атомарно создаёт
+`app/data/.secret_key` с правами `0600`. Один файл используется всеми Gunicorn
+workers, поэтому подписанная сессия и CSRF-токен не зависят от того, какой worker
+обработал следующий запрос. Для production следует всегда передавать стабильный
+`DIDACTIC_CARDS_SECRET_KEY` через окружение или secret manager.
 
 Встроенный сервер предназначен для локальной разработки и стартует без debug по умолчанию. Явно включить debug можно только переменной `DIDACTIC_CARDS_DEBUG=true`; значения кроме `true/false`, `yes/no`, `on/off`, `1/0` отклоняются, чтобы опечатка не включила небезопасный режим неожиданно.
 
@@ -81,15 +89,13 @@ kpsewhich babel-russian.tex
 
 Спецификация пакетного ввода:
 
-- strict v2 не интерпретирует обратный слэш: для обычной колоды строка имеет вид
+- строгий формат не интерпретирует обратный слэш: для обычной колоды строка имеет вид
   `front||back`, для Advanced — `front||back||upper_header||lower_header`;
 - поле с буквальным `||` заключается в двойные кавычки, а буквальная двойная кавычка
   внутри него удваивается;
 - реальный многострочный raw TeX следует импортировать через CSV;
-- явный Legacy-режим оставлен для старого контракта: `\||` означает буквальный `||`,
-  а `\\` схлопывается до одного обратного слэша;
 - «Проверить пачку» показывает распознанные поля и ошибки. Любое изменение текста,
-  секции, режима или версии колоды сбрасывает разрешение на добавление.
+  секции или версии колоды сбрасывает разрешение на добавление.
 
 Строгая CSV-схема использует canonical ASCII-заголовки в произвольном порядке:
 
@@ -100,8 +106,14 @@ kpsewhich babel-russian.tex
 - значения сохраняются посимвольно, включая внешние пробелы, обратные слэши, delimiter,
   кавычки и переводы строк quoted cell;
 - поддерживаются `;`, `,`, tab; UTF-8/BOM, UTF-16 по BOM и явно выбранная Windows-1251;
-- Legacy CSV без заголовка принимает либо две, либо три колонки одной ширины во всём
-  файле. Смешанная ширина и одноколоночные строки отклоняются.
+- первая строка всегда является заголовком; positional-файлы без заголовка отклоняются.
+
+Если разделителем выбрана запятая, запятая внутри значения должна быть заключена в
+двойные кавычки: `Math,"\\text{a, b}",Answer`. В файле с разделителем `;` обычная
+запятая является частью значения и quoting для неё не требуется. Незакавыченный
+разделитель создаёт лишнюю колонку: preview отклонит строку целиком, а не импортирует
+искажённую карточку. Поля с переводом строки всегда должны быть quoted; `"` внутри
+quoted-поля записывается как `""`.
 
 Preview показывает mapping, encoding, номера строк, все поля, errors/warnings и
 усечение списка. Он не исполняет TeX и ничего не записывает. Импорт доступен только для
@@ -147,7 +159,6 @@ section;front;back
 
 Панель «Оформление обычной колоды» принадлежит колоде и не изменяет физический профиль принтера. В Advanced-колоде этой панели нет:
 
-- `Legacy: сверху слева` воспроизводит прежнюю вёрстку существующих колод;
 - `По центру` центрирует body по обеим осям и используется для новых колод;
 - `Настроить вручную` открывает независимый выбор слева/по центру/справа и сверху/по центру/снизу — всего девять комбинаций;
 - верхний и нижний колонтитулы занимают фиксированные семантические полосы; каждый можно выводить на лицах, оборотах или обеих сторонах и выравнивать независимо;
@@ -219,7 +230,7 @@ MathJax 3.2.2 вместе с web fonts хранится локально в sta
 - Auto-fit включён по умолчанию: если сторона не помещается при 12pt, TeX последовательно пробует `small`, `footnotesize` и `scriptsize`. Preflight показывает применённое уменьшение как адресный warning. Если содержимое не помещается и на `scriptsize`, это остаётся error — текст следует сократить; молчаливого clipping нет. Deployment может отключить политику через `CardLayoutConfig(auto_fit=False)`.
 - Неполный лист дополняется пустыми ячейками до восьми карточек.
 - Страницы идут парами физических листов: `front-1, back-1, front-2, back-2, …`.
-- По умолчанию используется legacy portrait long-edge: колонки оборота зеркальны, а содержимое каждой оборотной карточки поворачивается на 180°. Перестановка ячеек (`duplex_mode`) и ориентация содержимого (`back_rotation_deg`) независимы; профиль может выбрать 0° или 180°.
+- По умолчанию используется portrait long-edge: колонки оборота зеркальны, а содержимое каждой оборотной карточки поворачивается на 180°. Перестановка ячеек (`duplex_mode`) и ориентация содержимого (`back_rotation_deg`) независимы; профиль может выбрать 0° или 180°.
 - Кириллические названия файлов передаются через RFC 5987 `filename*`; это проверено как Flask contract-тестом, так и реальным Werkzeug/curl запросом.
 - Колода ограничена 200 карточками, весь запрос — 2 MiB. Bulk/CSV при превышении лимита отклоняются целиком без частичной записи.
 - HTML-формы защищены CSRF-токеном; API принимает JSON и возвращает структурированные 4xx-ответы.
@@ -253,12 +264,44 @@ MathJax 3.2.2 вместе с web fonts хранится локально в sta
 
 ```text
 app/data/cards.sqlite3        # активная транзакционная база
-app/data/decks.json           # legacy JSON, сохраняется после миграции
-app/data/cards/<deck-id>.json # legacy-карточки, сохраняются после миграции
-app/data/legacy-json-backup-v1/ # снимок источника перед первым импортом
 ```
 
-Активное хранилище — SQLite schema 11: `decks`, `cards`, упорядоченная связь `deck_cards(position)`, `deck_render_settings`, `printer_profiles`, карантин `trusted_templates` и служебная `repository_meta`. Старые schema 1–10 обновляются транзакционно. Миграция 8→9 добавляет неизменяемый `authoring_mode`; 10→11 переносит значения Advanced-колонтитулов в карточки и заменяет прежнюю общую оболочку двумя оболочками сторон. Старый общий шаблон применяется к обеим сторонам, а его общие колонтитулы встраиваются в шаблон, чтобы по возможности сохранить результат существующих версий. Карточки и история оболочек не удаляются. Foreign keys включены для каждого соединения, journal работает в WAL, а изменения выполняются write-транзакциями.
+Активное хранилище — только SQLite schema 13: `decks`, `cards`,
+упорядоченная связь `deck_cards(position)`, `deck_render_settings`,
+`printer_profiles`, карантин `trusted_templates` и журнал
+`schema_migrations`. Схема помечена фиксированным SQLite `application_id`:
+файл чужого приложения с `user_version=0` не будет молча принят или
+дополнен таблицами. Foreign keys включены для каждого соединения, journal
+работает в WAL, а каждая серия чтений или записей имеет единый
+транзакционный snapshot.
+
+Пустой файл создаётся сразу в schema 13. Из старых баз автоматически
+поддерживается только точная schema 12. При первом старте приложение:
+
+1. проверит таблицы и колонки schema 12;
+2. создаст в `app/data/backups` проверенный
+   `pre-migration-v12-stable.sqlite3` с manifest или проверит/повторно
+   использует уже созданную копию после failed-start;
+3. выполнит единственную зарегистрированную миграцию 12→13 в одной
+   write-транзакции.
+
+Перед первым запуском schema-13 кода остановите **все** workers прежней
+schema-12 версии. Rolling upgrade со смешанными версиями небезопасен: старый
+процесс не знает о schema 13 и новом lease-протоколе. Только после успешного
+однократного startup запускайте остальные workers новой версии.
+
+Базы ниже schema 12, будущие версии и неполные/неизвестные схемы
+отклоняются без изменения файла.
+
+Новый data directory создаётся с режимом `0700`; SQLite main/WAL/SHM и
+локальный `.secret_key` приводятся к `0600`. Существующий внешний
+каталог намеренно не получает новый mode целиком: администратор должен
+явно настроить ownership и права его родителей.
+
+Координация не зависит от удаляемых `.lock`-файлов: schema lease берёт
+`flock` на inode каталога, runtime lease — на inode активной базы. Этот
+контракт рассчитан только на один Linux-host и локальную POSIX FS. NFS,
+SMB, Windows и одновременный доступ с нескольких hosts не поддерживаются.
 
 Trusted-шаблон хранится отдельно как неизменяемая версия с SHA-256, provenance (`local-author`, `imported`, `cloned`) и состоянием `quarantined`, `approved` либо `revoked`. В колоде одновременно может быть не более одной явно одобренной версии. Клон и JSON-import сохраняют историю исходников, но все копии снова помещают в карантин. Advanced CSV может содержать raw TeX полей карточки, но никогда не переносит оболочки и их approval/history. Integrity/readiness проверяет hash каждой сохранённой версии.
 
@@ -268,26 +311,98 @@ Trusted-шаблон хранится отдельно как неизменяе
 
 В редакторе доступны два download:
 
-- versioned JSON schema 8 содержит deck/card UUID, тип колоды, тексты, секции, значения колонтитулов карточек, safe-настройки и историю пар trusted-оболочек/provenance без approval; schema 1–7 импортируются, а наличие trusted-истории однозначно делает колоду Advanced; все импортированные оболочки получают provenance `imported` и `quarantined`;
+- versioned JSON schema 8 содержит deck/card UUID, тип колоды, тексты, секции, значения колонтитулов карточек, safe-настройки и историю пар trusted-оболочек/provenance без approval; принимается только schema 8, а все импортированные оболочки получают provenance `imported` и `quarantined`;
 - UTF-8-BOM CSV использует `;` и стандартное quoting для delimiter/multiline. Обычная колода экспортирует `section;front;back`, Advanced — `section;front;back;upper_header;lower_header`; повторный импорт в колоду того же типа сохраняет значения посимвольно. CSV остаётся форматом строк карточек, а не полным backup колоды;
 
 На странице списка колод JSON export можно импортировать обратно. Импорт никогда не перезаписывает существующую колоду: создаются новые UUID, `parent_id` новой колоды и карточек указывают на исходные UUID. Schema/type/quota/duplicate-ID validation выполняется до записи, а создание deck + cards проходит одной транзакцией; при ошибке не остаётся пустой или частично импортированной колоды. Секция и настройки оформления одинаково применяются в HTML и TeX после импорта.
 
-Если `cards.sqlite3` ещё нет, а `decks.json` существует, приложение сначала запускает полный read-only JSON integrity scan. Набор импортируется в одной SQLite-транзакции с сохранением UUID, порядка, timestamps и clone lineage. Единственное безопасно восстанавливаемое расхождение — устаревший денормализованный `card_ids`: порядок берётся из канонического card-файла, JSON не переписывается, а warning сохраняется в `repository_meta`. Любая structural/missing/orphan/duplicate ошибка блокирует импорт. Перед импортом исходники копируются в `legacy-json-backup-v1`; исходные JSON не удаляются. Метка в SQLite не позволяет повторно импортировать позднее изменённый JSON. База с более новой неизвестной версией схемы отклоняется без downgrade.
+Операции над всей базой не следует путать с JSON/CSV export колоды.
+CLI примет `DIDACTIC_CARDS_DATA_DIR`; тот же каталог можно явно передать каждой
+команде через `--data-dir /absolute/path`.
 
-Legacy JSON schema 1 и его инструменты atomic replace/lock/`.bak` сохранены для аудита и восстановления миграционного источника. Они больше не являются рабочим backend после успешного импорта.
-
-Проверка и контролируемое восстановление:
+### Read-only inspect
 
 ```bash
-python scripts/check_storage.py
-python scripts/check_storage.py \
-  --backend json \
-  --recover 'cards/<deck-id>.json' \
-  --yes
+python scripts/storage.py inspect
+# или проверить явно указанный файл:
+python scripts/storage.py inspect --database /safe/place/cards.sqlite3
 ```
 
-В auto-режиме утилита выбирает SQLite, если `cards.sqlite3` уже существует. Recovery разрешён только с `--backend json` и только для `decks.json`, `repository.json` и JSON внутри `cards/`. Перед заменой команда проверяет соседний `.bak`, а текущий повреждённый файл перемещает в `.broken-<UTC timestamp>`. Это локальная последняя версия, а не полноценная стратегия backup: перед миграциями по-прежнему копируйте весь `app/data` во внешнее хранилище.
+`inspect` открывает только существующий regular file в SQLite read-only/query-only mode.
+Он не создаёт пустую базу при опечатке в пути. JSON-отчёт показывает
+`user_version`, ожидаемую версию, structure/integrity/FK/semantic issues, счётчики,
+размер, SHA-256 и наличие WAL. Код возврата `0` означает healthy, `1` —
+найдена проблема в самой базе.
+
+При активном WAL SQLite может обновить служебные read marks в уже существующем
+`-shm`, но main/WAL и логические данные не изменяются. Непустой WAL без `-shm`
+инспектор намеренно отклоняет, чтобы не создавать sidecar под видом read-only.
+
+Поле `sha256` здесь — fingerprint только main-файла в момент отчёта.
+`logical_sha256` хеширует схему и строки одного транзакционного read-snapshot и
+поэтому учитывает committed-данные из WAL. Для переносимого автономного файла
+всё равно создайте backup.
+
+### Online backup
+
+```bash
+# автоимя в app/data/backups
+python scripts/storage.py backup
+
+# или явная новая цель
+python scripts/storage.py backup --output /safe/place/cards.sqlite3
+```
+
+Останавливать сервер для backup не нужно: SQLite backup API снимает один
+целостный snapshot и включает committed-данные из WAL. Перед публикацией
+копия проходит те же structure/integrity/semantic checks. Файл и соседний
+`*.manifest.json` публикуются только после проверки и имеют права `0600`; manifest содержит
+формат, UTC-время, schema version, размер, байтовый `sha256` и
+`logical_sha256`. Существующий backup
+или manifest никогда не перезаписываются: локальная hard-link publication
+атомарно откажет при destination race. Это ещё одна причина размещать output на
+локальной POSIX FS, а не на NFS/SMB.
+
+Храните хотя бы одну копию вне хоста приложения: локальный `app/data/backups`
+не защищает от потери всего диска. SQLite backup не включает `.secret_key`; ключ
+нужно хранить отдельно в secret manager или как environment secret.
+
+### Offline restore
+
+Восстановление заменяет активную базу. Остановите **все** Flask/Gunicorn workers
+и только после этого выполните:
+
+```bash
+python scripts/storage.py inspect --database /safe/place/cards.sqlite3
+python scripts/storage.py restore /safe/place/cards.sqlite3 --yes
+python scripts/storage.py inspect
+```
+
+`--yes` обязателен; без него CLI ничего не меняет. Каждый запущенный worker
+держит shared runtime lease; restore пытается взять exclusive lease и откажется,
+если хотя бы один процесс ещё работает. Источник проверяется до касания
+live-базы; соседний manifest обязателен, а его hash/schema/size обязаны совпасть.
+Перед заменой создаётся проверенный `pre-restore-*` backup текущего состояния,
+кандидат ставится через staged-файл и повторно проверяется. `.secret_key` и другие
+файлы каталога данных restore не заменяет. Backup schema 12 с корректным
+manifest допустим: миграция 12→13 выполняется в staged-копии, а не в файле
+источника.
+
+Если `inspect` показывает, что live DB unhealthy, обычный restore намеренно
+откажется: это защита от неявной потери артефактов. После остановки всех
+workers, проверки backup и осознанного решения запустите opt-in disaster recovery:
+
+```bash
+python scripts/storage.py restore /safe/place/cards.sqlite3 \
+  --yes --allow-unhealthy-live
+```
+
+До касания live-семейства CLI скопирует каждый существующий main/WAL/SHM/journal
+в private-каталог `backups/forensic-<UTC>-<id>/`, запишет для каждого файла
+размер/SHA-256 в `forensic-manifest.json` и вернёт путь в JSON-поле
+`forensic_bundle`. Bundle directory имеет `0700`, его файлы — `0600`. При
+провале post-restore validation код попытается вернуть исходное семейство из bundle;
+сам bundle не удаляется автоматически.
 
 ## 5. Архитектура
 
@@ -302,7 +417,7 @@ Browser / HTML / JSON API
   |                        |
 SqliteRepository     LatexRenderer
   |                        |
-JSON files             PdfLatexCompiler
+cards.sqlite3          PdfLatexCompiler
                            |
                         A4 PDF
 ```
@@ -311,8 +426,7 @@ Trusted-контур передаёт immutable job с UUID/schema/source hash �
 
 - `domain/entities.py`: карточка, метаданные колоды, рабочая `CardDeck`.
 - `use_cases/`: CRUD, импорт, padding, preview и generate.
-- `adapters/sqlite_repository.py`: активное transactional/WAL-хранилище и одноразовый legacy import.
-- `adapters/json_repository.py`: проверка, backup и recovery исходного JSON.
+- `adapters/sqlite_repository.py`: единственное transactional/WAL-хранилище.
 - `adapters/latex_renderer.py`: физическая сетка и зеркалирование.
 - `web/blueprint.py`: HTML и AJAX endpoints.
 - `xelatex_compiler.py`: протестированная альтернативная реализация компилятора; активная конфигурация пока использует `pdflatex`.
@@ -341,7 +455,7 @@ python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 
 Все исходные `xfail(strict=True)` после исправлений сохранены как обычные regression-тесты; известных исполнимых дефектов без обычного passing contract больше нет.
 
-Текущее состояние полного набора фиксируется после каждого полного CI-прогона; `xfail` нет, branch coverage не ниже обязательного порога 98%. В набор входят migrations до schema 11, JSON schema 1–7→8, hard split safe/Advanced, разные оболочки front/back, колонтитулы на уровне карточек, dynamic safe headers, линии, direct raw sandbox route, физические row/sheet breaks, PDF-геометрия, safe-типографика, UI-inventory, calibration calculator и production health. Hostile-набор проверяет namespaces, отсутствие host/project mounts и сети, запрет host-записи/shell escape, timeout, лимиты и очистку. Chromium E2E отдельно проходит safe-оформление, Advanced raw/оболочки и колонтитулы карточки, preflight и calibration UI.
+Текущее состояние полного набора фиксируется после каждого полного CI-прогона; `xfail` нет, branch coverage не ниже обязательного порога 98%. В storage-матрицу входят SQLite 12→13, stable migration retry, strict rejection неизвестных схем, WAL snapshot, concurrent hard-link no-clobber, manifest mismatch, inode leases, active-worker refusal, healthy/forensic restore и rollback при `replace/fsync` failure. Остальной набор покрывает JSON schema 8, hard split safe/Advanced, разные оболочки front/back, колонтитулы на уровне карточек, dynamic safe headers, линии, strict mode-aware CSV, direct raw sandbox route, физические row/sheet breaks, PDF-геометрия, safe-типографика, UI-inventory, calibration calculator и production health. Hostile-набор проверяет namespaces, отсутствие host/project mounts и сети, запрет host-записи/shell escape, timeout, лимиты и очистку. Chromium E2E отдельно проходит safe-оформление, Advanced raw/оболочки и колонтитулы карточки, preflight и calibration UI.
 
 Golden fixtures обновляются осознанной отдельной командой после визуальной проверки изменения раскладки:
 
@@ -368,6 +482,6 @@ python scripts/capture_screenshots.py \
 - Страница ошибки LaTeX: откройте полный лог, найдите первую строку, начинающуюся с `!`.
 - Формулы видны как `$x^2$`: проверьте статус локального MathJax и HTTP-загрузку `/cards/static/vendor/mathjax/tex-mml-chtml.js`; это не обязательно означает сбой PDF.
 - Колоды «пропали»: проверьте `DIDACTIC_CARDS_DATA_DIR`; без этой переменной приложение всегда использует `app/data`.
-- Ошибка повреждения хранилища: сначала выполните `python scripts/check_storage.py` и скопируйте весь каталог; затем восстановите только указанный в отчёте файл через `--recover ... --yes` или вручную после проверки `.bak`.
+- Ошибка повреждения хранилища: не запускайте приложение повторно и не пытайтесь «починить» live-файл; остановите все workers, зафиксируйте вывод `python scripts/storage.py inspect`, проверьте backup и только после явного решения запустите `python scripts/storage.py restore <backup.sqlite3> --yes --allow-unhealthy-live`. Перед заменой CLI сохранит main/WAL/SHM/journal и вернёт путь `forensic_bundle`; не удаляйте этот каталог до завершения разбора.
 - PDF не скачивается: проверьте HTTP-статус и первую диагностическую строку; кириллические имена поддерживаются.
 - `/health/live` отвечает 200, а `/health/ready` — 503: процесс жив, но проверьте доступ на запись к `DIDACTIC_CARDS_DATA_DIR` и наличие `pdflatex` в `PATH`.

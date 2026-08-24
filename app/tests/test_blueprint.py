@@ -9,7 +9,6 @@ import pytest
 
 from config import AppConfig
 from didactic_cards.domain.printing import PrinterProfile
-from didactic_cards.adapters.json_repository import RepositoryCorruptionError
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.adapters.sqlite_repository import SqliteRepository
 from didactic_cards.domain.entities import Card, CardDeck
@@ -53,11 +52,10 @@ def _enable_trusted(app, tmp_path, *, compiler=None):
     return repository, deck
 
 
-def _preview_bulk(client, deck_id, bulk, *, section='', schema_mode='v2'):
+def _preview_bulk(client, deck_id, bulk, *, section=''):
     data = {
         'bulk': bulk,
         'section': section,
-        'schema_mode': schema_mode,
     }
     response = client.post(f'/api/deck/{deck_id}/preview_bulk', data=data)
     return response, data
@@ -68,12 +66,10 @@ def _preview_csv(
     deck_id,
     source,
     *,
-    schema_mode='header',
     delimiter='auto',
     encoding='utf-8',
 ):
     options = {
-        'schema_mode': schema_mode,
         'delimiter': delimiter,
         'encoding': encoding,
     }
@@ -203,7 +199,7 @@ def test_advanced_deck_rejects_builtin_render_settings_form(
 
     response = client.post(
         f'/deck/{deck.id}/render_settings',
-        data={'version': deck.version, 'preset': 'legacy-top-left'},
+        data={'version': deck.version, 'preset': 'centered'},
     )
 
     assert response.status_code == 409
@@ -380,7 +376,6 @@ def test_csv_preview_is_read_only_and_reports_validation(client, repo, deck_id):
                     io.BytesIO(b"front;back\nQ;A\nbad;row;extra;column"),
                     "cards.csv",
                 ),
-            "has_header": "on",
             "delimiter": "auto",
         },
         content_type="multipart/form-data",
@@ -580,12 +575,6 @@ def test_import_preview_routes_validate_deck_options_and_quota(
         data={'csv_file': (io.BytesIO(b'front;back\nQ;A'), 'cards.csv')},
         content_type='multipart/form-data',
     ).status_code == 302
-    invalid_bulk = client.post(
-        f'/api/deck/{deck_id}/preview_bulk',
-        data={'bulk': 'Q||A', 'schema_mode': 'future'},
-    )
-    assert invalid_bulk.status_code == 400
-
     app.config['MAX_CARDS'] = 0
     bulk_preview, bulk_options = _preview_bulk(client, deck_id, 'Q||A')
     bulk_import = client.post(
@@ -830,7 +819,6 @@ def test_safe_typography_form_rejects_latex_as_font_token(client, repo, deck_id)
 @pytest.mark.parametrize(
     ('preset', 'horizontal', 'vertical'),
     [
-        ('legacy-top-left', 'left', 'top'),
         ('centered', 'center', 'center'),
     ],
 )
@@ -942,7 +930,7 @@ def test_api_rejects_unknown_deck(client, repo):
         "/api/deck/missing/add_card", json={"front": "orphan", "back": ""}
     )
     assert response.status_code == 404
-    assert not repo._cards_path("missing").exists()
+    assert repo.get_deck("missing") is None
 
 
 def test_html_unknown_deck_mutation_redirects(client):
@@ -951,26 +939,6 @@ def test_html_unknown_deck_mutation_redirects(client):
     )
     assert response.status_code == 302
     assert response.location.endswith("/")
-
-
-def test_repository_corruption_has_safe_html_and_api_errors(client, repo, monkeypatch):
-    error = RepositoryCorruptionError(repo.decks_file, "test failure")
-
-    def fail(*_args, **_kwargs):
-        raise error
-
-    monkeypatch.setattr(repo, "list_decks", fail)
-    html_response = client.get("/")
-    assert html_response.status_code == 500
-    assert "Хранилище данных повреждено" in html_response.text
-    assert str(repo.decks_file) not in html_response.text
-
-    monkeypatch.setattr(repo, "mutate_cards", fail)
-    api_response = client.post(
-        "/api/deck/anything/add_card", json={"front": "Q", "back": "A"}
-    )
-    assert api_response.status_code == 500
-    assert api_response.json == {"error": "Хранилище данных повреждено"}
 
 
 def test_delete_card_requires_non_get_method(client, deck_id):
@@ -1440,13 +1408,6 @@ def test_configured_printer_profile_cannot_be_deleted(client, app):
     assert client.post('/printer_profiles/built-in/delete').status_code == 400
 
 
-def test_json_backend_reports_profile_storage_as_unavailable(client):
-    assert client.get('/printer_profiles').status_code == 200
-    assert client.post('/printer_profiles/save', data={
-        'key': 'profile', 'name': 'Profile'
-    }).status_code == 501
-
-
 def test_security_headers_are_added(client):
     response = client.get('/')
     assert response.headers['X-Content-Type-Options'] == 'nosniff'
@@ -1680,8 +1641,6 @@ def test_trusted_editor_stages_modes_without_activation(
                 r'{{ lower_header }}'
             ),
             'back_source': r'BACK {{ content }}',
-            'front_content_mode': 'escaped',
-            'back_content_mode': 'raw',
         },
     )
 
@@ -1689,8 +1648,6 @@ def test_trusted_editor_stages_modes_without_activation(
     history = repository.list_trusted_templates(deck.id)
     assert len(history) == 1
     assert history[0].status is TemplateStatus.QUARANTINED
-    assert history[0].front_content_mode.value == 'raw'
-    assert history[0].back_content_mode.value == 'raw'
     assert history[0].front_source.startswith('{{ upper_header }}')
     assert history[0].back_source == 'BACK {{ content }}'
     assert repository.get_approved_trusted_template(deck.id) is None
@@ -1758,8 +1715,6 @@ def test_trusted_test_compile_is_read_only_and_validation_is_atomic(
         data={
             'front_source': '{{ content }} {{ content }}',
             'back_source': '{{ content }}',
-            'front_content_mode': 'escaped',
-            'back_content_mode': 'escaped',
         },
     )
     valid = client.post(
@@ -1767,8 +1722,6 @@ def test_trusted_test_compile_is_read_only_and_validation_is_atomic(
         data={
             'front_source': r'\centering {{ content }}',
             'back_source': r'\raggedleft {{ content }}',
-            'front_content_mode': 'escaped',
-            'back_content_mode': 'escaped',
         },
     )
 
@@ -1787,8 +1740,6 @@ def test_trusted_approval_requires_consent_compile_and_routes_print_to_sandbox(
     template = repository.quarantine_trusted_template(
         deck.id,
         r'\centering {{ content }}',
-        front_content_mode='escaped',
-        back_content_mode='raw',
     )
 
     denied = client.post(
@@ -1854,8 +1805,6 @@ def test_trusted_editor_covers_empty_sample_and_fail_closed_form_paths(
         data={
             'front_source': '{{ content }}',
             'back_source': '{{ content }}',
-            'front_content_mode': 'escaped',
-            'back_content_mode': 'escaped',
         },
     )
     invalid_stage = client.post(
@@ -1883,8 +1832,6 @@ def test_trusted_editor_covers_empty_sample_and_fail_closed_form_paths(
         data={
             'front_source': '{{ content }}',
             'back_source': '{{ content }}',
-            'front_content_mode': 'escaped',
-            'back_content_mode': 'escaped',
         },
     )
     assert page.status_code == 200
@@ -1898,7 +1845,7 @@ def test_trusted_compile_and_print_errors_name_card_side_without_log_leak(
     compiler = RecordingTrustedCompiler()
     repository, deck = _enable_trusted(app, tmp_path, compiler=compiler)
     template = repository.quarantine_trusted_template(
-        deck.id, '{{ content }}', back_content_mode='raw'
+        deck.id, '{{ content }}'
     )
     client.post(
         f'/deck/{deck.id}/advanced/{template.id}/approve',
@@ -1920,8 +1867,6 @@ def test_trusted_compile_and_print_errors_name_card_side_without_log_leak(
         data={
             'front_source': '{{ content }}',
             'back_source': '{{ content }}',
-            'front_content_mode': 'escaped',
-            'back_content_mode': 'raw',
         },
     )
     generated = client.post(f'/deck/{deck.id}/generate')

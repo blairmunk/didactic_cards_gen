@@ -2,7 +2,7 @@ import shutil
 from pathlib import Path
 
 from flask import Flask
-from config import AppConfig as Config
+from config import AppConfig as Config, load_or_create_local_secret
 from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.adapters.pdflatex_compiler import PdfLatexCompiler
 from didactic_cards.adapters.sqlite_repository import SqliteRepository
@@ -23,13 +23,20 @@ def create_app(
 ) -> Flask:
     """Create an application with optional deployment/test dependencies."""
     cfg = config or Config()
+    effective_data_dir = Path(
+        data_dir if data_dir is not None else cfg.data_dir
+    ).expanduser().resolve()
     app = Flask(__name__)
-    app.secret_key = cfg.secret_key
+    app.secret_key = (
+        cfg.secret_key
+        if cfg.secret_key is not None
+        else load_or_create_local_secret(effective_data_dir)
+    )
     app.debug = cfg.debug
     configure_json_logging(app.logger)
 
     repo = repo if repo is not None else SqliteRepository(
-        data_dir=data_dir if data_dir is not None else cfg.data_dir
+        data_dir=effective_data_dir
     )
 
     layout = cfg.layout

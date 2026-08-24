@@ -19,7 +19,7 @@ class SandboxedPdfLatexCompiler(PdfCompiler):
         *,
         pdflatex_path: str = '/usr/bin/pdflatex',
         bwrap_path: str = '/usr/bin/bwrap',
-        timeout: int = 10,
+        timeout: int = 30,
         memory_limit_mb: int = 512,
         output_limit_mb: int = 16,
         process_limit: int = 4096,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from flask import Flask
 
-from didactic_cards.adapters.json_repository import JsonRepository
+from didactic_cards.adapters.sqlite_repository import SqliteRepository
 from didactic_cards.domain.entities import CardDeck
 from didactic_cards.domain.interfaces import CompileResult, DocumentRenderer, PdfCompiler
 from didactic_cards.web.blueprint import cards_bp
@@ -63,7 +63,7 @@ def make_test_app(tmp_path, *, compiler_success: bool = True) -> Flask:
     app.config.update(
         TESTING=True,
         SECRET_KEY="test-secret",
-        REPO=JsonRepository(str(tmp_path / "data")),
+        REPO=SqliteRepository(tmp_path / "data"),
         RENDERER=FakeRenderer(),
         COMPILER=FakeCompiler(compiler_success),
         CARDS_PER_PAGE=8,
@@ -85,7 +85,7 @@ def client(app):
 
 
 @pytest.fixture
-def repo(app) -> JsonRepository:
+def repo(app) -> SqliteRepository:
     return app.config["REPO"]
 
 

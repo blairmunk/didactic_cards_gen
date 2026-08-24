@@ -9,12 +9,12 @@ from flask import (Blueprint, render_template, request, redirect,
                    url_for, jsonify, current_app, send_file, session, abort, g)
 
 from ..adapters.latex_renderer import UnsafeLatexError
-from ..adapters.json_repository import DeckNotFoundError, RepositoryStorageError
+from ..adapters.repository_errors import DeckNotFoundError
 from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import CompileResult, ConcurrentModificationError
 from ..domain.printing import PrinterProfile, recommend_back_offsets
 from ..domain.rendering import AuthoringMode, DeckRenderSettings, StylePreset
-from ..domain.trusted import ContentMode, PrintJobSnapshot, TrustedTemplateVersion
+from ..domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
 
 from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
@@ -344,10 +344,7 @@ def _render_settings_from_form(
     authoring_mode: AuthoringMode = AuthoringMode.SAFE,
 ) -> DeckRenderSettings:
     preset = StylePreset(request.form.get('preset', 'centered'))
-    if preset is StylePreset.LEGACY_TOP_LEFT:
-        horizontal_alignment = 'left'
-        vertical_alignment = 'top'
-    elif preset is StylePreset.CENTERED:
+    if preset is StylePreset.CENTERED:
         horizontal_alignment = 'center'
         vertical_alignment = 'center'
     else:
@@ -496,21 +493,6 @@ def handle_missing_deck(_error):
     if request.path.startswith('/api/'):
         return jsonify({'error': 'Колода не найдена'}), 404
     return redirect(url_for('cards.decks_list'))
-
-
-@cards_bp.app_errorhandler(RepositoryStorageError)
-def handle_repository_corruption(error):
-    if request.path.startswith('/api/'):
-        return jsonify({'error': 'Хранилище данных повреждено'}), 500
-    return render_template(
-        'cards/error.html',
-        deck=None,
-        errors=[
-            'Хранилище данных повреждено. Запись остановлена; '
-            'восстановите JSON из резервной копии.'
-        ],
-        full_log=str(error) if current_app.debug else '',
-    ), 500
 
 
 @cards_bp.app_errorhandler(ConcurrentModificationError)
@@ -842,8 +824,6 @@ def _trusted_draft_from_form(deck_id: str) -> TrustedTemplateVersion:
         version=1,
         front_source=request.form.get('front_source', ''),
         back_source=request.form.get('back_source', ''),
-        front_content_mode=ContentMode.RAW,
-        back_content_mode=ContentMode.RAW,
     )
 
 
@@ -928,8 +908,6 @@ def stage_trusted_latex(deck_id):
             deck_id,
             template.front_source,
             template.back_source,
-            front_content_mode=template.front_content_mode,
-            back_content_mode=template.back_content_mode,
         )
     except ValueError as error:
         return _render_trusted_page(
@@ -1049,12 +1027,10 @@ def add_cards_bulk(deck_id):
         raise DeckNotFoundError(deck_id)
     bulk = request.form.get('bulk', '')
     section = request.form.get('section', '')
-    schema_mode = request.form.get('schema_mode', 'v2')
     expected_token = _import_preview_token(
         'bulk',
         deck,
         bulk.encode('utf-8'),
-        schema_mode=schema_mode,
         section=section,
     )
     if not _valid_preview_token(
@@ -1071,7 +1047,6 @@ def add_cards_bulk(deck_id):
             bulk,
             _optional_version(request.form.get('version')),
             section=section,
-            schema_mode=schema_mode,
         )
     except (BulkValidationError, CardLimitExceeded, ValueError) as error:
         return _render_deck_error(deck_id, str(error), 400)
@@ -1085,13 +1060,11 @@ def api_preview_bulk(deck_id):
         raise DeckNotFoundError(deck_id)
     bulk = request.form.get('bulk', '')
     section = request.form.get('section', '')
-    schema_mode = request.form.get('schema_mode', 'v2')
     try:
         preview = preview_bulk_import(
             bulk,
             deck.render_settings.authoring_mode,
             section=section,
-            schema_mode=schema_mode,
             existing_cards=GetDeck(_repo()).execute(deck_id).cards,
         )
     except ValueError as error:
@@ -1101,7 +1074,6 @@ def api_preview_bulk(deck_id):
             'bulk',
             deck,
             bulk.encode('utf-8'),
-            schema_mode=schema_mode,
             section=section,
         )
         if preview.accepted_count and not preview.errors
@@ -1119,10 +1091,6 @@ def api_preview_csv(deck_id):
     if not file or file.filename == '':
         return jsonify({'error': 'Выберите CSV-файл'}), 400
     file_bytes = file.stream.read()
-    schema_mode = request.form.get(
-        'schema_mode',
-        'header' if request.form.get('has_header') == 'on' else 'legacy',
-    )
     delimiter = request.form.get('delimiter', 'auto')
     encoding = request.form.get('encoding', 'utf-8')
     try:
@@ -1130,7 +1098,6 @@ def api_preview_csv(deck_id):
             file_bytes,
             delimiter,
             authoring_mode=deck.render_settings.authoring_mode,
-            schema_mode=schema_mode,
             encoding=encoding,
             existing_cards=GetDeck(_repo()).execute(deck_id).cards,
         )
@@ -1147,7 +1114,6 @@ def api_preview_csv(deck_id):
             file_bytes,
             delimiter=delimiter,
             encoding=encoding,
-            schema_mode=schema_mode,
         )
         if preview.accepted_count and not preview.errors
         else ''
@@ -1163,7 +1129,6 @@ def import_csv(deck_id):
     file = request.files.get('csv_file')
     if not file or file.filename == '':
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
-    schema_mode = request.form.get('schema_mode', 'header')
     delimiter = request.form.get('delimiter', 'auto')
     encoding = request.form.get('encoding', 'utf-8')
     try:
@@ -1174,7 +1139,6 @@ def import_csv(deck_id):
             file_bytes,
             delimiter=delimiter,
             encoding=encoding,
-            schema_mode=schema_mode,
         )
         if not _valid_preview_token(
             request.form.get('preview_token', ''), expected_token
@@ -1198,7 +1162,6 @@ def import_csv(deck_id):
             file_bytes,
             _optional_version(request.form.get('version')),
             delimiter=delimiter,
-            schema_mode=schema_mode,
             encoding=encoding,
         )
     except CardLimitExceeded as error:

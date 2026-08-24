@@ -29,18 +29,6 @@ class CompileResult:
     error_kind: str | None = None
 
 
-class CardRepository(ABC):
-    """Легаси-интерфейс для обратной совместимости."""
-
-    @abstractmethod
-    def load(self, deck_id: str = 'default') -> CardDeck:
-        ...
-
-    @abstractmethod
-    def save(self, deck: CardDeck, deck_id: str = 'default') -> None:
-        ...
-
-
 class DeckRepository(ABC):
     """Интерфейс для множественных колод с персистентным хранением."""
 
@@ -95,7 +83,7 @@ class DeckRepository(ABC):
         """Apply one read-modify-write operation.
 
         Adapters with transactional facilities should override this method.
-        The default keeps compatibility with simple in-memory test doubles.
+        The default is suitable for simple in-memory implementations.
         """
         deck_info = self.get_deck(deck_id)
         if deck_info is None:
@@ -153,8 +141,7 @@ class DocumentRenderer(ABC):
     ) -> DocumentRenderer:
         """Return a renderer configured for one deck.
 
-        The compatibility default keeps simple renderers usable when they do
-        not implement presentation settings.
+        The default keeps stateless renderers concise.
         """
         return self
 

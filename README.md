@@ -2,7 +2,7 @@
 
 Локальное Flask-приложение для создания колод дидактических карточек и сборки A4 PDF через LaTeX. У карточки есть лицевая сторона (задание), оборотная сторона (ответ) и сохраняемая секция/тема; данные сохраняются транзакционно в SQLite. Поддерживаются проверяемый пакетный ввод, строгий mode-aware CSV, формулы, сортировка, клонирование колод, сохраняемые профили принтера, двухстраничный калибровочный PDF, duplex PDF и отдельные PDF лиц/оборотов для ручной двусторонней печати.
 
-> Статус после remediation 24.08.2026: duplex-порядок, long-edge/short-edge transforms, поворот оборота 0°/180°, calibration offsets/лист, registration marks, auto-fit и адресный preflight реализованы. SQLite schema 11 и JSON export schema 8 жёстко разделяют два типа колод. Обычная колода использует экранированный текст, профили типографики, динамические `{{ card_number }}/{{ card_count }}` и семантические верхний/нижний колонтитулы с опциональными линиями. В Advanced-колоде каждая сторона является raw trusted TeX; для лица и оборота можно независимо версионировать необязательные оболочки. Значения `upper_header/lower_header` задаются у каждой карточки, а их расположение, линии и оформление полностью определяет raw-оболочка. Strict CSV переносит все пять полей Advanced-карточки без изменения raw-значений, требует подписанный preview и подтверждение доверия. Весь Advanced print job всегда идёт только в sandbox. Тип выбирается при создании и не смешивается в UI или renderer. Гарантия точности всё ещё требует физического прогона; актуальный прогресс — в [плане ревизии](docs/REMEDIATION_PLAN.md).
+> Статус после remediation 24.08.2026: duplex-порядок, long-edge/short-edge transforms, поворот оборота 0°/180°, calibration offsets/лист, registration marks, auto-fit и адресный preflight реализованы. SQLite schema 13 и JSON export schema 8 жёстко разделяют два типа колод. Legacy backend, старые JSON-схемы, positional CSV/bulk и preset прежней вёрстки удалены; для SQLite оставлен один явный путь 12→13 с pre-migration backup. Обычная колода использует экранированный текст, профили типографики, динамические `{{ card_number }}/{{ card_count }}` и семантические верхний/нижний колонтитулы с опциональными линиями. В Advanced-колоде каждая сторона является raw trusted TeX; для лица и оборота можно независимо версионировать необязательные оболочки. Значения `upper_header/lower_header` задаются у каждой карточки, а их расположение, линии и оформление полностью определяет raw-оболочка. Strict CSV переносит все пять полей Advanced-карточки без изменения raw-значений, требует подписанный preview и подтверждение доверия. Весь Advanced print job всегда идёт только в sandbox. Тип выбирается при создании и не смешивается в UI или renderer. Гарантия точности всё ещё требует физического прогона; актуальный прогресс — в [плане ревизии](docs/REMEDIATION_PLAN.md).
 
 Для физической приёмки используйте встроенный калькулятор компенсации на странице профилей и заполните [протокол long-edge / short-edge / ручной подачи](docs/PHYSICAL_PRINT_ACCEPTANCE.md). Этап считается завершённым только после реальных измерений.
 
@@ -10,7 +10,7 @@
 
 ## Быстрый запуск
 
-Требуется Python 3.11+ и `pdflatex`. Для Debian/Ubuntu TeX-зависимости можно установить так:
+Требуется Linux, Python 3.11+ и `pdflatex`. Для Debian/Ubuntu TeX-зависимости можно установить так:
 
 ```bash
 sudo apt update
@@ -27,7 +27,19 @@ export DIDACTIC_CARDS_SECRET_KEY='replace-with-a-long-random-value'
 python app/run.py
 ```
 
-Откройте <http://127.0.0.1:5000>. Для одноразового локального запуска secret можно не задавать — он будет создан автоматически, но браузерная сессия сбросится после рестарта. База всегда находится в `app/data`, независимо от рабочего каталога. Другой абсолютный каталог можно задать переменной `DIDACTIC_CARDS_DATA_DIR`.
+Для локального запуска переменную можно не задавать: приложение один раз создаст
+общий для всех workers файл `app/data/.secret_key` с правами `0600`. В production
+задавайте стабильный `DIDACTIC_CARDS_SECRET_KEY` через окружение или secret manager.
+Новый data directory создаётся с правами `0700`; SQLite main/WAL/SHM и
+локальный secret имеют `0600`.
+
+Откройте <http://127.0.0.1:5000>. Локальный secret сохраняется между рестартами в каталоге данных. База всегда находится в `app/data`, независимо от рабочего каталога. Другой абсолютный каталог можно задать переменной `DIDACTIC_CARDS_DATA_DIR`.
+
+Каталог данных должен быть на локальной Linux/POSIX-файловой системе одного
+хоста. Persistence и maintenance CLI опираются на `fcntl/flock`, hard links,
+directory `fsync` и SQLite WAL; Windows, NFS/SMB и multi-host shared volume не
+поддерживаются. В WSL храните данные в Linux-файловой системе, а не на
+смонтированном Windows-диске.
 
 Для production не используйте встроенный Flask-сервер:
 
@@ -51,15 +63,57 @@ python -m pytest -q
 python -m pytest --cov=didactic_cards --cov=run --cov=config --cov-branch
 ```
 
-Все исходные regression-контракты переведены из `xfail` в обычные тесты. Текущая база — 604 теста, включая Chromium E2E, без `xfail`; branch coverage не ниже обязательного порога 98%. Реальные PDF проходят vector geometry, матрицу выравнивания 3×3, верхнюю/нижнюю полосы с custom typography, динамическую нумерацию, линии, section sheet-break, raster golden diff, overflow, A4-калибровку и hostile-набор sandbox compiler. E2E отдельно проходит safe-оформление, strict safe CSV, пятиколоночный Advanced CSV, direct raw Advanced, разные оболочки сторон, колонтитулы карточки, quarantine/approval, sandbox-routed PDF и calibration UI. GitHub Actions проверяет Python 3.11–3.13 и TeX/bubblewrap-интеграцию.
+Все regression-контракты являются обычными тестами без `xfail`; обязательный порог branch coverage — 98%. Набор включает SQLite migration/backup/restore и WAL-concurrency, Chromium E2E, strict safe/Advanced CSV, hostile sandbox fixtures, реальную TeX-сборку, vector geometry, матрицу выравнивания 3×3, динамическую нумерацию, section breaks, raster golden diff, overflow и A4-калибровку. GitHub Actions проверяет Python 3.11–3.13 и TeX/bubblewrap-интеграцию; фактическое число тестов и coverage фиксируются результатом текущего CI-прогона.
 
-Проверить целостность хранилища без автоматического исправления:
+Проверить активную базу без создания отсутствующего файла и без изменения данных:
 
 ```bash
-python scripts/check_storage.py
+python scripts/storage.py inspect
 ```
 
-Команда автоматически проверяет активный `cards.sqlite3` через SQLite integrity/foreign-key checks и возвращает код `1` при проблеме. До первой миграции она проверяет legacy JSON: missing/orphan/duplicate ID, timestamps, метаданные и версию схемы. Порядок контролируемого восстановления JSON описан в руководстве.
+`sha256` в отчёте — fingerprint только основного SQLite-файла.
+`logical_sha256` вычисляется по схеме и строкам одного read-snapshot, поэтому
+учитывает committed-состояние из активного WAL. Для переносимого автономного
+snapshot всё равно используйте `backup`.
+
+Создать проверенный online backup можно при работающем приложении:
+
+```bash
+python scripts/storage.py backup
+# или в явное место, которое ещё не существует:
+python scripts/storage.py backup --output /safe/place/cards.sqlite3
+```
+
+Рядом с копией создаётся `*.manifest.json` с schema version, размером,
+байтовым `sha256` и логическим `logical_sha256`. Hard-link publication атомарно
+отказывает при уже существующем файле или
+manifest, не перезаписывая их. Для restore остановите
+все workers, затем явно подтвердите операцию:
+
+```bash
+python scripts/storage.py restore /safe/place/cards.sqlite3 --yes
+```
+
+Runtime lock отклонит restore, если хотя бы один worker ещё работает. До
+замены live-базы команда потребует соседний manifest, проверит оба файла и
+автоматически создаст pre-restore backup. При старте schema 12 так же автоматически
+бэкапится в один stable-файл перед единственной поддерживаемой миграцией 12→13.
+Перед таким upgrade остановите **все** workers старой schema-12 версии: rolling
+upgrade со смешанными версиями небезопасен, потому что старый код ещё не
+участвует в новом lease-протоколе.
+
+По умолчанию restore fail-closed откажется заменять unhealthy live DB. Для явного
+disaster recovery после остановки всех workers и проверки backup используйте:
+
+```bash
+python scripts/storage.py restore /safe/place/cards.sqlite3 \
+  --yes --allow-unhealthy-live
+```
+
+До замены CLI побайтово скопирует main/WAL/SHM/journal в private
+`app/data/backups/forensic-*` и вернёт путь в JSON-поле `forensic_bundle`.
+Для другого каталога данных добавьте
+`--data-dir /absolute/path` к любой команде.
 
 ## Структура
 
@@ -70,14 +124,17 @@ app/
   didactic_cards/
     domain/                  # Card, Deck, CardDeck и интерфейсы
     use_cases/               # операции над колодами и документом
-    adapters/                # SQLite, legacy JSON/recovery, LaTeX, compilers
+    adapters/                # SQLite, LaTeX и compilers
     web/                     # routes, шаблоны, CSS и JavaScript
-  data/                      # cards.sqlite3 и сохранённый legacy JSON
+  data/                      # cards.sqlite3
   tests/                     # unit, web, TeX/PDF integration и browser E2E
 docs/
   USER_AND_TECHNICAL_GUIDE.md
   REMEDIATION_PLAN.md
+  REMEDIATION_HISTORY.md
   BULK_CSV_IMPORT_AUDIT.md
+scripts/
+  storage.py                 # inspect, online backup, offline restore
 ```
 
 Пользовательская и техническая инструкция находится в [docs/USER_AND_TECHNICAL_GUIDE.md](docs/USER_AND_TECHNICAL_GUIDE.md). План строгого импорта готовых Advanced-карточек из другой программы или нейросети — в [docs/BULK_CSV_IMPORT_AUDIT.md](docs/BULK_CSV_IMPORT_AUDIT.md). Проект распространяется по GPL-3.0; полный текст — в [LICENSE](LICENSE).
