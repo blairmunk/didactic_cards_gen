@@ -3,8 +3,12 @@ from __future__ import annotations
 import pytest
 
 from didactic_cards.adapters.latex_renderer import LatexRenderer
-from didactic_cards.domain.interfaces import CompileResult, DocumentRenderer
-from didactic_cards.domain.rendering import DeckRenderSettings
+from didactic_cards.domain.interfaces import (
+    CompileResult,
+    ConcurrentModificationError,
+    DocumentRenderer,
+)
+from didactic_cards.domain.rendering import AuthoringMode, DeckRenderSettings
 from didactic_cards.domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
 from didactic_cards.domain.entities import Card
 from didactic_cards.use_cases.card_use_cases import (
@@ -22,6 +26,8 @@ from didactic_cards.use_cases.card_use_cases import (
     ResetCards,
     CardLimitExceeded,
     CsvValidationError,
+    BulkValidationError,
+    preview_bulk_import,
     preview_csv_import,
 )
 
@@ -93,10 +99,14 @@ def test_csv_import_accepts_comma_and_utf8_bom(repo, deck_id):
     assert repo.load_cards(deck_id).cards[1].back == "ответ"
 
 
-def test_csv_import_skips_blank_rows_and_empty_cells(repo, deck_id):
-    count = ImportCsv(repo).execute(deck_id, b"\n,\nfront-only\n")
+def test_csv_import_skips_blank_rows(repo, deck_id):
+    count = ImportCsv(repo).execute(
+        deck_id,
+        b"\nQ;A\n\n",
+        delimiter='semicolon',
+    )
     assert count == 1
-    assert repo.load_cards(deck_id).cards[0].front == "front-only"
+    assert repo.load_cards(deck_id).cards[0].front == "Q"
 
 
 def test_csv_import_matches_documented_semicolon(repo, deck_id):
@@ -119,15 +129,22 @@ def test_csv_import_explicit_dialect_and_header(repo, deck_id):
 def test_csv_import_accepts_section_front_back_and_legacy_two_columns(repo, deck_id):
     ImportCsv(repo).execute(
         deck_id,
-        "section;front;back\nГеометрия;Q1;A1\nQ2;A2".encode(),
+        "section;front;back\nГеометрия;Q1;A1\n;Q2;A2".encode(),
         delimiter="semicolon",
         has_header=True,
+    )
+    ImportCsv(repo).execute(
+        deck_id,
+        b'Q3;A3',
+        delimiter='semicolon',
+        schema_mode='legacy',
     )
     cards = repo.load_cards(deck_id).cards
     assert (cards[0].section, cards[0].front, cards[0].back) == (
         'Геометрия', 'Q1', 'A1'
     )
     assert (cards[1].section, cards[1].front, cards[1].back) == ('', 'Q2', 'A2')
+    assert (cards[2].section, cards[2].front, cards[2].back) == ('', 'Q3', 'A3')
 
 
 def test_csv_import_rejects_unknown_dialect(repo, deck_id):
@@ -156,6 +173,210 @@ def test_csv_import_rejects_non_utf8(repo, deck_id):
 def test_csv_limit_is_atomic(repo, deck_id):
     with pytest.raises(CardLimitExceeded):
         ImportCsv(repo, max_cards=1).execute(deck_id, b'Q1,A1\nQ2,A2')
+    assert len(repo.load_cards(deck_id)) == 0
+
+
+def test_concurrent_csv_imports_use_deck_version_and_never_partially_write(
+    repo, deck_id
+):
+    initial_version = repo.get_deck(deck_id).version
+    ImportCsv(repo).execute(
+        deck_id,
+        b'Q1;A1',
+        expected_version=initial_version,
+        delimiter='semicolon',
+        schema_mode='legacy',
+    )
+    with pytest.raises(ConcurrentModificationError):
+        ImportCsv(repo).execute(
+            deck_id,
+            b'Q2;A2',
+            expected_version=initial_version,
+            delimiter='semicolon',
+            schema_mode='legacy',
+        )
+    assert [card.front for card in repo.load_cards(deck_id).cards] == ['Q1']
+
+
+def test_advanced_csv_preserves_all_fields_character_for_character(repo):
+    deck = repo.create_deck(
+        'Raw import',
+        render_settings=DeckRenderSettings(authoring_mode=AuthoringMode.ADVANCED),
+    )
+    source = (
+        'lower_header;front;section;upper_header;back\r\n'
+        '"  Foot\\\\line  ";"  \\vfill\r\nBody {{ side }}\\vfill  ";'
+        'Topic;"Head {{ card_number }}/{{ card_count }}";"Back; quoted"\r\n'
+    ).encode('utf-8-sig')
+
+    preview = preview_csv_import(
+        source,
+        authoring_mode=AuthoringMode.ADVANCED,
+        schema_mode='header',
+    )
+
+    assert preview.rejected_count == 0
+    assert preview.columns == (
+        'lower_header', 'front', 'section', 'upper_header', 'back'
+    )
+    row = preview.rows[0]
+    assert row.section == 'Topic'
+    assert row.front == '  \\vfill\r\nBody {{ side }}\\vfill  '
+    assert row.back == 'Back; quoted'
+    assert row.upper_header == 'Head {{ card_number }}/{{ card_count }}'
+    assert row.lower_header == r'  Foot\\line  '
+
+    count = ImportCsv(repo).execute(
+        deck.id,
+        source,
+        schema_mode='header',
+    )
+    assert count == 1
+    card = repo.load_cards(deck.id).cards[0]
+    assert (
+        card.section, card.front, card.back,
+        card.upper_header, card.lower_header,
+    ) == (
+        row.section, row.front, row.back,
+        row.upper_header, row.lower_header,
+    )
+
+
+@pytest.mark.parametrize(
+    ('source', 'code'),
+    [
+        (b'front;back\n"unclosed;value\n', 'malformed_csv'),
+        (b'front;front;back\nA;B;C\n', 'duplicate_column'),
+        (b'front;answer\nA;B\n', 'unknown_column'),
+        (b'section;front\nS;A\n', 'missing_column'),
+        (b'front;back\nA\x00;B\n', 'control_character'),
+    ],
+)
+def test_strict_csv_reports_schema_and_syntax_errors(source, code):
+    preview = preview_csv_import(
+        source,
+        delimiter='semicolon',
+        schema_mode='header',
+    )
+    assert preview.accepted_count == 0
+    assert code in {issue.code for issue in preview.errors}
+
+
+def test_safe_csv_rejects_advanced_only_columns():
+    preview = preview_csv_import(
+        b'front;back;upper_header\nQ;A;raw\n',
+        delimiter='semicolon',
+        schema_mode='header',
+        authoring_mode=AuthoringMode.SAFE,
+    )
+    assert preview.accepted_count == 0
+    assert preview.errors[0].code == 'unknown_column'
+
+
+@pytest.mark.parametrize(
+    'source',
+    [
+        b'Q;A\nS;Q2;A2\n',
+        b'front-only\n',
+        b'Q;A;extra;column\n',
+    ],
+)
+def test_legacy_csv_requires_one_consistent_supported_width(source):
+    preview = preview_csv_import(
+        source,
+        delimiter='semicolon',
+        schema_mode='legacy',
+    )
+    assert preview.rejected_count > 0
+
+
+def test_csv_rejects_empty_and_section_only_records():
+    empty = preview_csv_import(b'', schema_mode='header')
+    section_only = preview_csv_import(
+        b'section;front;back\nTopic;;\n',
+        delimiter='semicolon',
+        schema_mode='header',
+    )
+    assert empty.errors[0].code == 'empty_file'
+    assert section_only.errors[0].code == 'empty_card'
+
+
+def test_csv_supports_bom_utf16_and_explicit_windows_1251():
+    utf16 = preview_csv_import(
+        'front;back\nВопрос;Ответ\n'.encode('utf-16'),
+        delimiter='semicolon',
+        schema_mode='header',
+        encoding='auto',
+    )
+    cp1251 = preview_csv_import(
+        'front;back\nВопрос;Ответ\n'.encode('cp1251'),
+        delimiter='semicolon',
+        schema_mode='header',
+        encoding='windows-1251',
+    )
+    assert utf16.rows[0].back == 'Ответ'
+    assert utf16.encoding == 'utf-16'
+    assert cp1251.rows[0].front == 'Вопрос'
+    assert cp1251.encoding == 'windows-1251'
+
+
+def test_csv_duplicate_rows_are_warnings_not_implicit_deduplication():
+    preview = preview_csv_import(
+        b'front;back\nQ;A\nQ;A\n',
+        delimiter='semicolon',
+        schema_mode='header',
+    )
+    assert preview.accepted_count == 2
+    assert preview.warning_count == 1
+    assert preview.warnings[0].code == 'duplicate_row'
+
+
+def test_advanced_bulk_v2_preserves_tex_and_supports_headers(repo):
+    deck = repo.create_deck(
+        'Raw bulk',
+        render_settings=DeckRenderSettings(authoring_mode=AuthoringMode.ADVANCED),
+    )
+    source = r'"\\lVert x \\rVert || 1"||Back\\line||Top||Bottom'
+    preview = preview_bulk_import(
+        source,
+        AuthoringMode.ADVANCED,
+        section='Math',
+        schema_mode='v2',
+    )
+    assert preview.rejected_count == 0
+    assert (
+        preview.rows[0].front,
+        preview.rows[0].back,
+        preview.rows[0].upper_header,
+        preview.rows[0].lower_header,
+    ) == (r'\\lVert x \\rVert || 1', r'Back\\line', 'Top', 'Bottom')
+
+    count = AddCardsBulk(repo).execute(
+        deck.id,
+        source,
+        section='Math',
+        schema_mode='v2',
+    )
+    assert count == 1
+    assert repo.load_cards(deck.id).cards[0].front == r'\\lVert x \\rVert || 1'
+
+
+def test_bulk_v2_rejects_bad_width_unclosed_quote_and_empty_card():
+    bad_width = preview_bulk_import('Q||A', AuthoringMode.ADVANCED)
+    unclosed = preview_bulk_import('"Q||A', AuthoringMode.SAFE)
+    empty = preview_bulk_import('||', AuthoringMode.SAFE)
+    assert bad_width.errors[0].code == 'column_count'
+    assert unclosed.errors[0].code == 'malformed_bulk'
+    assert empty.errors[0].code == 'empty_card'
+
+
+def test_bulk_v2_validation_is_atomic(repo, deck_id):
+    with pytest.raises(BulkValidationError):
+        AddCardsBulk(repo).execute(
+            deck_id,
+            'Q1||A1\ninvalid',
+            schema_mode='v2',
+        )
     assert len(repo.load_cards(deck_id)) == 0
 
 

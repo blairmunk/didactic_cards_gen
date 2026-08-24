@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function() {
         addCard:    '/api/deck/' + DECK_ID + '/add_card',
         deleteCard: '/api/deck/' + DECK_ID + '/delete_card/',
         reorder:    '/api/deck/' + DECK_ID + '/reorder',
+        previewBulk:'/api/deck/' + DECK_ID + '/preview_bulk',
         previewCsv: '/api/deck/' + DECK_ID + '/preview_csv',
         preflight:  '/api/deck/' + DECK_ID + '/preflight',
         editPage:   '/deck/' + DECK_ID + '/edit_card/',
@@ -64,6 +65,12 @@ document.addEventListener('DOMContentLoaded', function() {
         document.body.dataset.deckVersion = version;
         document.querySelectorAll('input[name="version"]').forEach(function(input) {
             input.value = version;
+        });
+        ['bulk', 'csv'].forEach(function(kind) {
+            const token = document.getElementById(kind + '-preview-token');
+            const submit = document.getElementById(kind + '-import-button');
+            if (token) token.value = '';
+            if (submit) submit.disabled = true;
         });
     }
 
@@ -429,15 +436,140 @@ document.addEventListener('DOMContentLoaded', function() {
 
     document.querySelectorAll('.delete-btn').forEach(attachDeleteEvent);
 
-    // ── Read-only CSV preview ──
+    // ── Read-only bulk/CSV previews ──
+
+    function renderImportPreview(result, data) {
+        result.replaceChildren();
+        const summary = document.createElement('p');
+        const metadata = [];
+        if (data.encoding) metadata.push('кодировка: ' + data.encoding);
+        if (data.delimiter) metadata.push('разделитель: ' + JSON.stringify(data.delimiter));
+        metadata.push('схема: ' + data.schema_mode);
+        summary.textContent = 'Принято: ' + data.accepted_count +
+            '; отклонено строк: ' + data.rejected_count +
+            '; ошибок: ' + data.error_count +
+            '; предупреждений: ' + data.warning_count +
+            '; пропущено: ' + data.skipped_count +
+            '; ' + metadata.join('; ');
+        result.appendChild(summary);
+
+        if (data.columns && data.columns.length) {
+            const mapping = document.createElement('p');
+            mapping.textContent = 'Колонки: ' + data.columns.join(' → ');
+            result.appendChild(mapping);
+        }
+
+        const list = document.createElement('ol');
+        data.cards.forEach(function(card) {
+            const item = document.createElement('li');
+            const title = document.createElement('strong');
+            title.textContent = 'Строка ' + card.row +
+                (card.section ? ' [' + card.section + ']' : '');
+            item.appendChild(title);
+            const values = document.createElement('pre');
+            values.className = 'import-row-values';
+            values.textContent = 'front: ' + card.front + '\nback: ' + card.back +
+                (IS_ADVANCED
+                    ? '\nupper_header: ' + card.upper_header +
+                      '\nlower_header: ' + card.lower_header
+                    : '');
+            item.appendChild(values);
+            list.appendChild(item);
+        });
+        result.appendChild(list);
+
+        if (data.issues && data.issues.length) {
+            const issueHeading = document.createElement('p');
+            issueHeading.className = data.rejected_count ? 'error-message' : 'warning-message';
+            issueHeading.textContent = data.rejected_count
+                ? 'Исправьте ошибки до импорта:'
+                : 'Предупреждения:';
+            result.appendChild(issueHeading);
+            const issues = document.createElement('ul');
+            data.issues.forEach(function(issue) {
+                const item = document.createElement('li');
+                item.className = issue.severity === 'error'
+                    ? 'import-issue-error' : 'import-issue-warning';
+                item.textContent = (issue.row ? 'Строка ' + issue.row + ': ' : '') +
+                    issue.reason + (issue.column ? ' [' + issue.column + ']' : '');
+                issues.appendChild(item);
+            });
+            result.appendChild(issues);
+        }
+        if (data.truncated) {
+            const truncated = document.createElement('p');
+            truncated.className = 'warning-message';
+            truncated.textContent = 'Предпросмотр усечён; итоговые счётчики относятся ко всему файлу.';
+            result.appendChild(truncated);
+        }
+        result.focus({preventScroll: true});
+        result.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+    }
+
+    function installPreviewInvalidation(form, token, submit, ignoredName) {
+        function invalidate(event) {
+            if (ignoredName && event.target.name === ignoredName) return;
+            token.value = '';
+            submit.disabled = true;
+        }
+        form.addEventListener('input', invalidate);
+        form.addEventListener('change', invalidate);
+    }
+
+    const bulkForm = document.getElementById('bulk-import-form');
+    const bulkPreviewButton = document.getElementById('bulk-preview-button');
+    if (bulkForm && bulkPreviewButton) {
+        const bulkResult = document.getElementById('bulk-preview-result');
+        const bulkToken = document.getElementById('bulk-preview-token');
+        const bulkSubmit = document.getElementById('bulk-import-button');
+        installPreviewInvalidation(bulkForm, bulkToken, bulkSubmit);
+        bulkPreviewButton.addEventListener('click', async function() {
+            bulkResult.textContent = 'Проверка…';
+            bulkPreviewButton.disabled = true;
+            bulkToken.value = '';
+            bulkSubmit.disabled = true;
+            try {
+                const response = await fetch(API.previewBulk, {
+                    method: 'POST',
+                    body: new FormData(bulkForm)
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    bulkResult.textContent = data.error || 'Не удалось проверить пачку';
+                    return;
+                }
+                renderImportPreview(bulkResult, data);
+                if (data.preview_token && data.rejected_count === 0 && data.accepted_count > 0) {
+                    bulkToken.value = data.preview_token;
+                    bulkSubmit.disabled = false;
+                }
+            } catch (error) {
+                console.error(error);
+                bulkResult.textContent = 'Ошибка сети';
+            } finally {
+                bulkPreviewButton.disabled = false;
+            }
+        });
+    }
 
     const csvForm = document.getElementById('csv-import-form');
     const csvPreviewButton = document.getElementById('csv-preview-button');
     if (csvForm && csvPreviewButton) {
+        const result = document.getElementById('csv-preview-result');
+        const token = document.getElementById('csv-preview-token');
+        const submit = document.getElementById('csv-import-button');
+        const trust = document.getElementById('trust-raw-csv');
+        installPreviewInvalidation(csvForm, token, submit, 'trust_raw_csv');
+        if (trust) {
+            trust.addEventListener('change', function() {
+                submit.disabled = !token.value || !trust.checked;
+            });
+        }
         csvPreviewButton.addEventListener('click', async function() {
-            const result = document.getElementById('csv-preview-result');
             result.textContent = 'Проверка…';
             csvPreviewButton.disabled = true;
+            token.value = '';
+            submit.disabled = true;
             try {
                 const response = await fetch(API.previewCsv, {
                     method: 'POST',
@@ -448,25 +580,10 @@ document.addEventListener('DOMContentLoaded', function() {
                     result.textContent = data.error || 'Не удалось проверить CSV';
                     return;
                 }
-                result.replaceChildren();
-                const summary = document.createElement('p');
-                summary.textContent = 'Принято: ' + data.accepted_count +
-                    '; отклонено: ' + data.rejected_count +
-                    '; разделитель: ' + JSON.stringify(data.delimiter);
-                result.appendChild(summary);
-                const list = document.createElement('ol');
-                data.cards.forEach(function(card) {
-                    const item = document.createElement('li');
-                    item.textContent = (card.section ? '[' + card.section + '] ' : '') +
-                        card.front + ' → ' + card.back;
-                    list.appendChild(item);
-                });
-                result.appendChild(list);
-                if (data.rejected_count > 0) {
-                    const warning = document.createElement('p');
-                    warning.className = 'error-message';
-                    warning.textContent = 'Исправьте отклонённые строки до импорта.';
-                    result.appendChild(warning);
+                renderImportPreview(result, data);
+                if (data.preview_token && data.rejected_count === 0 && data.accepted_count > 0) {
+                    token.value = data.preview_token;
+                    submit.disabled = Boolean(trust && !trust.checked);
                 }
             } catch (error) {
                 console.error(error);

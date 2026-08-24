@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import csv
-import io
 import re
 from dataclasses import dataclass
 
@@ -12,6 +10,13 @@ from ..domain.interfaces import (
 from ..domain.entities import Card, CardDeck
 from ..domain.rendering import AuthoringMode, DeckRenderSettings
 from ..domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
+from .card_import import (
+    BulkImportPreview,
+    CsvImportPreview,
+    _parse_legacy_bulk_line as _parse_bulk_line,
+    preview_bulk_import,
+    preview_csv_import,
+)
 
 
 def _print_inputs(
@@ -60,21 +65,12 @@ class CsvValidationError(ValueError):
         )
 
 
-@dataclass(frozen=True)
-class CsvImportPreview:
-    cards: tuple[Card, ...]
-    rejected_rows: tuple[dict, ...]
-    delimiter: str
-
-    def to_dict(self, preview_limit: int = 20) -> dict:
-        return {
-            'accepted_count': len(self.cards),
-            'rejected_count': len(self.rejected_rows),
-            'delimiter': self.delimiter,
-            'cards': [card.to_dict() for card in self.cards[:preview_limit]],
-            'rejected_rows': list(self.rejected_rows[:preview_limit]),
-            'truncated': max(len(self.cards), len(self.rejected_rows)) > preview_limit,
-        }
+class BulkValidationError(ValueError):
+    def __init__(self, preview: BulkImportPreview):
+        self.preview = preview
+        super().__init__(
+            f'Пакетный ввод содержит ошибки: {preview.rejected_count}'
+        )
 
 
 @dataclass(frozen=True)
@@ -133,73 +129,9 @@ def compile_error_context(
     return number, side, deck.cards[number - 1]
 
 
-def _parse_bulk_line(line: str) -> tuple[str, str]:
-    sides: list[list[str]] = [[], []]
-    side = 0
-    index = 0
-    while index < len(line):
-        if line.startswith(r'\||', index):
-            sides[side].append('||')
-            index += 3
-        elif line.startswith(r'\\', index):
-            sides[side].append('\\')
-            index += 2
-        elif side == 0 and line.startswith('||', index):
-            side = 1
-            index += 2
-        else:
-            sides[side].append(line[index])
-            index += 1
-    return ''.join(sides[0]).strip(), ''.join(sides[1]).strip()
-
-
 def _ensure_capacity(deck: CardDeck, incoming: int, max_cards: int | None) -> None:
     if max_cards is not None and len(deck) + incoming > max_cards:
         raise CardLimitExceeded(f'Максимум карточек в колоде: {max_cards}')
-
-
-def preview_csv_import(
-    file_bytes: bytes,
-    delimiter: str = 'auto',
-    has_header: bool = False,
-) -> CsvImportPreview:
-    text = file_bytes.decode('utf-8-sig')
-    delimiters = {'comma': ',', 'semicolon': ';', 'tab': '\t'}
-    if delimiter == 'auto':
-        try:
-            dialect = csv.Sniffer().sniff(text[:4096], delimiters=',;\t')
-            selected_delimiter = dialect.delimiter
-        except csv.Error:
-            sample = text[:4096]
-            selected_delimiter = max(',;\t', key=sample.count)
-    elif delimiter in delimiters:
-        selected_delimiter = delimiters[delimiter]
-    else:
-        raise ValueError('Unsupported CSV delimiter')
-
-    cards: list[Card] = []
-    rejected: list[dict] = []
-    reader = csv.reader(io.StringIO(text), delimiter=selected_delimiter)
-    for row_index, row in enumerate(reader, start=1):
-        if row_index == 1 and has_header:
-            continue
-        if not row or not any(cell.strip() for cell in row):
-            continue
-        if len(row) > 3:
-            rejected.append({
-                'row': row_index,
-                'reason': 'Ожидалось не более трёх колонок',
-            })
-            continue
-        if len(row) == 3:
-            section, front, back = (cell.strip() for cell in row)
-        else:
-            section = ''
-            front = row[0].strip() if row else ''
-            back = row[1].strip() if len(row) > 1 else ''
-        if front or back:
-            cards.append(Card(front=front, back=back, section=section))
-    return CsvImportPreview(tuple(cards), tuple(rejected), selected_delimiter)
 
 
 class AddCard:
@@ -238,19 +170,24 @@ class AddCardsBulk:
     def execute(
         self, deck_id: str, bulk_text: str, expected_version: int | None = None,
         section: str = '',
+        schema_mode: str = 'legacy',
     ) -> int:
-        new_cards = []
-        for line in bulk_text.strip().splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            front, back = _parse_bulk_line(line)
-            new_cards.append(Card(front=front, back=back, section=section))
+        mode = self.repo.get_render_settings(deck_id).authoring_mode
+        preview = preview_bulk_import(
+            bulk_text,
+            mode,
+            section=section,
+            schema_mode=schema_mode,
+            existing_cards=self.repo.load_cards(deck_id).cards,
+        )
+        if preview.errors:
+            raise BulkValidationError(preview)
+        new_rows = list(preview.rows)
         def add_all(deck: CardDeck):
-            _ensure_capacity(deck, len(new_cards), self.max_cards)
-            for card in new_cards:
-                deck.add(card)
-            return len(new_cards), bool(new_cards)
+            _ensure_capacity(deck, len(new_rows), self.max_cards)
+            for row in new_rows:
+                deck.add(row.to_card())
+            return len(new_rows), bool(new_rows)
 
         return self.repo.mutate_cards(
             deck_id, add_all, expected_version=expected_version
@@ -267,16 +204,27 @@ class ImportCsv:
         expected_version: int | None = None,
         delimiter: str = 'auto',
         has_header: bool = False,
+        schema_mode: str | None = None,
+        encoding: str = 'utf-8',
     ) -> int:
-        preview = preview_csv_import(file_bytes, delimiter, has_header)
-        if preview.rejected_rows:
+        mode = self.repo.get_render_settings(deck_id).authoring_mode
+        preview = preview_csv_import(
+            file_bytes,
+            delimiter,
+            has_header,
+            authoring_mode=mode,
+            schema_mode=schema_mode,
+            encoding=encoding,
+            existing_cards=self.repo.load_cards(deck_id).cards,
+        )
+        if preview.errors:
             raise CsvValidationError(preview)
-        new_cards = list(preview.cards)
+        new_rows = list(preview.rows)
         def add_all(deck: CardDeck):
-            _ensure_capacity(deck, len(new_cards), self.max_cards)
-            for card in new_cards:
-                deck.add(card)
-            return len(new_cards), bool(new_cards)
+            _ensure_capacity(deck, len(new_rows), self.max_cards)
+            for row in new_rows:
+                deck.add(row.to_card())
+            return len(new_rows), bool(new_rows)
 
         return self.repo.mutate_cards(
             deck_id, add_all, expected_version=expected_version

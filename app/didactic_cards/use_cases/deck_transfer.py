@@ -61,13 +61,36 @@ def export_deck_json(repo: DeckRepository, deck_id: str) -> bytes:
 
 
 def export_deck_csv(repo: DeckRepository, deck_id: str) -> bytes:
-    if repo.get_deck(deck_id) is None:
+    deck = repo.get_deck(deck_id)
+    if deck is None:
         raise KeyError(deck_id)
     output = io.StringIO(newline='')
     writer = csv.writer(output, delimiter=';', lineterminator='\n')
-    writer.writerow(['section', 'front', 'back'])
+    advanced = (
+        deck.render_settings.authoring_mode is AuthoringMode.ADVANCED
+    )
+    writer.writerow(
+        ['section', 'front', 'back', 'upper_header', 'lower_header']
+        if advanced
+        else ['section', 'front', 'back']
+    )
     for card in repo.load_cards(deck_id).cards:
-        writer.writerow([card.section, card.front, card.back])
+        row = [card.section, card.front, card.back]
+        if advanced:
+            row.extend([card.upper_header, card.lower_header])
+        writer.writerow(row)
+    return ('\ufeff' + output.getvalue()).encode('utf-8')
+
+
+def export_card_csv_template(authoring_mode: AuthoringMode | str) -> bytes:
+    mode = AuthoringMode(authoring_mode)
+    output = io.StringIO(newline='')
+    writer = csv.writer(output, delimiter=';', lineterminator='\n')
+    writer.writerow(
+        ['section', 'front', 'back', 'upper_header', 'lower_header']
+        if mode is AuthoringMode.ADVANCED
+        else ['section', 'front', 'back']
+    )
     return ('\ufeff' + output.getvalue()).encode('utf-8')
 
 

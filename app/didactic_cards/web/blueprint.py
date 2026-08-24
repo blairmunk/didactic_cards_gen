@@ -1,4 +1,5 @@
 import io
+import hashlib
 import hmac
 import secrets
 import time
@@ -19,7 +20,8 @@ from ..use_cases.card_use_cases import (
     AddCard, AddCardsBulk, ImportCsv, DeleteCard,
     EditCard, ReorderCards, ResetCards, GetDeck,
     GenerateDocument, GenerateDocumentSide, PreviewDocument, CardLimitExceeded,
-    PreflightDocument, CsvValidationError, preview_csv_import,
+    PreflightDocument, BulkValidationError, CsvValidationError,
+    preview_bulk_import, preview_csv_import,
     compile_error_context,
 )
 from ..use_cases.deck_use_cases import (
@@ -28,6 +30,7 @@ from ..use_cases.deck_use_cases import (
 )
 from ..use_cases.deck_transfer import (
     DeckTransferError,
+    export_card_csv_template,
     export_deck_csv,
     export_deck_json,
     import_deck_json,
@@ -262,6 +265,33 @@ def _optional_version(value) -> int | None:
     if version <= 0:
         abort(400, description='Некорректная версия колоды')
     return version
+
+
+def _import_preview_token(
+    kind: str,
+    deck,
+    payload: bytes,
+    **options,
+) -> str:
+    secret = str(current_app.config['SECRET_KEY']).encode('utf-8')
+    digest = hmac.new(secret, digestmod=hashlib.sha256)
+    parts = (
+        kind,
+        deck.id,
+        str(deck.version),
+        deck.render_settings.authoring_mode.value,
+        hashlib.sha256(payload).hexdigest(),
+        *(f'{key}={options[key]}' for key in sorted(options)),
+    )
+    for part in parts:
+        encoded = part.encode('utf-8')
+        digest.update(len(encoded).to_bytes(8, 'big'))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def _valid_preview_token(submitted: str, expected: str) -> bool:
+    return bool(submitted) and hmac.compare_digest(submitted, expected)
 
 
 def _saved_print_profiles():
@@ -717,6 +747,25 @@ def export_deck_as_csv(deck_id):
     )
 
 
+@cards_bp.route('/deck/<deck_id>/import-template.csv', methods=['GET'])
+def download_card_csv_template(deck_id):
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
+        return redirect(url_for('cards.decks_list'))
+    return send_file(
+        io.BytesIO(export_card_csv_template(
+            deck.render_settings.authoring_mode
+        )),
+        mimetype='text/csv',
+        as_attachment=True,
+        download_name=(
+            'advanced-cards-template.csv'
+            if deck.render_settings.authoring_mode is AuthoringMode.ADVANCED
+            else 'cards-template.csv'
+        ),
+    )
+
+
 @cards_bp.route('/import_deck', methods=['POST'])
 def import_deck():
     file = request.files.get('deck_file')
@@ -995,56 +1044,165 @@ def add_card(deck_id):
 
 @cards_bp.route('/deck/<deck_id>/add_cards_bulk', methods=['POST'])
 def add_cards_bulk(deck_id):
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
+        raise DeckNotFoundError(deck_id)
     bulk = request.form.get('bulk', '')
-    section = request.form.get('section', '').strip()
+    section = request.form.get('section', '')
+    schema_mode = request.form.get('schema_mode', 'v2')
+    expected_token = _import_preview_token(
+        'bulk',
+        deck,
+        bulk.encode('utf-8'),
+        schema_mode=schema_mode,
+        section=section,
+    )
+    if not _valid_preview_token(
+        request.form.get('preview_token', ''), expected_token
+    ):
+        return _render_deck_error(
+            deck_id,
+            'Сначала проверьте пакетный ввод; после изменений preview нужно повторить.',
+            400,
+        )
     try:
         AddCardsBulk(_repo(), _max_cards()).execute(
             deck_id,
             bulk,
             _optional_version(request.form.get('version')),
             section=section,
+            schema_mode=schema_mode,
         )
-    except CardLimitExceeded as error:
-        return _render_deck_error(deck_id, str(error))
+    except (BulkValidationError, CardLimitExceeded, ValueError) as error:
+        return _render_deck_error(deck_id, str(error), 400)
     return redirect(url_for('cards.deck_view', deck_id=deck_id))
+
+
+@cards_bp.route('/api/deck/<deck_id>/preview_bulk', methods=['POST'])
+def api_preview_bulk(deck_id):
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
+        raise DeckNotFoundError(deck_id)
+    bulk = request.form.get('bulk', '')
+    section = request.form.get('section', '')
+    schema_mode = request.form.get('schema_mode', 'v2')
+    try:
+        preview = preview_bulk_import(
+            bulk,
+            deck.render_settings.authoring_mode,
+            section=section,
+            schema_mode=schema_mode,
+            existing_cards=GetDeck(_repo()).execute(deck_id).cards,
+        )
+    except ValueError as error:
+        return jsonify({'error': str(error)}), 400
+    token = (
+        _import_preview_token(
+            'bulk',
+            deck,
+            bulk.encode('utf-8'),
+            schema_mode=schema_mode,
+            section=section,
+        )
+        if preview.accepted_count and not preview.errors
+        else ''
+    )
+    return jsonify({'ok': True, 'preview_token': token, **preview.to_dict()})
 
 
 @cards_bp.route('/api/deck/<deck_id>/preview_csv', methods=['POST'])
 def api_preview_csv(deck_id):
-    if GetDeckInfo(_repo()).execute(deck_id) is None:
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
         raise DeckNotFoundError(deck_id)
     file = request.files.get('csv_file')
     if not file or file.filename == '':
         return jsonify({'error': 'Выберите CSV-файл'}), 400
+    file_bytes = file.stream.read()
+    schema_mode = request.form.get(
+        'schema_mode',
+        'header' if request.form.get('has_header') == 'on' else 'legacy',
+    )
+    delimiter = request.form.get('delimiter', 'auto')
+    encoding = request.form.get('encoding', 'utf-8')
     try:
         preview = preview_csv_import(
-            file.stream.read(),
-            request.form.get('delimiter', 'auto'),
-            request.form.get('has_header') == 'on',
+            file_bytes,
+            delimiter,
+            authoring_mode=deck.render_settings.authoring_mode,
+            schema_mode=schema_mode,
+            encoding=encoding,
+            existing_cards=GetDeck(_repo()).execute(deck_id).cards,
         )
     except UnicodeDecodeError:
-        return jsonify({'error': 'CSV должен быть сохранён в UTF-8'}), 400
+        return jsonify({
+            'error': 'CSV не соответствует выбранной кодировке'
+        }), 400
     except ValueError as error:
         return jsonify({'error': str(error)}), 400
-    return jsonify({'ok': True, **preview.to_dict()})
+    token = (
+        _import_preview_token(
+            'csv',
+            deck,
+            file_bytes,
+            delimiter=delimiter,
+            encoding=encoding,
+            schema_mode=schema_mode,
+        )
+        if preview.accepted_count and not preview.errors
+        else ''
+    )
+    return jsonify({'ok': True, 'preview_token': token, **preview.to_dict()})
 
 
 @cards_bp.route('/deck/<deck_id>/import_csv', methods=['POST'])
 def import_csv(deck_id):
+    deck = GetDeckInfo(_repo()).execute(deck_id)
+    if deck is None:
+        raise DeckNotFoundError(deck_id)
     file = request.files.get('csv_file')
     if not file or file.filename == '':
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
+    schema_mode = request.form.get('schema_mode', 'header')
+    delimiter = request.form.get('delimiter', 'auto')
+    encoding = request.form.get('encoding', 'utf-8')
     try:
         file_bytes = file.stream.read()
+        expected_token = _import_preview_token(
+            'csv',
+            deck,
+            file_bytes,
+            delimiter=delimiter,
+            encoding=encoding,
+            schema_mode=schema_mode,
+        )
+        if not _valid_preview_token(
+            request.form.get('preview_token', ''), expected_token
+        ):
+            return _render_deck_error(
+                deck_id,
+                'Сначала проверьте CSV; после изменения файла или настроек preview нужно повторить.',
+                400,
+            )
+        if (
+            deck.render_settings.authoring_mode is AuthoringMode.ADVANCED
+            and request.form.get('trust_raw_csv') != 'on'
+        ):
+            return _render_deck_error(
+                deck_id,
+                'Подтвердите доверие raw TeX из CSV-файла.',
+                400,
+            )
         ImportCsv(_repo(), _max_cards()).execute(
             deck_id,
             file_bytes,
             _optional_version(request.form.get('version')),
-            delimiter=request.form.get('delimiter', 'auto'),
-            has_header=request.form.get('has_header') == 'on',
+            delimiter=delimiter,
+            schema_mode=schema_mode,
+            encoding=encoding,
         )
     except CardLimitExceeded as error:
-        return _render_deck_error(deck_id, str(error))
+        return _render_deck_error(deck_id, str(error), 400)
     except UnicodeDecodeError:
         deck_info = GetDeckInfo(_repo()).execute(deck_id)
         card_deck = GetDeck(_repo()).execute(deck_id)
@@ -1053,7 +1211,7 @@ def import_csv(deck_id):
             **_deck_page_context(
                 deck_info,
                 card_deck,
-                error='Ошибка кодировки. Сохраните CSV в UTF-8.',
+                error='Ошибка кодировки. Проверьте выбранную кодировку CSV.',
             ),
         )
     except (CsvValidationError, ValueError) as error:

@@ -9,8 +9,9 @@ import pytest
 
 from didactic_cards.adapters.sqlite_repository import SqliteRepository
 from didactic_cards.domain.entities import Card, CardDeck
-from didactic_cards.domain.rendering import DeckRenderSettings
+from didactic_cards.domain.rendering import AuthoringMode, DeckRenderSettings
 from didactic_cards.domain.trusted import TemplateStatus, TrustedTemplateVersion
+from didactic_cards.use_cases.card_use_cases import ImportCsv
 from didactic_cards.use_cases.deck_transfer import (
     DECK_EXPORT_SCHEMA_VERSION,
     DeckTransferError,
@@ -277,6 +278,62 @@ def test_csv_export_is_bom_semicolon_and_quote_safe(repo):
         ['section', 'front', 'back'],
         ['Тема', 'A;B', 'line\nvalue'],
     ]
+
+
+def test_advanced_csv_export_contains_headers_and_round_trips(repo):
+    deck = repo.create_deck(
+        'Advanced CSV',
+        render_settings=DeckRenderSettings(authoring_mode=AuthoringMode.ADVANCED),
+    )
+    repo.save_cards(deck.id, CardDeck([
+        Card(
+            section=' Raw ',
+            front='  \\vfill\nFront;value  ',
+            back='Back "quoted"',
+            upper_header='{{ card_number }}',
+            lower_header=r'Foot\\line',
+        )
+    ]))
+
+    exported = export_deck_csv(repo, deck.id)
+    rows = list(csv.reader(
+        io.StringIO(exported.decode('utf-8-sig'), newline=''),
+        delimiter=';',
+        strict=True,
+    ))
+
+    assert rows == [
+        ['section', 'front', 'back', 'upper_header', 'lower_header'],
+        [
+            ' Raw ', '  \\vfill\nFront;value  ', 'Back "quoted"',
+            '{{ card_number }}', r'Foot\\line',
+        ],
+    ]
+
+    target = repo.create_deck(
+        'Advanced CSV target',
+        render_settings=DeckRenderSettings(authoring_mode=AuthoringMode.ADVANCED),
+    )
+    assert ImportCsv(repo).execute(
+        target.id,
+        exported,
+        delimiter='semicolon',
+        schema_mode='header',
+    ) == 1
+    imported = repo.load_cards(target.id).cards[0]
+    assert (
+        imported.section,
+        imported.front,
+        imported.back,
+        imported.upper_header,
+        imported.lower_header,
+    ) == (
+        ' Raw ',
+        '  \\vfill\nFront;value  ',
+        'Back "quoted"',
+        '{{ card_number }}',
+        r'Foot\\line',
+    )
 
 
 def test_schema_one_json_import_remains_supported_with_legacy_defaults(repo):

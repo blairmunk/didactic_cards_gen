@@ -2,10 +2,14 @@
 
 Дата ревизии: 24 августа 2026 года.
 
-Статус: аудит и целевой контракт утверждены, реализация ещё не начата. Этот документ
-описывает обнаруженные дефекты, продуктовые решения, порядок внедрения и обязательные
-тесты. Текущее поведение отдельно отмечено как текущее и не должно восприниматься как
-обещание новой версии импорта.
+Статус: ✅ реализовано 24 августа 2026 года. Документ сохраняет исходные находки,
+принятый контракт, выполненный порядок внедрения и regression-матрицу. Раздел 2
+описывает прежнюю реализацию на момент аудита; фактический пользовательский контракт
+после исправления приведён в разделах 4–6.
+
+Результат реализации: единое mode-aware ядро имеет 100% statement/branch coverage в
+изолированном прогоне; обычный и Advanced CSV прошли server/browser round-trip,
+Advanced export сохраняет пять полей, а import связан с конкретным preview HMAC-токеном.
 
 ## 1. Назначение
 
@@ -249,44 +253,44 @@ Bulk остаётся быстрым ручным инструментом, но
 
 ## 8. План реализации
 
-### Этап 0 — зафиксировать контракты тестами
+### ✅ Этап 0 — зафиксировать контракты тестами
 
-- [ ] Добавить failing regression для всех `BUG-IMPORT-*` из раздела 3.
-- [ ] Добавить fixture-файлы обычного, Advanced, multiline, malformed и legacy CSV.
-- [ ] Зафиксировать character-for-character ожидания для raw-полей.
-- [ ] Зафиксировать текущее атомарное поведение quota/version как сохраняемый контракт.
+- [x] Добавить failing regression для всех `BUG-IMPORT-*` из раздела 3.
+- [x] Добавить примеры/fixtures обычного, Advanced, multiline, malformed и legacy CSV.
+- [x] Зафиксировать character-for-character ожидания для raw-полей.
+- [x] Зафиксировать атомарное поведение quota/version как сохраняемый контракт.
 
-### Этап 1 — общее импортное ядро
+### ✅ Этап 1 — общее импортное ядро
 
-- [ ] Ввести DTO schema/row/issue/preview и mode-aware column registry.
-- [ ] Реализовать strict CSV parsing, header validation и детерминированный dialect.
-- [ ] Удалить implicit `strip()`/backslash transformation из raw-пути.
-- [ ] Добавить валидацию empty/control/limits и единые error codes.
-- [ ] Перевести preview и import на один parser с повторной серверной проверкой.
+- [x] Ввести DTO schema/row/issue/preview и mode-aware column registry.
+- [x] Реализовать strict CSV parsing, header validation и детерминированный dialect.
+- [x] Удалить implicit `strip()`/backslash transformation из raw-пути.
+- [x] Добавить валидацию empty/control/limits и единые error codes.
+- [x] Перевести preview и import на один parser с повторной серверной проверкой.
 
-### Этап 2 — Advanced CSV и симметричный export
+### ✅ Этап 2 — Advanced CSV и симметричный export
 
-- [ ] Поддержать пять canonical колонок и их отображение в preview.
-- [ ] Сделать mode-aware export: три колонки для обычной, пять для Advanced.
-- [ ] Добавить скачиваемые шаблоны и краткий prompt-пример для другой программы/LLM.
-- [ ] Реализовать обязательный свежий preview и trust confirmation для Advanced.
-- [ ] Явно описать, что wrappers/settings/type не входят в CSV.
+- [x] Поддержать пять canonical колонок и их отображение в preview.
+- [x] Сделать mode-aware export: три колонки для обычной, пять для Advanced.
+- [x] Добавить скачиваемые шаблоны и краткий prompt-пример для другой программы/LLM.
+- [x] Реализовать обязательный свежий preview и trust confirmation для Advanced.
+- [x] Явно описать, что wrappers/settings/type не входят в CSV.
 
-### Этап 3 — безопасный bulk v2
+### ✅ Этап 3 — безопасный bulk v2
 
-- [ ] Разделить подсказки и схемы обычной/Advanced-колоды.
-- [ ] Реализовать quote-aware parser без специальных значений backslash.
-- [ ] Добавить четыре поля Advanced и общую секцию пачки.
-- [ ] Добавить read-only preview, номера строк и атомарное отклонение ошибок.
-- [ ] Выбрать и протестировать переход с legacy escapes; не менять semantics молча.
+- [x] Разделить подсказки и схемы обычной/Advanced-колоды.
+- [x] Реализовать quote-aware parser без специальных значений backslash.
+- [x] Добавить четыре поля Advanced и общую секцию пачки.
+- [x] Добавить read-only preview, номера строк и атомарное отклонение ошибок.
+- [x] Добавить явный legacy parser для старых escapes без молчаливой смены semantics.
 
-### Этап 4 — UX, совместимость и документация
+### ✅ Этап 4 — UX, совместимость и документация
 
-- [ ] Показывать причины ошибок, warnings, mapping и truncation в UI.
-- [ ] Инвалидировать preview при изменении входов и переводить focus к результату.
-- [ ] Добавить явный legacy mode, migration note и примеры CSV с quoting/multiline.
-- [ ] При необходимости добавить BOM-driven UTF-16 и explicit Windows-1251.
-- [ ] Обновить screenshots после browser E2E.
+- [x] Показывать причины ошибок, warnings, mapping и truncation в UI.
+- [x] Инвалидировать preview при изменении входов/версии и переводить focus к результату.
+- [x] Добавить явный legacy mode, migration note и примеры CSV с quoting/multiline.
+- [x] Добавить BOM-driven UTF-16 и explicit Windows-1251.
+- [x] Обновить screenshots после browser E2E.
 
 ## 9. Обязательная тестовая матрица
 

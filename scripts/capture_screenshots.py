@@ -15,6 +15,7 @@ async def capture(
     deck_id: str,
     output_dir: Path,
     advanced_deck_id: str | None = None,
+    advanced_csv_file: Path | None = None,
 ) -> None:
     executable = shutil.which("chromium") or shutil.which("chromium-browser")
     if not executable:
@@ -54,6 +55,19 @@ async def capture(
                 "path": str(output_dir / "advanced-deck-editor.png"),
                 "fullPage": True,
             })
+            if advanced_csv_file is not None:
+                upload = await page.querySelector("#csv_file")
+                await upload.uploadFile(str(advanced_csv_file.resolve()))
+                await page.select("#delimiter", "semicolon")
+                await page.click("#csv-preview-button")
+                await page.waitForFunction(
+                    "document.getElementById('csv-preview-result')"
+                    ".textContent.includes('Принято: 2')"
+                )
+                csv_form = await page.querySelector("#csv-import-form")
+                await csv_form.screenshot({
+                    "path": str(output_dir / "csv-import-preview.png")
+                })
             await page.goto(
                 f"{base_url}/deck/{advanced_deck_id}/advanced",
                 {"waitUntil": "domcontentloaded"},
@@ -105,6 +119,7 @@ def main() -> None:
     parser.add_argument("--base-url", default="http://127.0.0.1:5055")
     parser.add_argument("--deck-id", required=True)
     parser.add_argument("--advanced-deck-id")
+    parser.add_argument("--advanced-csv-file", type=Path)
     parser.add_argument("--output-dir", type=Path, default=Path("docs/images"))
     args = parser.parse_args()
     asyncio.run(capture(
@@ -112,6 +127,7 @@ def main() -> None:
         args.deck_id,
         args.output_dir,
         args.advanced_deck_id,
+        args.advanced_csv_file,
     ))
 
 

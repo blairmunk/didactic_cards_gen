@@ -293,6 +293,39 @@ select {
     overflow: auto;
 }
 
+.import-preview:focus {
+    outline: 2px solid #1f6feb;
+    outline-offset: 3px;
+}
+
+.import-row-values {
+    margin: 0.35rem 0 0.75rem;
+    padding: 0.5rem;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    background: #f6f8fa;
+    color: #24292f;
+    border: 1px solid #d0d7de;
+    border-radius: 4px;
+}
+
+.import-issue-error {
+    color: #b42318;
+}
+
+.import-issue-warning,
+.warning-message {
+    color: #8a4b08;
+}
+
+.trust-confirmation {
+    display: block;
+    margin-top: 0.75rem;
+    padding: 0.75rem;
+    border-left: 4px solid #8a4b08;
+    background: #fff8e6;
+}
+
 .status-message {
     min-height: 1.25rem;
     color: #666;

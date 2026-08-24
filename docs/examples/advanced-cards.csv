@@ -1,0 +1,3 @@
+section;front;back;upper_header;lower_header
+Механика;"\vfill\centering Найдите ускорение $a$\vfill";"\vfill\centering $a=F/m$\vfill";"Механика · {{ card_number }}/{{ card_count }}";"Базовый уровень"
+Оптика;"\vfill Что произойдёт с лучом?\vfill";"\vfill Луч преломится.\vfill";"Оптика · {{ card_number }}/{{ card_count }}";"Повторение"

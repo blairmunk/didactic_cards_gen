@@ -256,16 +256,29 @@
     <!-- Пакетное добавление -->
     <h2>Пакетное добавление</h2>
     <div class="card-form">
-        <form action="{{ url_for('cards.add_cards_bulk', deck_id=deck.id) }}" method="post">
+        <form id="bulk-import-form" action="{{ url_for('cards.add_cards_bulk', deck_id=deck.id) }}" method="post">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="version" value="{{ deck.version }}">
+            <input type="hidden" name="preview_token" id="bulk-preview-token" value="">
             <label for="bulk-section">Секция / тема для всей пачки:</label>
             <input type="text" name="section" id="bulk-section" placeholder="Можно оставить пустым">
-            <label for="bulk">Формат: <code>лицевая || оборотная</code>, каждая с новой строки:</label>
+            <label for="bulk-schema-mode">Формат:</label>
+            <select name="schema_mode" id="bulk-schema-mode">
+                <option value="v2">Строгий v2 — без преобразования обратных слэшей</option>
+                <option value="legacy">Legacy — совместимость со старыми escapes</option>
+            </select>
+            {% if is_advanced %}
+            <p class="preview-notice">Одна строка: <code>front||back||upper_header||lower_header</code>. Поле с буквальным <code>||</code> заключите в двойные кавычки. Для многострочного или сгенерированного TeX используйте CSV.</p>
+            {% else %}
+            <p class="preview-notice">Одна строка: <code>front||back</code>. Поле с буквальным <code>||</code> заключите в двойные кавычки.</p>
+            {% endif %}
+            <label for="bulk">Каждая карточка с новой строки:</label>
             <textarea name="bulk" id="bulk" rows="8"
-                      placeholder="Найти ускорение тела массой 5кг || a = F/m = 10/5 = 2 м/с²&#10;Чему равна сила тяжести тела 3кг || F = mg = 3·10 = 30 Н"></textarea>
+                      placeholder="{{ 'TeX лица||TeX оборота||Верхний колонтитул||Нижний колонтитул' if is_advanced else 'Найти ускорение тела||a = F/m = 2 м/с²' }}"></textarea>
             <br><br>
-            <button type="submit" class="btn-primary">➕ Добавить все</button>
+            <button type="button" id="bulk-preview-button" class="btn-secondary">Проверить пачку</button>
+            <button type="submit" id="bulk-import-button" class="btn-primary" disabled>➕ Добавить все</button>
+            <div id="bulk-preview-result" class="import-preview" role="status" aria-live="polite" tabindex="-1"></div>
         </form>
     </div>
 
@@ -275,8 +288,15 @@
         <form id="csv-import-form" action="{{ url_for('cards.import_csv', deck_id=deck.id) }}" method="post" enctype="multipart/form-data">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="version" value="{{ deck.version }}">
-            <label for="csv_file">Файл CSV (<code>секция;лицевая;оборотная</code>, старый формат из двух колонок тоже поддерживается):</label>
+            <input type="hidden" name="preview_token" id="csv-preview-token" value="">
+            <p><a href="{{ url_for('cards.download_card_csv_template', deck_id=deck.id) }}" download>Скачать шаблон CSV для {{ 'Advanced' if is_advanced else 'обычной' }} колоды</a></p>
+            <label for="csv_file">Файл CSV ({% if is_advanced %}<code>section;front;back;upper_header;lower_header</code>{% else %}<code>section;front;back</code>{% endif %}):</label>
             <input type="file" name="csv_file" id="csv_file" accept=".csv">
+            <label for="csv-schema-mode">Схема:</label>
+            <select name="schema_mode" id="csv-schema-mode">
+                <option value="header">Строгая — canonical-заголовок</option>
+                <option value="legacy">Legacy без заголовка — ровно 2 или 3 колонки</option>
+            </select>
             <label for="delimiter">Разделитель:</label>
             <select name="delimiter" id="delimiter">
                 <option value="auto">Определить автоматически</option>
@@ -284,11 +304,20 @@
                 <option value="comma">Запятая</option>
                 <option value="tab">Табуляция</option>
             </select>
-            <label><input type="checkbox" name="has_header"> Первая строка — заголовок</label>
+            <label for="csv-encoding">Кодировка:</label>
+            <select name="encoding" id="csv-encoding">
+                <option value="utf-8">UTF-8 / UTF-8-BOM</option>
+                <option value="auto">По BOM (UTF-8 или UTF-16)</option>
+                <option value="utf-16">UTF-16 с BOM</option>
+                <option value="windows-1251">Windows-1251</option>
+            </select>
+            {% if is_advanced %}
+            <label class="trust-confirmation"><input type="checkbox" name="trust_raw_csv" id="trust-raw-csv"> Я доверяю raw TeX из этого файла. Он будет исполняться только через sandbox при создании PDF.</label>
+            {% endif %}
             <br><br>
             <button type="button" id="csv-preview-button" class="btn-secondary">Проверить файл</button>
-            <button type="submit" class="btn-primary">📂 Импортировать</button>
-            <div id="csv-preview-result" class="import-preview" role="status" aria-live="polite"></div>
+            <button type="submit" id="csv-import-button" class="btn-primary" disabled>📂 Импортировать</button>
+            <div id="csv-preview-result" class="import-preview" role="status" aria-live="polite" tabindex="-1"></div>
         </form>
     </div>
 

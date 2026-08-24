@@ -26,7 +26,11 @@ class BrowserTrustedCompiler(BrowserCompiler):
         return True
 
 
-async def _exercise_browser(base_url: str, csv_path: str) -> None:
+async def _exercise_browser(
+    base_url: str,
+    csv_path: str,
+    advanced_csv_path: str,
+) -> None:
     from pyppeteer import launch
 
     browser = await launch(
@@ -270,6 +274,26 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             page.click('#single-card-form button[type="submit"]'),
         )
 
+        advanced_upload = await page.querySelector('#csv_file')
+        await advanced_upload.uploadFile(advanced_csv_path)
+        await page.select('#delimiter', 'semicolon')
+        await page.click('#csv-preview-button')
+        await page.waitForFunction(
+            "document.getElementById('csv-preview-result').textContent.includes('Принято: 1')"
+        )
+        advanced_preview = await page.Jeval(
+            '#csv-preview-result', 'element => element.textContent'
+        )
+        assert 'upper_header: CSV top' in advanced_preview
+        await page.click('#trust-raw-csv')
+        await asyncio.gather(
+            page.waitForNavigation({'waitUntil': 'networkidle2'}),
+            page.click('#csv-import-button'),
+        )
+        assert await page.Jeval(
+            '#cards-count', 'element => element.textContent'
+        ) == '2'
+
         direct_pdf = await page.evaluate(
             '''async () => {
                 const form = document.querySelector('form[action$="generate"]');
@@ -325,7 +349,16 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
 @pytest.mark.filterwarnings('ignore:remove loop argument:DeprecationWarning')
 def test_complete_browser_workflow_is_offline_and_persistent(tmp_path):
     csv_path = tmp_path / 'cards.csv'
-    csv_path.write_text('csv question;csv answer\n', encoding='utf-8')
+    csv_path.write_text(
+        'front;back\ncsv question;csv answer\n',
+        encoding='utf-8',
+    )
+    advanced_csv_path = tmp_path / 'advanced-cards.csv'
+    advanced_csv_path.write_text(
+        'section;front;back;upper_header;lower_header\n'
+        'CSV raw;"\\vfill CSV front \\vfill";CSV back;CSV top;CSV bottom\n',
+        encoding='utf-8',
+    )
     app = create_app(
         config=AppConfig(
             secret_key='browser-secret', trusted_latex_enabled=True
@@ -345,7 +378,9 @@ def test_complete_browser_workflow_is_offline_and_persistent(tmp_path):
     try:
         asyncio.run(
             _exercise_browser(
-                f'http://127.0.0.1:{server.server_port}', str(csv_path)
+                f'http://127.0.0.1:{server.server_port}',
+                str(csv_path),
+                str(advanced_csv_path),
             )
         )
     finally:

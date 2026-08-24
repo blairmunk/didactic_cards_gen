@@ -11,11 +11,10 @@ JavaScript controls и фактически отрисованный Chromium UI
 Advanced — raw TeX, необязательные отдельные оболочки лица/оборота и значения верхнего/нижнего колонтитула у каждой карточки, без встроенных safe-шрифтов, линий и оформления.
 Deployment-флаг лишь разрешает создание/исполнение Advanced-колод и не меняет тип уже созданных.
 
-Повторная ревизия выявила одно существенное исключение из полноты UI: формы bulk/CSV
-видимы в обоих режимах, но используют общий legacy-контракт `front/back`. Они не дают
-подготовить или проверить `upper_header/lower_header`, а одинаковая подсказка скрывает
-то, что raw-контент может быть преобразован parser-ом. Это зафиксировано как активная
-серия `IMPORT-*`, а не как доступная Advanced-функция.
+Повторная ревизия выявила и закрыла существенное исключение из полноты UI: формы
+bulk/CSV были видимы в обоих режимах, но использовали общий legacy-контракт. Теперь UI
+показывает отдельные safe/Advanced-схемы, все поля колонтитулов, downloadable template,
+подробный обязательный preview и подтверждение доверия raw-файлу.
 
 В ходе аудита исправлены три разрыва:
 
@@ -37,7 +36,7 @@ Deployment-флаг лишь разрешает создание/исполне�
 | Колода | Название/описание и printer profiles | Верхняя навигация колоды |
 | Обычная колода | Preset, выравнивание 3×3, верхний/нижний колонтитулы, `card_number/card_count`, линии, профили шрифтов/интервалов и section breaks | «Оформление обычной колоды»; дополнительные секции свёрнуты |
 | Advanced-колода | Raw TeX каждой стороны; необязательная versioned-оболочка и trusted-поля верхнего/нижнего колонтитула | Отдельная Advanced-панель; safe-оформление отсутствует |
-| Колода | Single add; legacy bulk/CSV import и read-only CSV preview | Формы добавления; mode-aware Advanced CSV ещё в плане |
+| Колода | Single add; strict/legacy bulk; mode-aware CSV и read-only preview | Раздельные подсказки, шаблоны и поля обычной/Advanced-колоды |
 | Колода | Table/visual preview, edit/delete, drag и keyboard reorder | Таблица/превью карточек |
 | Колода | JSON/CSV export, включая пустую колоду | Всегда видимый раздел «Данные колоды» |
 | Колода | LaTeX preview, PDF, front-only, back-only, inline PDF | «Генерация» при наличии карточек |
@@ -66,13 +65,13 @@ Deployment-флаг лишь разрешает создание/исполне�
 может показывать состояние и инструкцию, но не должен менять работающий сервер. Настройки
 конкретной колоды и принтера, напротив, сохраняются через UI.
 
-## Активный UI-разрыв: импорт
+## ✅ Закрытый UI-разрыв: импорт
 
-Целевой Advanced CSV предназначен для загрузки готовых полей из другой программы или
-нейросети. UI должен показать пять canonical колонок, дать скачать шаблон, отобразить
-все поля и адресные ошибки в preview, потребовать свежий preview и подтверждение доверия
-raw-файлу. Обычная колода должна продолжить показывать только `section/front/back`.
-Подробный контракт и browser-test matrix: [аудит bulk/CSV](BULK_CSV_IMPORT_AUDIT.md).
+Advanced CSV загружает готовые поля из другой программы или нейросети. UI показывает
+пять canonical колонок, даёт скачать шаблон, отображает все поля и адресные ошибки,
+требует свежий preview и подтверждение доверия raw-файлу. Обычная колода показывает
+только `section/front/back`. Контракт и выполненная browser-test matrix:
+[аудит bulk/CSV](BULK_CSV_IMPORT_AUDIT.md).
 
 ## Проверяемый контракт
 
@@ -82,9 +81,10 @@ preview, preflight, reset и printer profile. Отдельные тесты пр
 Advanced navigation, export пустой колоды и prefilled edit printer profile. Chromium E2E
 проходит реальную навигацию в Advanced editor и calibration calculator.
 
-Это покрытие пока не доказывает lossless Advanced bulk/CSV: пятиколоночный round-trip,
-strict malformed input, сохранение raw whitespace/backslashes и mode-aware UI должны
-быть добавлены до закрытия `IMPORT-CSV-V2`.
+Дополнительное покрытие доказывает пятиколоночный Advanced round-trip, strict malformed
+input, сохранение raw whitespace/backslashes, свежесть preview и mode-aware UI. Chromium
+E2E импортирует внешний Advanced CSV, подтверждает raw trust и затем создаёт PDF через
+sandbox compiler.
 
 Полный accessibility review PDF overlay остаётся отдельным пунктом roadmap: этот аудит
 проверяет достижимость функций, названия controls, keyboard reorder и основные focus

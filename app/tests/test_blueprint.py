@@ -53,6 +53,41 @@ def _enable_trusted(app, tmp_path, *, compiler=None):
     return repository, deck
 
 
+def _preview_bulk(client, deck_id, bulk, *, section='', schema_mode='v2'):
+    data = {
+        'bulk': bulk,
+        'section': section,
+        'schema_mode': schema_mode,
+    }
+    response = client.post(f'/api/deck/{deck_id}/preview_bulk', data=data)
+    return response, data
+
+
+def _preview_csv(
+    client,
+    deck_id,
+    source,
+    *,
+    schema_mode='header',
+    delimiter='auto',
+    encoding='utf-8',
+):
+    options = {
+        'schema_mode': schema_mode,
+        'delimiter': delimiter,
+        'encoding': encoding,
+    }
+    response = client.post(
+        f'/api/deck/{deck_id}/preview_csv',
+        data={
+            **options,
+            'csv_file': (io.BytesIO(source), 'cards.csv'),
+        },
+        content_type='multipart/form-data',
+    )
+    return response, options
+
+
 def test_deck_crud_pages(client, repo):
     assert client.get("/").status_code == 200
 
@@ -266,9 +301,18 @@ def test_card_html_workflow(client, repo, deck_id):
     assert repo.load_cards(deck_id).cards[0].front == "Question"
     assert repo.load_cards(deck_id).cards[0].section == "Mechanics"
 
+    bulk_preview, bulk_options = _preview_bulk(
+        client,
+        deck_id,
+        'Q2||A2',
+        section='Dynamics',
+    )
     client.post(
         f"/deck/{deck_id}/add_cards_bulk",
-        data={"bulk": "Q2 || A2", "section": "Dynamics"},
+        data={
+            **bulk_options,
+            'preview_token': bulk_preview.json['preview_token'],
+        },
     )
     second_id = repo.load_cards(deck_id).cards[1].id
     edit_page = client.get(f"/deck/{deck_id}/edit_card/{second_id}")
@@ -304,21 +348,28 @@ def test_html_escapes_user_content(client, deck_id):
 
 def test_csv_import_and_encoding_error(client, repo, deck_id):
     assert client.post(f"/deck/{deck_id}/import_csv").status_code == 302
+    source = b'front;back\nfront;back\n'
+    preview, options = _preview_csv(client, deck_id, source)
+    assert preview.status_code == 200
     response = client.post(
         f"/deck/{deck_id}/import_csv",
-        data={"csv_file": (io.BytesIO("front,back".encode()), "cards.csv")},
+        data={
+            **options,
+            'preview_token': preview.json['preview_token'],
+            'csv_file': (io.BytesIO(source), 'cards.csv'),
+        },
         content_type="multipart/form-data",
     )
     assert response.status_code == 302
     assert repo.load_cards(deck_id).cards[0].back == "back"
 
-    response = client.post(
-        f"/deck/{deck_id}/import_csv",
-        data={"csv_file": (io.BytesIO(b"\xff\xfe"), "broken.csv")},
-        content_type="multipart/form-data",
+    response, _ = _preview_csv(
+        client,
+        deck_id,
+        b'\xff\xff',
     )
-    assert response.status_code == 200
-    assert "Ошибка кодировки" in response.text
+    assert response.status_code == 400
+    assert 'кодиров' in response.json['error']
 
 
 def test_csv_preview_is_read_only_and_reports_validation(client, repo, deck_id):
@@ -377,6 +428,190 @@ def test_csv_preview_validates_file_encoding_dialect_and_deck(client, deck_id):
         content_type="multipart/form-data",
     )
     assert missing_deck.status_code == 404
+
+
+def test_mode_aware_csv_templates(client, repo, deck_id):
+    safe = client.get(f'/deck/{deck_id}/import-template.csv')
+    advanced = repo.create_deck(
+        'Advanced',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    raw = client.get(f'/deck/{advanced.id}/import-template.csv')
+
+    assert safe.data.decode('utf-8-sig') == 'section;front;back\n'
+    assert raw.data.decode('utf-8-sig') == (
+        'section;front;back;upper_header;lower_header\n'
+    )
+
+
+def test_advanced_csv_preview_trust_and_lossless_import(client, repo):
+    deck = repo.create_deck(
+        'Advanced import',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    source = (
+        'section;front;back;upper_header;lower_header\n'
+        'Raw;"  \\vfill\nFront  ";Back;"{{ card_number }}";"Foot\\\\line"\n'
+    ).encode()
+    preview, options = _preview_csv(client, deck.id, source)
+
+    assert preview.status_code == 200
+    assert preview.json['accepted_count'] == 1
+    assert preview.json['columns'] == [
+        'section', 'front', 'back', 'upper_header', 'lower_header'
+    ]
+    assert preview.json['cards'][0]['front'] == '  \\vfill\nFront  '
+    assert 'id' not in preview.json['cards'][0]
+    token = preview.json['preview_token']
+
+    untrusted = client.post(
+        f'/deck/{deck.id}/import_csv',
+        data={
+            **options,
+            'preview_token': token,
+            'csv_file': (io.BytesIO(source), 'cards.csv'),
+        },
+        content_type='multipart/form-data',
+    )
+    assert untrusted.status_code == 400
+    assert len(repo.load_cards(deck.id)) == 0
+
+    imported = client.post(
+        f'/deck/{deck.id}/import_csv',
+        data={
+            **options,
+            'preview_token': token,
+            'trust_raw_csv': 'on',
+            'csv_file': (io.BytesIO(source), 'cards.csv'),
+        },
+        content_type='multipart/form-data',
+    )
+    assert imported.status_code == 302
+    card = repo.load_cards(deck.id).cards[0]
+    assert card.front == '  \\vfill\nFront  '
+    assert card.upper_header == '{{ card_number }}'
+    assert card.lower_header == r'Foot\\line'
+
+
+def test_csv_import_requires_fresh_preview_for_same_file_and_deck_version(
+    client, repo, deck_id
+):
+    source = b'front;back\nQ;A\n'
+    preview, options = _preview_csv(client, deck_id, source)
+    assert preview.json['preview_token']
+
+    client.post(
+        f'/api/deck/{deck_id}/add_card',
+        json={'front': 'changed', 'back': 'deck'},
+    )
+    stale = client.post(
+        f'/deck/{deck_id}/import_csv',
+        data={
+            **options,
+            'preview_token': preview.json['preview_token'],
+            'csv_file': (io.BytesIO(source), 'cards.csv'),
+        },
+        content_type='multipart/form-data',
+    )
+    assert stale.status_code == 400
+    assert [card.front for card in repo.load_cards(deck_id).cards] == ['changed']
+
+
+def test_bulk_v2_preview_is_required_and_imports_advanced_headers(
+    client, repo
+):
+    deck = repo.create_deck(
+        'Advanced bulk',
+        render_settings=DeckRenderSettings(authoring_mode='advanced'),
+    )
+    source = r'"A || B"||Back\\line||Top||Bottom'
+    preview, options = _preview_bulk(
+        client, deck.id, source, section='Raw'
+    )
+    assert preview.status_code == 200
+    assert preview.json['cards'][0]['front'] == 'A || B'
+
+    changed = client.post(
+        f'/deck/{deck.id}/add_cards_bulk',
+        data={**options, 'bulk': source + 'x',
+              'preview_token': preview.json['preview_token']},
+    )
+    assert changed.status_code == 400
+    assert len(repo.load_cards(deck.id)) == 0
+
+    imported = client.post(
+        f'/deck/{deck.id}/add_cards_bulk',
+        data={**options, 'preview_token': preview.json['preview_token']},
+    )
+    assert imported.status_code == 302
+    card = repo.load_cards(deck.id).cards[0]
+    assert (card.front, card.back, card.upper_header, card.lower_header) == (
+        'A || B', r'Back\\line', 'Top', 'Bottom'
+    )
+
+
+def test_csv_preview_exposes_addressed_issues(client, deck_id):
+    response, _ = _preview_csv(
+        client,
+        deck_id,
+        b'front;answer\nQ;A\n',
+        delimiter='semicolon',
+    )
+    assert response.status_code == 200
+    assert response.json['preview_token'] == ''
+    assert response.json['issues'][0] == {
+        'row': 1,
+        'code': 'unknown_column',
+        'reason': "Неизвестная колонка 'answer' для режима safe",
+        'column': 'answer',
+        'severity': 'error',
+    }
+
+
+def test_import_preview_routes_validate_deck_options_and_quota(
+    client, app, repo, deck_id
+):
+    assert client.post('/api/deck/missing/preview_bulk').status_code == 404
+    assert client.post(
+        '/deck/missing/add_cards_bulk', data={}
+    ).status_code == 302
+    assert client.post(
+        '/deck/missing/import_csv',
+        data={'csv_file': (io.BytesIO(b'front;back\nQ;A'), 'cards.csv')},
+        content_type='multipart/form-data',
+    ).status_code == 302
+    invalid_bulk = client.post(
+        f'/api/deck/{deck_id}/preview_bulk',
+        data={'bulk': 'Q||A', 'schema_mode': 'future'},
+    )
+    assert invalid_bulk.status_code == 400
+
+    app.config['MAX_CARDS'] = 0
+    bulk_preview, bulk_options = _preview_bulk(client, deck_id, 'Q||A')
+    bulk_import = client.post(
+        f'/deck/{deck_id}/add_cards_bulk',
+        data={
+            **bulk_options,
+            'preview_token': bulk_preview.json['preview_token'],
+        },
+    )
+    assert bulk_import.status_code == 400
+
+    csv_deck = repo.create_deck('CSV quota')
+    source = b'front;back\nQ;A\n'
+    csv_preview, csv_options = _preview_csv(client, csv_deck.id, source)
+    csv_import = client.post(
+        f'/deck/{csv_deck.id}/import_csv',
+        data={
+            **csv_options,
+            'preview_token': csv_preview.json['preview_token'],
+            'csv_file': (io.BytesIO(source), 'cards.csv'),
+        },
+        content_type='multipart/form-data',
+    )
+    assert csv_import.status_code == 400
+    assert 'Максимум карточек' in csv_import.text
+    assert len(repo.load_cards(csv_deck.id)) == 0
 
 
 def test_api_card_workflow(client, deck_id):
@@ -794,9 +1029,16 @@ def test_stale_deck_version_is_rejected(client, repo, deck_id):
     assert stale.json["current_version"] == first.json["deck_version"]
     assert [card.front for card in repo.load_cards(deck_id).cards] == ["first"]
 
+    bulk_preview, bulk_options = _preview_bulk(
+        client, deck_id, 'second||answer'
+    )
     html_conflict = client.post(
         f"/deck/{deck_id}/add_cards_bulk",
-        data={"bulk": "second || answer", "version": initial_version},
+        data={
+            **bulk_options,
+            'version': initial_version,
+            'preview_token': bulk_preview.json['preview_token'],
+        },
     )
     assert html_conflict.status_code == 409
     assert "Колода уже изменена" in html_conflict.text

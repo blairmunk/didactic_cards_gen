@@ -38,7 +38,7 @@
   - [x] Карточные HTML/API операции переведены с индексов на UUID; deck version даёт HTTP 409 при stale mutation.
 - [ ] Этап 4: импорт и web UX.
   - [x] Bulk использует exact `||` и документированное escaping.
-  - [x] CSV поддерживает auto/explicit dialect, UTF-8 BOM, header toggle, read-only preview и atomic reject при bad rows.
+  - [x] CSV поддерживает strict canonical header/legacy schema, mode-aware 3/5-column mapping, allowlisted encoding/dialect, подписанный read-only preview и atomic reject при bad rows.
   - [x] DnD/keyboard reorder использует UUID, loading state и DOM rollback.
   - [x] MathJax 3.2.2 и fonts vendored локально; добавлен status/fallback.
   - [x] Декоративный preview дополнен inline preview того же сгенерированного PDF.
@@ -97,7 +97,7 @@
 - сгенерирован настоящий A4 PDF, обе страницы растеризованы и визуально проверены;
 - проверены зависимости через `pip check` и исходники через `git diff --check`.
 
-Текущая автоматизированная база: 569 проходящих тестов, 0 `xfail`, включая browser E2E; branch coverage не ниже обязательного CI-порога 98%. Chromium-сценарий проверяет раздельные safe/Advanced-колоды, динамические safe-колонтитулы и линии, direct raw-печать, разные Advanced-оболочки front/back, колонтитулы карточки, focus/scroll preflight и calibration UI. Физический прогон на реальном принтере ещё обязателен: PDF/raster-проверка и калькулятор не моделируют driver margins, feed skew и аппаратный duplex offset.
+Текущая автоматизированная база: 604 проходящих теста, 0 `xfail`, включая browser E2E; branch coverage не ниже обязательного CI-порога 98%. Chromium-сценарий проверяет раздельные safe/Advanced-колоды, strict safe CSV, пятиколоночный Advanced CSV с trust confirmation, динамические safe-колонтитулы и линии, direct raw-печать, разные Advanced-оболочки front/back, колонтитулы карточки, focus/scroll preflight и calibration UI. Физический прогон на реальном принтере ещё обязателен: PDF/raster-проверка и калькулятор не моделируют driver margins, feed skew и аппаратный duplex offset.
 
 ## 3. Реестр дефектов
 
@@ -124,7 +124,7 @@
 | ~~BUG-ARCH-001~~ ✅ | Старый `JsonFileStorage` импортировал удалённый `StorageBackend`; весь старый test collection раньше падал. | Выполнено на этапе 0: неиспользуемые `JsonFileStorage` и `FlaskSessionRepository` удалены вместе с устаревшими тестами; активным остаётся один `JsonRepository`. |
 | ~~BUG-UI-001~~ ✅ | Drag-and-drop вызывал `renumberRows()` до построения permutation и отправлял identity order. | Выполнено: DOM и API используют card UUID, payload строится до renumber, failure восстанавливает прежний DOM без reload, stale version даёт 409; browser E2E проходит. |
 | ~~BUG-IMP-001~~ ✅ | UI обещал `||`, parser делил по первому одиночному `|`. | Выполнено: exact `||`, `\||` и `\\`; parser/UI/docs и regression tests синхронизированы. |
-| ~~BUG-IMP-002~~ ✅ | UI обещал `;`, `csv.reader` использовал `,`. | Выполнено: auto/explicit comma-semicolon-tab, UTF-8/BOM, header toggle, read-only preview, rejected counts и atomic reject. |
+| ~~BUG-IMP-002~~ ✅ | UI обещал `;`, `csv.reader` использовал `,`. | Выполнено и расширено: strict canonical header/explicit legacy, auto/explicit comma-semicolon-tab, UTF-8/UTF-16/Windows-1251, mode-aware 3/5-column mapping, подписанный read-only preview и atomic reject. |
 | ~~BUG-PDF-001~~ ✅ | Partial PDF считался успехом даже при non-zero exit code. | Выполнено: обязательный return code 0, наличие PDF, safe failure flags и fallback stdout/stderr log. |
 | ~~BUG-LIMIT-001~~ ✅ | `max_cards=200` не использовался. | Выполнено: единый quota в use cases и web/API; bulk/CSV проверяют будущую ёмкость до сохранения. |
 | ~~BUG-CONF-001~~ ✅ | База зависела от process CWD. | Выполнено: стабильный абсолютный `app/data`, override через `DIDACTIC_CARDS_DATA_DIR`; оба CWD дают один путь. Диагностика legacy-каталогов остаётся частью миграции. |
@@ -218,7 +218,7 @@
 
 1. [x] Единая спецификация bulk delimiter; UI, parser, escaping и docs синхронизированы.
 2. [x] Базовый CSV wizard: dialect/UTF-8/header skip, preview counts и atomic rollback;
-   [ ] mode-aware strict v2 и lossless Advanced round-trip — по плану
+   [x] mode-aware strict v2 и lossless Advanced round-trip — по выполненному плану
    [аудита bulk/CSV](BULK_CSV_IMPORT_AUDIT.md).
 3. [x] DnD на stable IDs; keyboard reorder; loading/error/rollback states.
 4. [x] Локальный MathJax bundle и явный status/fallback typesetting.
@@ -234,7 +234,7 @@
 1. [x] Config-defined и сохраняемые SQLite-профили, выбор на print job, двухстраничный калибровочный PDF и web workflow с X/Y offsets. Фактические значения пользователь получает по пяти парам мишеней и контрольному отрезку 100 мм.
 2. Выбор формата A4/Letter, ориентации, сетки, внешнего размера карточки, margins/gaps/bleed/safe area.
 3. [x] Двусторонний PDF и два отдельных файла front/back для принтеров без duplex. Раздельные документы сохраняют одинаковую нумерацию физических листов, back permutation и калибровочные offsets; unit, HTTP и реальный `pdflatex` page-count test проходят.
-4. [x] Полный импорт/экспорт колоды обновлён до versioned JSON schema 8; schema 1–7 обратно совместимы, trusted history всегда импортируется как Advanced + `imported/quarantined`, без approval. Текущий UTF-8-BOM CSV сохраняет только `section/front/back` и пока не является полным Advanced round-trip: исправление вынесено в `IMPORT-CSV-V2`. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
+4. [x] Полный импорт/экспорт колоды обновлён до versioned JSON schema 8; schema 1–7 обратно совместимы, trusted history всегда импортируется как Advanced + `imported/quarantined`, без approval. Mode-aware UTF-8-BOM CSV экспортирует три safe-колонки или пять Advanced-полей и даёт character-preserving round-trip строк карточек; оболочки и настройки остаются только в JSON. Полный backup/restore всей базы остаётся эксплуатационным пунктом.
 5. 🟡 Шаблоны оформления: ✅ безопасные профили шрифта/размера/начертания/интервалов и два колонтитула выполнены; фон, изображения и QR остаются после отдельной security-модели.
 6. [x] Auto-fit и preflight: 12pt → small → footnotesize → scriptsize, адресный vertical/horizontal overflow, missing glyphs, unsupported formulas и printable-area warning. Результат получает focus и прокручивается в видимую область; layout-only `Overfull hbox` игнорируется. Silent clipping отклонён как риск потери текста.
 7. Поиск, теги, массовое редактирование, undo/trash вместо немедленного удаления.
@@ -242,7 +242,7 @@
 9. [x] Advanced-контракт исправлен: `{{ upper_header }}` и `{{ lower_header }}` получают значения конкретной карточки, а UI версии хранит две общие raw-оболочки — отдельно для front и back.
 10. [x] Верхний и нижний safe-колонтитулы опционально отделяются горизонтальной линией allowlisted-толщины и отступа.
 11. [x] Встроенные `{{ card_number }}` и `{{ card_count }}` реализованы для динамических колонтитулов карточки; универсальные пользовательские поля убраны из активного roadmap и помещены в icebox до подтверждения спроса.
-12. [ ] `IMPORT-CSV-V2`: строгий mode-aware CSV, пять полей Advanced-карточки, lossless raw round-trip, подробный обязательный preview и симметричный export. Полная спецификация и тестовая матрица — в [отдельном аудите](BULK_CSV_IMPORT_AUDIT.md).
+12. [x] `IMPORT-CSV-V2`: строгий mode-aware CSV, пять полей Advanced-карточки, lossless raw round-trip, подробный обязательный preview и симметричный export. Полная спецификация и тестовая матрица — в [отдельном аудите](BULK_CSV_IMPORT_AUDIT.md).
 
 ## 5. Правила реализации каждого фикса
 
@@ -497,14 +497,14 @@ safe-сценарий, но перестал быть достаточным п�
 
 Активный порядок работ:
 
-1. `IMPORT-CONTRACT-001` — failing fixtures и единый mode-aware import DTO/parser.
-2. `IMPORT-CSV-V2` — strict header schema, детерминированные delimiter/encoding,
+1. ✅ `IMPORT-CONTRACT-001` — failing fixtures и единый mode-aware import DTO/parser.
+2. ✅ `IMPORT-CSV-V2` — strict header schema, детерминированные delimiter/encoding,
    подробный preview и атомарный import.
-3. `IMPORT-ADV-001` — пять Advanced-полей, character-preserving import/export,
+3. ✅ `IMPORT-ADV-001` — пять Advanced-полей, character-preserving import/export,
    свежий preview и явное доверие raw-файлу.
-4. `IMPORT-BULK-V2` — parser без backslash escaping, четыре Advanced-поля,
+4. ✅ `IMPORT-BULK-V2` — parser без backslash escaping, четыре Advanced-поля,
    quote-aware строки и preview с адресными ошибками.
-5. `IMPORT-UX-001` — шаблоны файлов, focus/scroll, причины и warnings, документация,
+5. ✅ `IMPORT-UX-001` — шаблоны файлов, focus/scroll, причины и warnings, документация,
    screenshots и browser E2E.
 
 Полный перечень подводных камней, принятые решения, этапы, security boundary,
