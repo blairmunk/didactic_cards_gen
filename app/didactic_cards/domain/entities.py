@@ -21,27 +21,46 @@ class Card:
     front: str = ''
     back: str = ''
     section: str = ''
+    upper_header: str = ''
+    lower_header: str = ''
     id: str = field(default_factory=_new_id)
     parent_id: Optional[str] = None
     created_at: datetime = field(default_factory=_now)
     updated_at: datetime = field(default_factory=_now)
 
     def is_empty(self) -> bool:
-        return not self.front.strip() and not self.back.strip()
+        return not any(
+            value.strip() for value in (
+                self.front, self.back, self.upper_header, self.lower_header
+            )
+        )
 
     def clone(self, keep_parent: bool = True) -> Card:
         return Card(
             front=self.front,
             back=self.back,
             section=self.section,
+            upper_header=self.upper_header,
+            lower_header=self.lower_header,
             parent_id=self.id if keep_parent else None,
         )
 
-    def update(self, front: str, back: str, section: str | None = None) -> None:
+    def update(
+        self,
+        front: str,
+        back: str,
+        section: str | None = None,
+        upper_header: str | None = None,
+        lower_header: str | None = None,
+    ) -> None:
         self.front = front
         self.back = back
         if section is not None:
             self.section = section
+        if upper_header is not None:
+            self.upper_header = upper_header
+        if lower_header is not None:
+            self.lower_header = lower_header
         self.updated_at = _now()
 
     def to_dict(self) -> dict:
@@ -51,6 +70,8 @@ class Card:
             'front': self.front,
             'back': self.back,
             'section': self.section,
+            'upper_header': self.upper_header,
+            'lower_header': self.lower_header,
             'created_at': self.created_at.isoformat(),
             'updated_at': self.updated_at.isoformat(),
         }
@@ -63,6 +84,8 @@ class Card:
             front=data.get('front', ''),
             back=data.get('back', ''),
             section=data.get('section', ''),
+            upper_header=data.get('upper_header', ''),
+            lower_header=data.get('lower_header', ''),
             created_at=datetime.fromisoformat(data['created_at']) if 'created_at' in data else _now(),
             updated_at=datetime.fromisoformat(data['updated_at']) if 'updated_at' in data else _now(),
         )
@@ -191,19 +214,35 @@ class CardDeck:
         return self.delete(index) if index is not None else False
 
     def edit(
-        self, index: int, front: str, back: str, section: str | None = None
+        self,
+        index: int,
+        front: str,
+        back: str,
+        section: str | None = None,
+        upper_header: str | None = None,
+        lower_header: str | None = None,
     ) -> bool:
         if 0 <= index < len(self.cards):
-            self.cards[index].update(front, back, section)
+            self.cards[index].update(
+                front, back, section, upper_header, lower_header
+            )
             return True
         return False
 
     def edit_by_id(
-        self, card_id: str, front: str, back: str, section: str | None = None
+        self,
+        card_id: str,
+        front: str,
+        back: str,
+        section: str | None = None,
+        upper_header: str | None = None,
+        lower_header: str | None = None,
     ) -> bool:
         index = self.index_of(card_id)
         return (
-            self.edit(index, front, back, section) if index is not None else False
+            self.edit(
+                index, front, back, section, upper_header, lower_header
+            ) if index is not None else False
         )
 
     def reorder(self, new_order: list[int]) -> bool:

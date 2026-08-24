@@ -3,46 +3,44 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Общая TeX-оболочка — {{ deck.name }}</title>
+    <title>TeX-оболочки сторон — {{ deck.name }}</title>
     <link rel="stylesheet" href="{{ url_for('cards.static', filename='cards/style.css') }}">
     <link rel="icon" href="{{ url_for('cards.static', filename='cards/favicon.svg') }}" type="image/svg+xml">
 </head>
 <body>
     <div class="breadcrumb">
         <a href="{{ url_for('cards.decks_list') }}">📚 Мои колоды</a> →
-        <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}">{{ deck.name }}</a> → общая оболочка
+        <a href="{{ url_for('cards.deck_view', deck_id=deck.id) }}">{{ deck.name }}</a> → оболочки сторон
     </div>
 
-    <h1>Необязательная общая TeX-оболочка</h1>
+    <h1>Необязательные TeX-оболочки сторон</h1>
     <div class="warning-panel">
-        <strong>Сама колода уже работает в Advanced-режиме:</strong> front/back каждой карточки являются доверенным TeX-кодом и без оболочки вставляются напрямую. Эта настройка нужна только для общего повторяющегося оформления и тоже исполняется в sandbox.
+        <strong>Сама колода уже работает в Advanced-режиме:</strong> front/back каждой карточки являются доверенным TeX-кодом и без оболочек вставляются напрямую. Эти настройки нужны только для повторяющегося оформления лица и оборота и тоже исполняются в sandbox.
     </div>
     <div class="info-panel">
         <strong>Sandbox:</strong> {{ 'готов' if sandbox_ready else 'недоступен' }}
         &nbsp;|&nbsp;
-        <strong>Оболочка:</strong>
+        <strong>Оболочки:</strong>
         {% if active %}версия {{ active.version }}, SHA-256 {{ active.source_hash[:12] }}…{% else %}не используется — raw-контент вставляется напрямую{% endif %}
     </div>
     {% if error %}<div class="error-message" role="alert">{{ error }}</div>{% endif %}
 
-    <h2>Новая версия оболочки</h2>
+    <h2>Новая версия оболочек</h2>
     <div class="card-form trusted-editor">
         <form method="post">
             <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-            <p><code>{% raw %}{{ content }}{% endraw %}</code> обязателен ровно один раз и обозначает raw-код конкретной стороны. В оболочке также доступны <code>{% raw %}{{ upper_header }}{% endraw %}</code>, <code>{% raw %}{{ lower_header }}{% endraw %}</code>, <code>{% raw %}{{ section }}{% endraw %}</code>, <code>{% raw %}{{ card_number }}{% endraw %}</code>, <code>{% raw %}{{ card_count }}{% endraw %}</code> и <code>{% raw %}{{ side }}{% endraw %}</code>.</p>
-            <label for="trusted-source">Общий TeX-фрагмент вокруг содержимого:</label>
-            <textarea id="trusted-source" name="source" rows="14" spellcheck="false" required>{{ draft_source }}</textarea>
-            <div class="settings-grid trusted-header-fields">
+            <p>В каждой оболочке <code>{% raw %}{{ content }}{% endraw %}</code> обязателен ровно один раз и обозначает raw-код соответствующей стороны. Значения <code>{% raw %}{{ upper_header }}{% endraw %}</code> и <code>{% raw %}{{ lower_header }}{% endraw %}</code> берутся из редактируемой карточки. Также доступны <code>{% raw %}{{ section }}{% endraw %}</code>, <code>{% raw %}{{ card_number }}{% endraw %}</code>, <code>{% raw %}{{ card_count }}{% endraw %}</code> и <code>{% raw %}{{ side }}{% endraw %}</code>.</p>
+            <div class="settings-grid trusted-side-fields">
                 <div>
-                    <label for="trusted-upper-header">Верхний колонтитул (trusted TeX):</label>
-                    <textarea id="trusted-upper-header" name="upper_header" rows="5" spellcheck="false">{{ draft_upper_header }}</textarea>
+                    <label for="trusted-front-source">Оболочка лицевой стороны (trusted TeX):</label>
+                    <textarea id="trusted-front-source" name="front_source" rows="14" spellcheck="false" required>{{ draft_front_source }}</textarea>
                 </div>
                 <div>
-                    <label for="trusted-lower-header">Нижний колонтитул (trusted TeX):</label>
-                    <textarea id="trusted-lower-header" name="lower_header" rows="5" spellcheck="false">{{ draft_lower_header }}</textarea>
+                    <label for="trusted-back-source">Оболочка оборотной стороны (trusted TeX):</label>
+                    <textarea id="trusted-back-source" name="back_source" rows="14" spellcheck="false" required>{{ draft_back_source }}</textarea>
                 </div>
             </div>
-            <p class="preview-notice">В полях колонтитулов доступны контекстные плейсхолдеры <code>{% raw %}{{ section }}{% endraw %}</code>, <code>{% raw %}{{ card_number }}{% endraw %}</code>, <code>{% raw %}{{ card_count }}{% endraw %}</code> и <code>{% raw %}{{ side }}{% endraw %}</code>. Место, размеры и линии задаёт сама оболочка.</p>
+            <p class="preview-notice">Приложение не добавляет колонтитулам разметку, отступы или линии: оболочка полностью определяет, где и как использовать эти значения.</p>
             <p class="preview-notice">Test compile ничего не сохраняет. «Сохранить в карантин» создаёт неизменяемую версию, но не включает её в печать.</p>
             <button type="submit" formaction="{{ url_for('cards.test_trusted_latex', deck_id=deck.id) }}" class="btn-secondary">Test compile / PDF</button>
             <button type="submit" formaction="{{ url_for('cards.stage_trusted_latex', deck_id=deck.id) }}" class="btn-primary">Сохранить в карантин</button>
@@ -57,9 +55,8 @@
             <h3>Версия {{ template.version }} — {{ template.status.value }}</h3>
             <p><strong>Источник:</strong> {{ template.provenance.value }} · <strong>SHA-256 состояния:</strong> <code>{{ template.state_hash }}</code></p>
             <p><strong>Содержимое:</strong> raw trusted TeX · {{ template.created_at.isoformat() }}</p>
-            <pre>{{ template.source }}</pre>
-            {% if template.upper_header %}<p><strong>Верхний колонтитул:</strong></p><pre>{{ template.upper_header }}</pre>{% endif %}
-            {% if template.lower_header %}<p><strong>Нижний колонтитул:</strong></p><pre>{{ template.lower_header }}</pre>{% endif %}
+            <p><strong>Лицевая сторона:</strong></p><pre>{{ template.front_source }}</pre>
+            <p><strong>Оборотная сторона:</strong></p><pre>{{ template.back_source }}</pre>
             {% if template.status.value != 'approved' %}
             <form action="{{ url_for('cards.approve_trusted_latex', deck_id=deck.id, template_id=template.id) }}" method="post">
                 <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
@@ -79,7 +76,7 @@
     {% if active %}
     <form action="{{ url_for('cards.reset_trusted_latex', deck_id=deck.id) }}" method="post">
         <input type="hidden" name="_csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn-secondary">Отключить оболочку и оставить raw-контент</button>
+        <button type="submit" class="btn-secondary">Отключить оболочки и оставить raw-контент</button>
     </form>
     {% endif %}
 </body>

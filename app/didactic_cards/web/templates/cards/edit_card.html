@@ -53,6 +53,22 @@
                 <label for="section">Секция / тема:</label>
                 <input type="text" id="section" name="section" value="{{ card.section }}">
             </div>
+            {% if is_advanced %}
+            <fieldset class="advanced-card-headers">
+                <legend><strong>Значения колонтитулов (необязательно)</strong></legend>
+                <p class="preview-notice">Это raw TeX-значения этой карточки. Оболочки сторон сами определяют их положение и оформление через <code>{% raw %}{{ upper_header }}{% endraw %}</code> и <code>{% raw %}{{ lower_header }}{% endraw %}</code>.</p>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="upper-header">Верхний колонтитул:</label>
+                        <textarea id="upper-header" name="upper_header" rows="3">{{ card.upper_header }}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="lower-header">Нижний колонтитул:</label>
+                        <textarea id="lower-header" name="lower_header" rows="3">{{ card.lower_header }}</textarea>
+                    </div>
+                </div>
+            </fieldset>
+            {% endif %}
             <div class="form-row">
                 <div class="form-group">
                     <label for="front">Лицевая сторона{{ ' — trusted TeX' if is_advanced else '' }}:</label>

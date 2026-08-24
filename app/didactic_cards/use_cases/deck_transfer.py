@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 from datetime import datetime, timezone
@@ -14,9 +15,9 @@ from ..domain.trusted import (
 )
 
 
-DECK_EXPORT_SCHEMA_VERSION = 7
+DECK_EXPORT_SCHEMA_VERSION = 8
 SUPPORTED_DECK_EXPORT_SCHEMAS = {
-    1, 2, 3, 4, 5, 6, DECK_EXPORT_SCHEMA_VERSION,
+    1, 2, 3, 4, 5, 6, 7, DECK_EXPORT_SCHEMA_VERSION,
 }
 
 
@@ -41,10 +42,9 @@ def export_deck_json(repo: DeckRepository, deck_id: str) -> bytes:
             {
                 'id': template.id,
                 'version': template.version,
-                'source': template.source,
+                'front_source': template.front_source,
+                'back_source': template.back_source,
                 'source_hash': template.source_hash,
-                'upper_header': template.upper_header,
-                'lower_header': template.lower_header,
                 'source_provenance': template.provenance.value,
                 'front_content_mode': template.front_content_mode.value,
                 'back_content_mode': template.back_content_mode.value,
@@ -119,11 +119,17 @@ def import_deck_json(
         front = item.get('front', '')
         back = item.get('back', '')
         section = item.get('section', '')
+        upper_header = item.get('upper_header', '')
+        lower_header = item.get('lower_header', '')
         source_card_id = item.get('id')
         if not isinstance(front, str) or not isinstance(back, str):
             raise DeckTransferError(f'Стороны карточки {index} должны быть строками')
         if not isinstance(section, str):
             raise DeckTransferError(f'Секция карточки {index} должна быть строкой')
+        if not isinstance(upper_header, str) or not isinstance(lower_header, str):
+            raise DeckTransferError(
+                f'Колонтитулы карточки {index} должны быть строками'
+            )
         if source_card_id is not None and not isinstance(source_card_id, str):
             raise DeckTransferError(f'ID карточки {index} должен быть строкой')
         if source_card_id and source_card_id in source_ids:
@@ -134,6 +140,8 @@ def import_deck_json(
             front=front,
             back=back,
             section=section,
+            upper_header=upper_header,
+            lower_header=lower_header,
             parent_id=source_card_id,
         ))
 
@@ -147,11 +155,15 @@ def import_deck_json(
         template_ids: set[str] = set()
         template_versions: set[int] = set()
         expected_fields = {
-            'id', 'version', 'source', 'source_hash', 'source_provenance',
+            'id', 'version', 'source_hash', 'source_provenance',
             'front_content_mode', 'back_content_mode',
         }
-        if schema_version >= 7:
-            expected_fields |= {'upper_header', 'lower_header'}
+        if schema_version >= 8:
+            expected_fields |= {'front_source', 'back_source'}
+        else:
+            expected_fields |= {'source'}
+            if schema_version >= 7:
+                expected_fields |= {'upper_header', 'lower_header'}
         for index, item in enumerate(template_items, start=1):
             if not isinstance(item, dict) or set(item) != expected_fields:
                 raise DeckTransferError(
@@ -167,13 +179,35 @@ def import_deck_json(
                 raise DeckTransferError('Повтор trusted-шаблона или версии')
             try:
                 TemplateProvenance(item['source_provenance'])
+                if schema_version >= 8:
+                    front_source = item['front_source']
+                    back_source = item['back_source']
+                    source_hash = item['source_hash']
+                else:
+                    legacy_source = item['source']
+                    legacy_hash = hashlib.sha256(
+                        legacy_source.encode('utf-8')
+                    ).hexdigest()
+                    if item['source_hash'] != legacy_hash:
+                        raise ValueError('trusted template source hash mismatch')
+                    migrated_source = (
+                        legacy_source
+                        .replace(
+                            '{{ upper_header }}', item.get('upper_header', '')
+                        )
+                        .replace(
+                            '{{ lower_header }}', item.get('lower_header', '')
+                        )
+                    )
+                    front_source = migrated_source
+                    back_source = migrated_source
+                    source_hash = ''
                 template = TrustedTemplateVersion(
                     deck_id='import-source',
                     version=version,
-                    source=item['source'],
-                    upper_header=item.get('upper_header', ''),
-                    lower_header=item.get('lower_header', ''),
-                    source_hash=item['source_hash'],
+                    front_source=front_source,
+                    back_source=back_source,
+                    source_hash=source_hash,
                     provenance=TemplateProvenance.IMPORTED,
                     origin_template_id=template_id,
                     front_content_mode=item['front_content_mode'],

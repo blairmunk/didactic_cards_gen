@@ -21,10 +21,14 @@ def test_trusted_template_replaces_builtin_body_and_keeps_context_typed():
     template = TrustedTemplateVersion(
         deck_id='deck',
         version=1,
-        source=(
+        front_source=(
             r'\vfill\centering '
             r'{{ section }} / {{ card_number }} / {{ side }}: {{ content }}'
             r'\vfill'
+        ),
+        back_source=(
+            r'\raggedleft '
+            r'{{ section }} / {{ card_number }} / {{ side }}: {{ content }}'
         ),
         front_content_mode='escaped',
         back_content_mode='raw',
@@ -55,7 +59,9 @@ def test_trusted_template_is_copy_configured_and_padding_stays_blank():
         render_settings=DeckRenderSettings(authoring_mode='advanced'),
     )
     template = TrustedTemplateVersion(
-        deck_id='deck', version=1, source='MARK {{ content }}'
+        deck_id='deck', version=1,
+        front_source='FRONT-MARK {{ content }}',
+        back_source='BACK-MARK {{ content }}',
     )
     configured = base.with_trusted_template(template)
     deck = CardDeck([Card(front='Q', back='A')])
@@ -64,7 +70,8 @@ def test_trusted_template_is_copy_configured_and_padding_stays_blank():
 
     assert base.trusted_template is None
     assert configured.trusted_template is template
-    assert latex.count('MARK') == 2
+    assert latex.count('FRONT-MARK') == 1
+    assert latex.count('BACK-MARK') == 1
     with pytest.raises(TypeError, match='TrustedTemplateVersion'):
         LatexRenderer(trusted_template='bad')
     with pytest.raises(TypeError, match='TrustedTemplateVersion'):
@@ -90,9 +97,8 @@ def test_advanced_wrapper_receives_headers_and_total_without_padding():
     template = TrustedTemplateVersion(
         deck_id='deck',
         version=1,
-        source='{{ upper_header }} | {{ content }} | {{ lower_header }}',
-        upper_header='TOP {{ section }}',
-        lower_header='{{ card_number }}/{{ card_count }} {{ side }}',
+        front_source='{{ upper_header }} | {{ content }} | {{ lower_header }}',
+        back_source='BACK {{ content }}',
     )
     renderer = LatexRenderer(
         cards_per_row=2,
@@ -102,9 +108,17 @@ def test_advanced_wrapper_receives_headers_and_total_without_padding():
     )
     layout = renderer.prepare_print_layout(
         CardDeck([
-            Card(front='Q1', section='S'),
+            Card(
+                front='Q1', section='S',
+                upper_header='TOP {{ section }}',
+                lower_header='{{ card_number }}/{{ card_count }} {{ side }}',
+            ),
             Card(front='Q2', section='S'),
-            Card(front='Q3', section='T'),
+            Card(
+                front='Q3', section='T',
+                upper_header='TOP {{ section }}',
+                lower_header='{{ card_number }}/{{ card_count }} {{ side }}',
+            ),
         ]),
         2,
     )
@@ -118,7 +132,9 @@ def test_advanced_wrapper_receives_headers_and_total_without_padding():
 
 def test_safe_deck_ignores_trusted_wrapper_even_if_passed_by_caller():
     template = TrustedTemplateVersion(
-        deck_id='deck', version=1, source='WRAPPER {{ content }}'
+        deck_id='deck', version=1,
+        front_source='WRAPPER {{ content }}',
+        back_source='WRAPPER {{ content }}',
     )
     source = LatexRenderer(
         cards_per_row=1,

@@ -261,6 +261,10 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
 
         await page.type('#front', r'\centering Сырой \TeX')
         await page.type('#back', r'\vfill Ответ \vfill')
+        await page.type('#upper-header', r'\small Раздел {{ section }}')
+        await page.type(
+            '#lower-header', 'Карточка {{ card_number }}/{{ card_count }}'
+        )
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('#single-card-form button[type="submit"]'),
@@ -282,19 +286,15 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
             page.click('.advanced-entry a.btn-warning'),
         )
         await page.evaluate(
-            "value => document.getElementById('trusted-source').value = value",
+            "value => document.getElementById('trusted-front-source').value = value",
             (
                 r'{{ upper_header }}\begin{center}{{ content }}\end{center}'
                 r'{{ lower_header }}'
             ),
         )
         await page.evaluate(
-            "value => document.getElementById('trusted-upper-header').value = value",
-            r'\small Раздел {{ section }}',
-        )
-        await page.evaluate(
-            "value => document.getElementById('trusted-lower-header').value = value",
-            'Карточка {{ card_number }}/{{ card_count }}',
+            "value => document.getElementById('trusted-back-source').value = value",
+            r'\raggedleft {{ upper_header }} {{ content }} {{ lower_header }}',
         )
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
@@ -308,7 +308,7 @@ async def _exercise_browser(base_url: str, csv_path: str) -> None:
         assert 'Активная версия' in await page.Jeval(
             '.trusted-version', 'element => element.textContent'
         )
-        assert 'Карточка {{ card_number }}/{{ card_count }}' in await page.Jeval(
+        assert 'Оборотная сторона' in await page.Jeval(
             '.trusted-version', 'element => element.textContent'
         )
 

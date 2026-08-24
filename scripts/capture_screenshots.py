@@ -47,6 +47,14 @@ async def capture(
 
         if advanced_deck_id is not None:
             await page.goto(
+                f"{base_url}/deck/{advanced_deck_id}",
+                {"waitUntil": "domcontentloaded"},
+            )
+            await page.screenshot({
+                "path": str(output_dir / "advanced-deck-editor.png"),
+                "fullPage": True,
+            })
+            await page.goto(
                 f"{base_url}/deck/{advanced_deck_id}/advanced",
                 {"waitUntil": "domcontentloaded"},
             )

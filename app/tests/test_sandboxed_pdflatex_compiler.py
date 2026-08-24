@@ -223,12 +223,14 @@ def test_real_bwrap_compiles_advanced_template_with_contextual_headers(
     template = TrustedTemplateVersion(
         deck_id='deck',
         version=1,
-        source=(
+        front_source=(
             r'{{ upper_header }}\par\vfill\centering {{ content }}\vfill'
             r'\par{{ lower_header }}'
         ),
-        upper_header=r'\small {{ section }}',
-        lower_header='Карточка {{ card_number }}/{{ card_count }}',
+        back_source=(
+            r'{{ upper_header }}\par\vfill\centering {{ content }}\vfill'
+            r'\par{{ lower_header }}'
+        ),
         front_content_mode='raw',
         back_content_mode='raw',
     )
@@ -242,6 +244,8 @@ def test_real_bwrap_compiles_advanced_template_with_contextual_headers(
         front=r'Стоимость 10\% \& ответ',
         back=r'\textbf{Жирный ответ}',
         section='Тема & раздел',
+        upper_header=r'\small {{ section }}',
+        lower_header='Карточка {{ card_number }}/{{ card_count }}',
     )]))
 
     result = compiler.compile(latex)

@@ -14,7 +14,6 @@ from didactic_cards.domain.trusted import (
     TrustedCompileJob,
     TrustedTemplateVersion,
     render_trusted_template,
-    validate_header_source,
     validate_template_source,
 )
 from didactic_cards.domain.entities import Card
@@ -82,37 +81,51 @@ def test_trusted_headers_are_contextual_raw_fragments():
         card_number=7,
         card_count=21,
         side='front',
-        upper_header=r'\small {{ section }}',
+        upper_header=r'{{\small {{ section }}}}',
         lower_header='Карточка {{ card_number }}/{{ card_count }}',
     )
 
     assert rendered == (
-        r'\vbox\small Явления\par \textbf{Q}\par Карточка 7/21'
+        r'\vbox{{\small Явления}}\par \textbf{Q}\par Карточка 7/21'
     )
 
 
 @pytest.mark.parametrize(
-    'source',
-    ['{{ content }}', '{{ upper_header }}', '{{ danger }}', '{{ card_count }'],
+    ('header', 'expected'),
+    [
+        (r'{{\bfseries Raw group}}', r'{{\bfseries Raw group}}'),
+        ('{{ custom_macro }}', '{{ custom_macro }}'),
+        ('{{ content }}', '{{ content }}'),
+        ('{{ card_count }', '{{ card_count }'),
+    ],
 )
-def test_trusted_header_rejects_non_context_placeholders(source):
-    with pytest.raises(ValueError):
-        validate_header_source(source)
+def test_trusted_header_values_keep_unknown_double_braces_as_raw_tex(
+    header, expected
+):
+    assert render_trusted_template(
+        '{{ upper_header }} {{ content }}',
+        content='Q',
+        section='',
+        card_number=1,
+        side='front',
+        upper_header=header,
+    ) == f'{expected} Q'
 
 
-def test_trusted_template_record_keeps_headers_in_one_version():
+def test_trusted_template_record_keeps_both_side_wrappers_in_one_version():
     template = TrustedTemplateVersion(
         deck_id='deck',
-        source='{{ upper_header }}{{ content }}{{ lower_header }}',
-        upper_header='Верх {{ card_number }}',
-        lower_header='Низ {{ card_count }}',
+        front_source='FRONT {{ upper_header }}{{ content }}{{ lower_header }}',
+        back_source='BACK {{ upper_header }}{{ content }}{{ lower_header }}',
         version=1,
     )
 
-    assert template.upper_header == 'Верх {{ card_number }}'
-    assert template.lower_header == 'Низ {{ card_count }}'
-    assert template.state_hash != template.source_hash
-    assert replace(template, lower_header='Другой низ').state_hash != (
+    assert template.front_source.startswith('FRONT')
+    assert template.back_source.startswith('BACK')
+    assert template.state_hash == template.source_hash
+    assert replace(
+        template, back_source='OTHER {{ content }}', source_hash=''
+    ).state_hash != (
         template.state_hash
     )
 
@@ -133,7 +146,7 @@ def test_template_render_context_is_typed(kwargs, message):
 
 def test_template_record_is_hashed_and_approval_is_explicit():
     template = TrustedTemplateVersion(
-        deck_id='deck', source='{{ content }}', version=1
+        deck_id='deck', front_source='{{ content }}', back_source='{{ content }}', version=1
     )
 
     assert template.status is TemplateStatus.QUARANTINED
@@ -152,21 +165,21 @@ def test_template_record_rejects_tampered_hash_and_invalid_status_timestamp():
     with pytest.raises(ValueError, match='hash mismatch'):
         TrustedTemplateVersion(
             deck_id='deck',
-            source='{{ content }}',
+            front_source='{{ content }}', back_source='{{ content }}',
             version=1,
             source_hash='0' * 64,
         )
     with pytest.raises(ValueError, match='approved_at'):
         TrustedTemplateVersion(
             deck_id='deck',
-            source='{{ content }}',
+            front_source='{{ content }}', back_source='{{ content }}',
             version=1,
             status='approved',
         )
     with pytest.raises(ValueError, match='only approved'):
         TrustedTemplateVersion(
             deck_id='deck',
-            source='{{ content }}',
+            front_source='{{ content }}', back_source='{{ content }}',
             version=1,
             approved_at=datetime.now(timezone.utc),
         )
@@ -177,12 +190,17 @@ def test_template_record_rejects_tampered_hash_and_invalid_status_timestamp():
     [
         ({'deck_id': ''}, 'deck_id'),
         ({'version': 0}, 'version'),
-        ({'source': ''}, 'source'),
-        ({'source': '{{ content }}\x00'}, 'NUL'),
+        ({'front_source': ''}, 'front_source'),
+        ({'back_source': '{{ content }}\x00'}, 'NUL'),
     ],
 )
 def test_template_record_rejects_invalid_identity_and_source(kwargs, message):
-    values = {'deck_id': 'deck', 'source': '{{ content }}', 'version': 1}
+    values = {
+        'deck_id': 'deck',
+        'front_source': '{{ content }}',
+        'back_source': '{{ content }}',
+        'version': 1,
+    }
     values.update(kwargs)
     with pytest.raises(ValueError, match=message):
         TrustedTemplateVersion(**values)
@@ -191,7 +209,7 @@ def test_template_record_rejects_invalid_identity_and_source(kwargs, message):
 def test_template_record_validates_independent_content_modes():
     template = TrustedTemplateVersion(
         deck_id='deck',
-        source='{{ content }}',
+        front_source='{{ content }}', back_source='{{ content }}',
         version=1,
         front_content_mode='raw',
         back_content_mode='escaped',
@@ -205,7 +223,11 @@ def test_template_and_job_size_limits_are_utf8_byte_limits():
     with pytest.raises(ValueError, match='too large'):
         TrustedTemplateVersion(
             deck_id='deck',
-            source='я' * (MAX_TRUSTED_TEMPLATE_BYTES // 2 + 1) + '{{ content }}',
+            front_source=(
+                'я' * (MAX_TRUSTED_TEMPLATE_BYTES // 2 + 1)
+                + '{{ content }}'
+            ),
+            back_source='{{ content }}',
             version=1,
         )
     with pytest.raises(ValueError, match='too large'):
@@ -236,7 +258,7 @@ def test_job_protocol_round_trip_detects_unknown_fields_and_tampering():
 
 def test_print_snapshot_requires_matching_approved_template():
     approved = TrustedTemplateVersion(
-        deck_id='deck', source='{{ content }}', version=1
+        deck_id='deck', front_source='{{ content }}', back_source='{{ content }}', version=1
     ).approved()
     snapshot = PrintJobSnapshot(
         deck_id='deck',
@@ -251,7 +273,7 @@ def test_print_snapshot_requires_matching_approved_template():
         replace(
             snapshot,
             trusted_template=TrustedTemplateVersion(
-                deck_id='deck', source='{{ content }}', version=2
+                deck_id='deck', front_source='{{ content }}', back_source='{{ content }}', version=2
             ),
         )
     with pytest.raises(ValueError, match='approved'):

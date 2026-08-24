@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import hashlib
 
 import pytest
 
@@ -72,12 +73,16 @@ def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
         'Trusted export',
         render_settings=DeckRenderSettings(authoring_mode='advanced'),
     )
-    repo.save_cards(source.id, CardDeck([Card(front='Q', back='A')]))
+    repo.save_cards(source.id, CardDeck([Card(
+        front='Q',
+        back='A',
+        upper_header=r'Верх {{ card_number }}',
+        lower_header=r'Низ {{ card_count }}',
+    )]))
     template = repo.quarantine_trusted_template(
         source.id,
-        r'{{ upper_header }}\vfill {{ content }}\vfill{{ lower_header }}',
-        upper_header='Верх {{ card_number }}',
-        lower_header='Низ {{ card_count }}',
+        r'FRONT {{ upper_header }}\vfill {{ content }}\vfill{{ lower_header }}',
+        r'BACK {{ upper_header }}\vfill {{ content }}\vfill{{ lower_header }}',
         front_content_mode='escaped',
         back_content_mode='raw',
     )
@@ -86,9 +91,8 @@ def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
     exported = export_deck_json(repo, source.id)
     payload = json.loads(exported)
     exported_template = payload['trusted_templates'][0]
-    assert exported_template['source'] == template.source
-    assert exported_template['upper_header'] == template.upper_header
-    assert exported_template['lower_header'] == template.lower_header
+    assert exported_template['front_source'] == template.front_source
+    assert exported_template['back_source'] == template.back_source
     assert exported_template['source_provenance'] == 'local-author'
     assert 'status' not in exported_template
     assert 'approved_at' not in exported_template
@@ -97,9 +101,11 @@ def test_trusted_export_import_preserves_source_but_never_approval(tmp_path):
     imported_history = repo.list_trusted_templates(imported.id)
 
     assert len(imported_history) == 1
-    assert imported_history[0].source == template.source
-    assert imported_history[0].upper_header == template.upper_header
-    assert imported_history[0].lower_header == template.lower_header
+    assert imported_history[0].front_source == template.front_source
+    assert imported_history[0].back_source == template.back_source
+    imported_card = repo.load_cards(imported.id).cards[0]
+    assert imported_card.upper_header == r'Верх {{ card_number }}'
+    assert imported_card.lower_header == r'Низ {{ card_count }}'
     assert imported_history[0].provenance.value == 'imported'
     assert imported_history[0].origin_template_id == template.id
     assert imported_history[0].status is TemplateStatus.QUARANTINED
@@ -122,7 +128,7 @@ def test_safe_export_never_carries_stale_trusted_history(tmp_path):
     assert payload['trusted_templates'] == []
 
 
-def test_schema_six_trusted_import_gets_empty_header_fragments(tmp_path):
+def test_schema_six_trusted_import_migrates_shared_wrapper(tmp_path):
     repo = SqliteRepository(tmp_path / 'schema-six-transfer')
     source = repo.create_deck(
         'Old advanced',
@@ -131,14 +137,17 @@ def test_schema_six_trusted_import_gets_empty_header_fragments(tmp_path):
     repo.quarantine_trusted_template(source.id, '{{ content }}')
     payload = json.loads(export_deck_json(repo, source.id))
     payload['schema_version'] = 6
-    payload['trusted_templates'][0].pop('upper_header')
-    payload['trusted_templates'][0].pop('lower_header')
+    item = payload['trusted_templates'][0]
+    legacy_source = item.pop('front_source')
+    item.pop('back_source')
+    item['source'] = legacy_source
+    item['source_hash'] = hashlib.sha256(legacy_source.encode()).hexdigest()
 
     imported = import_deck_json(repo, json.dumps(payload).encode())
     template = repo.list_trusted_templates(imported.id)[0]
 
-    assert template.upper_header == ''
-    assert template.lower_header == ''
+    assert template.front_source == '{{ content }}'
+    assert template.back_source == '{{ content }}'
 
 
 def test_invalid_trusted_import_is_rejected_before_any_write(tmp_path):
@@ -150,13 +159,12 @@ def test_invalid_trusted_import_is_rejected_before_any_write(tmp_path):
         'trusted_templates': [{
             'id': 'source-template',
             'version': 1,
-            'source': '{{ content }}',
+            'front_source': '{{ content }}',
+            'back_source': '{{ content }}',
             'source_hash': '0' * 64,
             'source_provenance': 'local-author',
             'front_content_mode': 'escaped',
             'back_content_mode': 'raw',
-            'upper_header': '',
-            'lower_header': '',
         }],
     }
 
@@ -184,7 +192,7 @@ def test_schema_four_rejects_malformed_trusted_contract_before_write(
 ):
     repo = SqliteRepository(tmp_path / message)
     template = TrustedTemplateVersion(
-        deck_id='source', version=1, source='{{ content }}'
+        deck_id='source', version=1, front_source='{{ content }}', back_source='{{ content }}'
     )
     payload = {
         'schema_version': DECK_EXPORT_SCHEMA_VERSION,
@@ -193,13 +201,12 @@ def test_schema_four_rejects_malformed_trusted_contract_before_write(
         'trusted_templates': [{
             'id': template.id,
             'version': 1,
-            'source': template.source,
+            'front_source': template.front_source,
+            'back_source': template.back_source,
             'source_hash': template.source_hash,
             'source_provenance': 'local-author',
             'front_content_mode': 'escaped',
             'back_content_mode': 'escaped',
-            'upper_header': '',
-            'lower_header': '',
         }],
     }
     mutation(payload)
@@ -211,7 +218,7 @@ def test_schema_four_rejects_malformed_trusted_contract_before_write(
 
 def test_trusted_import_requires_atomic_capable_repository(repo):
     template = TrustedTemplateVersion(
-        deck_id='source', version=1, source='{{ content }}'
+        deck_id='source', version=1, front_source='{{ content }}', back_source='{{ content }}'
     )
     payload = {
         'schema_version': DECK_EXPORT_SCHEMA_VERSION,
@@ -220,13 +227,12 @@ def test_trusted_import_requires_atomic_capable_repository(repo):
         'trusted_templates': [{
             'id': template.id,
             'version': 1,
-            'source': template.source,
+            'front_source': template.front_source,
+            'back_source': template.back_source,
             'source_hash': template.source_hash,
             'source_provenance': 'local-author',
             'front_content_mode': 'escaped',
             'back_content_mode': 'escaped',
-            'upper_header': '',
-            'lower_header': '',
         }],
     }
 

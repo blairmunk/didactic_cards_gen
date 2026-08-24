@@ -759,46 +759,28 @@ def _render_trusted_page(
     *,
     error: str | None = None,
     status: int = 200,
-    draft_source: str | None = None,
-    draft_upper_header: str | None = None,
-    draft_lower_header: str | None = None,
-    draft_front_mode: str | None = None,
-    draft_back_mode: str | None = None,
+    draft_front_source: str | None = None,
+    draft_back_source: str | None = None,
 ):
     _trusted_service()
     deck = _require_advanced_deck(deck_id)
     templates = _repo().list_trusted_templates(deck_id)
     latest = templates[-1] if templates else None
-    default_source = (
-        r'{{ content }}'
-    )
+    default_source = r'{{ content }}'
     return render_template(
         'cards/trusted_latex.html',
         deck=deck,
         templates=tuple(reversed(templates)),
         active=_trusted_service().active(deck_id),
-        draft_source=(
-            draft_source
-            if draft_source is not None
-            else latest.source if latest else default_source
+        draft_front_source=(
+            draft_front_source
+            if draft_front_source is not None
+            else latest.front_source if latest else default_source
         ),
-        draft_upper_header=(
-            draft_upper_header
-            if draft_upper_header is not None
-            else latest.upper_header if latest else ''
-        ),
-        draft_lower_header=(
-            draft_lower_header
-            if draft_lower_header is not None
-            else latest.lower_header if latest else ''
-        ),
-        draft_front_mode=(
-            draft_front_mode
-            or 'raw'
-        ),
-        draft_back_mode=(
-            draft_back_mode
-            or 'raw'
+        draft_back_source=(
+            draft_back_source
+            if draft_back_source is not None
+            else latest.back_source if latest else default_source
         ),
         sandbox_ready=_trusted_sandbox_ready(),
         error=error,
@@ -809,9 +791,8 @@ def _trusted_draft_from_form(deck_id: str) -> TrustedTemplateVersion:
     return TrustedTemplateVersion(
         deck_id=deck_id,
         version=1,
-        source=request.form.get('source', ''),
-        upper_header=request.form.get('upper_header', ''),
-        lower_header=request.form.get('lower_header', ''),
+        front_source=request.form.get('front_source', ''),
+        back_source=request.form.get('back_source', ''),
         front_content_mode=ContentMode.RAW,
         back_content_mode=ContentMode.RAW,
     )
@@ -853,22 +834,16 @@ def test_trusted_latex(deck_id):
             deck_id,
             error=str(error),
             status=400,
-            draft_source=request.form.get('source', ''),
-            draft_upper_header=request.form.get('upper_header', ''),
-            draft_lower_header=request.form.get('lower_header', ''),
-            draft_front_mode=request.form.get('front_content_mode'),
-            draft_back_mode=request.form.get('back_content_mode'),
+            draft_front_source=request.form.get('front_source', ''),
+            draft_back_source=request.form.get('back_source', ''),
         )
     if result is None:
         return _render_trusted_page(
             deck_id,
             error='Изолированный compiler worker не прошёл readiness-проверку.',
             status=503,
-            draft_source=template.source,
-            draft_upper_header=template.upper_header,
-            draft_lower_header=template.lower_header,
-            draft_front_mode=template.front_content_mode.value,
-            draft_back_mode=template.back_content_mode.value,
+            draft_front_source=template.front_source,
+            draft_back_source=template.back_source,
         )
     if not result.success:
         context = compile_error_context(
@@ -883,11 +858,8 @@ def test_trusted_latex(deck_id):
             deck_id,
             error='Тестовая компиляция шаблона завершилась ошибкой.' + location,
             status=422,
-            draft_source=template.source,
-            draft_upper_header=template.upper_header,
-            draft_lower_header=template.lower_header,
-            draft_front_mode=template.front_content_mode.value,
-            draft_back_mode=template.back_content_mode.value,
+            draft_front_source=template.front_source,
+            draft_back_source=template.back_source,
         )
     return send_file(
         io.BytesIO(result.pdf_data),
@@ -905,9 +877,8 @@ def stage_trusted_latex(deck_id):
         template = _trusted_draft_from_form(deck_id)
         service.stage_local(
             deck_id,
-            template.source,
-            upper_header=template.upper_header,
-            lower_header=template.lower_header,
+            template.front_source,
+            template.back_source,
             front_content_mode=template.front_content_mode,
             back_content_mode=template.back_content_mode,
         )
@@ -916,11 +887,8 @@ def stage_trusted_latex(deck_id):
             deck_id,
             error=str(error),
             status=400,
-            draft_source=request.form.get('source', ''),
-            draft_upper_header=request.form.get('upper_header', ''),
-            draft_lower_header=request.form.get('lower_header', ''),
-            draft_front_mode=request.form.get('front_content_mode'),
-            draft_back_mode=request.form.get('back_content_mode'),
+            draft_front_source=request.form.get('front_source', ''),
+            draft_back_source=request.form.get('back_source', ''),
         )
     return redirect(url_for('cards.trusted_latex_editor', deck_id=deck_id))
 
@@ -1007,7 +975,9 @@ def add_card(deck_id):
     front = request.form.get('front', '').strip()
     back = request.form.get('back', '').strip()
     section = request.form.get('section', '').strip()
-    if front or back:
+    upper_header = request.form.get('upper_header', '')
+    lower_header = request.form.get('lower_header', '')
+    if front or back or upper_header.strip() or lower_header.strip():
         try:
             AddCard(_repo(), _max_cards()).execute(
                 deck_id,
@@ -1015,6 +985,8 @@ def add_card(deck_id):
                 back,
                 _optional_version(request.form.get('version')),
                 section=section,
+                upper_header=upper_header,
+                lower_header=lower_header,
             )
         except CardLimitExceeded as error:
             return _render_deck_error(deck_id, str(error))
@@ -1112,10 +1084,14 @@ def edit_card(deck_id, card_id):
         front = request.form.get('front', '')
         back = request.form.get('back', '')
         section = request.form.get('section', '').strip()
+        upper_header = request.form.get('upper_header', '')
+        lower_header = request.form.get('lower_header', '')
         EditCard(_repo()).execute(
             deck_id, card_id, front, back,
             _optional_version(request.form.get('version')),
             section=section,
+            upper_header=upper_header,
+            lower_header=lower_header,
         )
         return redirect(url_for('cards.deck_view', deck_id=deck_id))
 
@@ -1343,16 +1319,25 @@ def api_add_card(deck_id):
     front_value = data.get('front', '')
     back_value = data.get('back', '')
     section_value = data.get('section', '')
+    upper_header_value = data.get('upper_header', '')
+    lower_header_value = data.get('lower_header', '')
     if (
         not isinstance(front_value, str)
         or not isinstance(back_value, str)
         or not isinstance(section_value, str)
+        or not isinstance(upper_header_value, str)
+        or not isinstance(lower_header_value, str)
     ):
         return jsonify({'error': 'Поля карточки должны быть строками'}), 400
     front = front_value.strip()
     back = back_value.strip()
     section = section_value.strip()
-    if not front and not back:
+    if not any((
+        front,
+        back,
+        upper_header_value.strip(),
+        lower_header_value.strip(),
+    )):
         return jsonify({'error': 'Заполните хотя бы одно поле'}), 400
 
     try:
@@ -1362,6 +1347,8 @@ def api_add_card(deck_id):
             back,
             _optional_version(data.get('version')),
             section=section,
+            upper_header=upper_header_value,
+            lower_header=lower_header_value,
         )
     except CardLimitExceeded as error:
         return jsonify({'error': str(error)}), 409
@@ -1429,10 +1416,14 @@ def api_edit_card(deck_id, card_id):
     front = data.get('front', '')
     back = data.get('back', '')
     section = data.get('section')
+    upper_header = data.get('upper_header')
+    lower_header = data.get('lower_header')
     if (
         not isinstance(front, str)
         or not isinstance(back, str)
         or (section is not None and not isinstance(section, str))
+        or (upper_header is not None and not isinstance(upper_header, str))
+        or (lower_header is not None and not isinstance(lower_header, str))
     ):
         return jsonify({'error': 'Поля карточки должны быть строками'}), 400
     result = EditCard(_repo()).execute(
@@ -1442,6 +1433,8 @@ def api_edit_card(deck_id, card_id):
         back,
         _optional_version(data.get('version')),
         section=section.strip() if section is not None else None,
+        upper_header=upper_header,
+        lower_header=lower_header,
     )
     if not result:
         return jsonify({'error': 'Неверный индекс'}), 404

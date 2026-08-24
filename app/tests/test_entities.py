@@ -9,6 +9,8 @@ class TestCard:
         assert card.front == ''
         assert card.back == ''
         assert card.section == ''
+        assert card.upper_header == ''
+        assert card.lower_header == ''
         assert card.id is not None
         assert card.parent_id is None
         assert card.created_at is not None
@@ -18,23 +20,31 @@ class TestCard:
         assert Card().is_empty()
         assert Card(front='  ', back='  ').is_empty()
         assert not Card(front='Q').is_empty()
+        assert not Card(upper_header=r'\small Header').is_empty()
 
     def test_update(self):
         card = Card(front='old', back='old')
         old_updated = card.updated_at
-        card.update('new', 'new')
+        card.update('new', 'new', upper_header='Top', lower_header='Bottom')
         assert card.front == 'new'
         assert card.back == 'new'
+        assert card.upper_header == 'Top'
+        assert card.lower_header == 'Bottom'
         assert card.updated_at >= old_updated
 
     def test_clone(self):
-        original = Card(front='Q', back='A', section='Механика')
+        original = Card(
+            front='Q', back='A', section='Механика',
+            upper_header='Top', lower_header='Bottom',
+        )
         clone = original.clone()
         assert clone.id != original.id
         assert clone.parent_id == original.id
         assert clone.front == 'Q'
         assert clone.back == 'A'
         assert clone.section == 'Механика'
+        assert clone.upper_header == 'Top'
+        assert clone.lower_header == 'Bottom'
 
     def test_clone_no_parent(self):
         original = Card(front='Q', back='A')
@@ -42,12 +52,17 @@ class TestCard:
         assert clone.parent_id is None
 
     def test_round_trip(self):
-        card = Card(front='Q', back='A', section='Алгебра')
+        card = Card(
+            front='Q', back='A', section='Алгебра',
+            upper_header='Top', lower_header='Bottom',
+        )
         restored = Card.from_dict(card.to_dict())
         assert restored.id == card.id
         assert restored.front == card.front
         assert restored.back == card.back
         assert restored.section == card.section
+        assert restored.upper_header == card.upper_header
+        assert restored.lower_header == card.lower_header
         assert restored.parent_id == card.parent_id
 
 

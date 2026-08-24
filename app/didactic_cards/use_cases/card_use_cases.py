@@ -211,10 +211,18 @@ class AddCard:
         self, deck_id: str, front: str, back: str,
         expected_version: int | None = None,
         section: str = '',
+        upper_header: str = '',
+        lower_header: str = '',
     ) -> tuple[Card, int]:
         def add(deck: CardDeck):
             _ensure_capacity(deck, 1, self.max_cards)
-            card = Card(front=front, back=back, section=section)
+            card = Card(
+                front=front,
+                back=back,
+                section=section,
+                upper_header=upper_header,
+                lower_header=lower_header,
+            )
             return (card, deck.add(card)), True
 
         return self.repo.mutate_cards(
@@ -299,9 +307,13 @@ class EditCard:
         self, deck_id: str, card_id: str, front: str, back: str,
         expected_version: int | None = None,
         section: str | None = None,
+        upper_header: str | None = None,
+        lower_header: str | None = None,
     ) -> bool:
         def edit(deck: CardDeck):
-            result = deck.edit_by_id(card_id, front, back, section)
+            result = deck.edit_by_id(
+                card_id, front, back, section, upper_header, lower_header
+            )
             return result, result
 
         return self.repo.mutate_cards(

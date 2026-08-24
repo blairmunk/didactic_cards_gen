@@ -414,7 +414,7 @@ def test_generate_uses_immutable_snapshot_without_rereading_repository(
     repo, deck_id, app, monkeypatch
 ):
     template = TrustedTemplateVersion(
-        deck_id=deck_id, source='{{ content }}', version=1
+        deck_id=deck_id, front_source='{{ content }}', back_source='{{ content }}', version=1
     ).approved()
     snapshot = PrintJobSnapshot(
         deck_id=deck_id,

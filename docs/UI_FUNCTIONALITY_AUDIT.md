@@ -7,7 +7,7 @@ JavaScript controls и фактически отрисованный Chromium UI
 
 Все прикладные сценарии имеют видимую точку входа. Колоды жёстко делятся на
 «Обычные» и «Advanced» при создании. Обычная колода показывает только safe-оформление;
-Advanced — raw TeX и необязательную общую оболочку с отдельными trusted-полями колонтитулов, без встроенных safe-шрифтов и оформления.
+Advanced — raw TeX, необязательные отдельные оболочки лица/оборота и значения верхнего/нижнего колонтитула у каждой карточки, без встроенных safe-шрифтов, линий и оформления.
 Deployment-флаг лишь разрешает создание/исполнение Advanced-колод и не меняет тип уже созданных.
 
 В ходе аудита исправлены три разрыва:
@@ -37,7 +37,7 @@ Deployment-флаг лишь разрешает создание/исполне�
 | Колода | Preflight с переходом к проблемной карточке | «Проверить перед печатью» |
 | Printer profiles | Calibration PDF и calculator X/Y | Верхние формы страницы |
 | Printer profiles | Create, edit/update и delete сохранённого профиля | Текстовые действия таблицы и prefilled editor |
-| Advanced | Direct raw print; test compile, quarantine, history, approval и reset общей оболочки | Versioned Advanced editor |
+| Advanced | Direct raw print; поля колонтитулов карточки; test compile, quarantine, history, approval и reset пары front/back-оболочек | Карточка и versioned Advanced editor |
 
 ## Маршруты без отдельной страницы
 

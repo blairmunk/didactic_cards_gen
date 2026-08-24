@@ -305,11 +305,15 @@ document.addEventListener('DOMContentLoaded', function() {
             const frontEl = document.getElementById('front');
             const backEl = document.getElementById('back');
             const sectionEl = document.getElementById('section');
+            const upperHeaderEl = document.getElementById('upper-header');
+            const lowerHeaderEl = document.getElementById('lower-header');
             const front = frontEl.value.trim();
             const back = backEl.value.trim();
             const section = sectionEl.value.trim();
+            const upperHeader = upperHeaderEl ? upperHeaderEl.value : '';
+            const lowerHeader = lowerHeaderEl ? lowerHeaderEl.value : '';
 
-            if (!front && !back) {
+            if (!front && !back && !upperHeader.trim() && !lowerHeader.trim()) {
                 alert('Заполните хотя бы одно поле');
                 return;
             }
@@ -322,6 +326,8 @@ document.addEventListener('DOMContentLoaded', function() {
                         front: front,
                         back: back,
                         section: section,
+                        upper_header: upperHeader,
+                        lower_header: lowerHeader,
                         version: deckVersion
                     })
                 });
@@ -341,6 +347,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 frontEl.value = '';
                 backEl.value = '';
                 sectionEl.value = '';
+                if (upperHeaderEl) upperHeaderEl.value = '';
+                if (lowerHeaderEl) lowerHeaderEl.value = '';
                 frontEl.focus();
 
                 if (!document.getElementById('view-table')) {

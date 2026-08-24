@@ -766,14 +766,18 @@ class LatexRenderer(DocumentRenderer):
             fragment = content
             if self.trusted_template is not None:
                 fragment = render_trusted_template(
-                    self.trusted_template.source,
+                    (
+                        self.trusted_template.front_source
+                        if side == 'front'
+                        else self.trusted_template.back_source
+                    ),
                     content=content,
                     section=_card_content(card.section),
                     card_number=card_number,
                     card_count=card_count,
                     side=side,
-                    upper_header=self.trusted_template.upper_header,
-                    lower_header=self.trusted_template.lower_header,
+                    upper_header=card.upper_header,
+                    lower_header=card.lower_header,
                 )
             return (
                 f'\\typeout{{DIDACTIC-CARDS-HBOX-BEGIN:{card_number}:{side}:body}}%\n'

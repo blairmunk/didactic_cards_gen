@@ -200,12 +200,12 @@
         <p>
             Содержимое лицевой и оборотной стороны печатается как доверенный TeX-код без встроенной типографики и колонтитулов.
             {% if trusted_active %}
-            Дополнительно применяется общая оболочка v{{ trusted_active.version }}.
+            Дополнительно применяются оболочки сторон v{{ trusted_active.version }}.
             {% else %}
-            Общая оболочка не задана: код каждой стороны вставляется напрямую.
+            Оболочки сторон не заданы: код каждой стороны вставляется напрямую.
             {% endif %}
         </p>
-        <a href="{{ url_for('cards.trusted_latex_editor', deck_id=deck.id) }}" class="btn-warning">Настроить необязательную общую оболочку</a>
+        <a href="{{ url_for('cards.trusted_latex_editor', deck_id=deck.id) }}" class="btn-warning">Настроить необязательные оболочки сторон</a>
         {% else %}
         <p><strong>Печать этой Advanced-колоды заблокирована:</strong> trusted LaTeX выключен при запуске сервера.</p>
         <p>Для локального запуска установите <code>bubblewrap</code> и перезапустите приложение:</p>
@@ -223,6 +223,22 @@
                 <label for="section">Секция / тема:</label>
                 <input type="text" name="section" id="section" placeholder="Например: Механика">
             </div>
+            {% if is_advanced %}
+            <fieldset class="advanced-card-headers">
+                <legend><strong>Значения колонтитулов (необязательно)</strong></legend>
+                <p class="preview-notice">Это raw TeX-значения конкретной карточки. Они попадут в <code>{{ '{{ upper_header }}' }}</code> и <code>{{ '{{ lower_header }}' }}</code> оболочек лица и оборота. Без соответствующего плейсхолдера оболочка их не печатает.</p>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="upper-header">Верхний колонтитул:</label>
+                        <textarea name="upper_header" id="upper-header" rows="3" placeholder="Например: Явления"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="lower-header">Нижний колонтитул:</label>
+                        <textarea name="lower_header" id="lower-header" rows="3" placeholder="Например: Карточка 7/21"></textarea>
+                    </div>
+                </div>
+            </fieldset>
+            {% endif %}
             <div class="form-row">
                 <div class="form-group">
                 <label for="front">Лицевая сторона ({{ 'trusted TeX' if is_advanced else 'задание' }}):</label>

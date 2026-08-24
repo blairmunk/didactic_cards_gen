@@ -139,7 +139,7 @@ def test_deck_type_is_chosen_at_creation_and_not_mixed_in_ui(
     assert 'Advanced-колода' in page.text
     assert 'Оформление обычной колоды' not in page.text
     assert 'Сохранить оформление' not in page.text
-    assert 'необязательную общую оболочку' in page.text
+    assert 'необязательные оболочки сторон' in page.text
     assert 'MathJax-script' not in page.text
     assert 'preview-header' not in page.text
 
@@ -1394,10 +1394,12 @@ def test_safe_deck_rejects_every_direct_advanced_post(client, app, tmp_path):
     deck = repository.create_deck('Safe')
 
     tested = client.post(
-        f'/deck/{deck.id}/advanced/test', data={'source': '{{ content }}'}
+        f'/deck/{deck.id}/advanced/test',
+        data={'front_source': '{{ content }}', 'back_source': '{{ content }}'},
     )
     staged = client.post(
-        f'/deck/{deck.id}/advanced/stage', data={'source': '{{ content }}'}
+        f'/deck/{deck.id}/advanced/stage',
+        data={'front_source': '{{ content }}', 'back_source': '{{ content }}'},
     )
     approved = client.post(
         f'/deck/{deck.id}/advanced/missing/approve',
@@ -1424,19 +1426,18 @@ def test_trusted_editor_stages_modes_without_activation(
     assert 'Можно создавать отдельные Advanced-колоды' in home.text
     assert f'href="/deck/{deck.id}/advanced"' in home.text
     editor = client.get(f'/deck/{deck.id}/advanced')
-    assert 'id="trusted-upper-header"' in editor.text
-    assert 'id="trusted-lower-header"' in editor.text
+    assert 'id="trusted-front-source"' in editor.text
+    assert 'id="trusted-back-source"' in editor.text
     assert '{{ card_count }}' in editor.text
 
     staged = client.post(
         f'/deck/{deck.id}/advanced/stage',
         data={
-            'source': (
+            'front_source': (
                 r'{{ upper_header }}\vfill {{ content }}\vfill'
                 r'{{ lower_header }}'
             ),
-            'upper_header': r'\small {{ section }}',
-            'lower_header': '{{ card_number }}/{{ card_count }}',
+            'back_source': r'BACK {{ content }}',
             'front_content_mode': 'escaped',
             'back_content_mode': 'raw',
         },
@@ -1448,9 +1449,61 @@ def test_trusted_editor_stages_modes_without_activation(
     assert history[0].status is TemplateStatus.QUARANTINED
     assert history[0].front_content_mode.value == 'raw'
     assert history[0].back_content_mode.value == 'raw'
-    assert history[0].upper_header == r'\small {{ section }}'
-    assert history[0].lower_header == '{{ card_number }}/{{ card_count }}'
+    assert history[0].front_source.startswith('{{ upper_header }}')
+    assert history[0].back_source == 'BACK {{ content }}'
     assert repository.get_approved_trusted_template(deck.id) is None
+
+
+def test_advanced_card_ui_and_api_persist_per_card_header_values(
+    client, app, tmp_path
+):
+    repository, deck = _enable_trusted(app, tmp_path)
+    safe = repository.create_deck('Safe comparison')
+
+    page = client.get(f'/deck/{deck.id}')
+    safe_page = client.get(f'/deck/{safe.id}')
+    assert 'name="upper_header"' in page.text
+    assert 'name="lower_header"' in page.text
+    assert 'name="upper_header"' not in safe_page.text
+
+    added = client.post(
+        f'/api/deck/{deck.id}/add_card',
+        json={
+            'front': r'\centering Front',
+            'back': r'\centering Back',
+            'upper_header': r'\small Верх {{ card_number }}',
+            'lower_header': r'Низ {{ card_count }}',
+        },
+    )
+    assert added.status_code == 200
+    card_id = added.json['card']['id']
+    stored = next(
+        card for card in repository.load_cards(deck.id).cards
+        if card.id == card_id
+    )
+    assert stored.upper_header == r'\small Верх {{ card_number }}'
+    assert stored.lower_header == r'Низ {{ card_count }}'
+
+    edit_page = client.get(f'/deck/{deck.id}/edit_card/{card_id}')
+    assert 'id="upper-header"' in edit_page.text
+    assert r'\small Верх {{ card_number }}' in edit_page.text
+
+    edited = client.put(
+        f'/api/deck/{deck.id}/edit_card/{card_id}',
+        json={
+            'front': stored.front,
+            'back': stored.back,
+            'upper_header': 'Другой верх',
+            'lower_header': '',
+        },
+    )
+    assert edited.status_code == 200
+    updated = next(
+        card for card in repository.load_cards(deck.id).cards
+        if card.id == card_id
+    )
+    assert updated.upper_header == 'Другой верх'
+    assert updated.lower_header == ''
 
 
 def test_trusted_test_compile_is_read_only_and_validation_is_atomic(
@@ -1461,7 +1514,8 @@ def test_trusted_test_compile_is_read_only_and_validation_is_atomic(
     invalid = client.post(
         f'/deck/{deck.id}/advanced/test',
         data={
-            'source': '{{ content }} {{ content }}',
+            'front_source': '{{ content }} {{ content }}',
+            'back_source': '{{ content }}',
             'front_content_mode': 'escaped',
             'back_content_mode': 'escaped',
         },
@@ -1469,7 +1523,8 @@ def test_trusted_test_compile_is_read_only_and_validation_is_atomic(
     valid = client.post(
         f'/deck/{deck.id}/advanced/test',
         data={
-            'source': r'\centering {{ content }}',
+            'front_source': r'\centering {{ content }}',
+            'back_source': r'\raggedleft {{ content }}',
             'front_content_mode': 'escaped',
             'back_content_mode': 'escaped',
         },
@@ -1555,14 +1610,18 @@ def test_trusted_editor_covers_empty_sample_and_fail_closed_form_paths(
     sample = client.post(
         f'/deck/{deck.id}/advanced/test',
         data={
-            'source': '{{ content }}',
+            'front_source': '{{ content }}',
+            'back_source': '{{ content }}',
             'front_content_mode': 'escaped',
             'back_content_mode': 'escaped',
         },
     )
     invalid_stage = client.post(
         f'/deck/{deck.id}/advanced/stage',
-        data={'source': 'missing placeholder'},
+        data={
+            'front_source': 'missing placeholder',
+            'back_source': '{{ content }}',
+        },
     )
     missing_version = client.post(
         f'/deck/{deck.id}/advanced/missing/approve',
@@ -1580,7 +1639,8 @@ def test_trusted_editor_covers_empty_sample_and_fail_closed_form_paths(
     unavailable_test = client.post(
         f'/deck/{deck.id}/advanced/test',
         data={
-            'source': '{{ content }}',
+            'front_source': '{{ content }}',
+            'back_source': '{{ content }}',
             'front_content_mode': 'escaped',
             'back_content_mode': 'escaped',
         },
@@ -1616,7 +1676,8 @@ def test_trusted_compile_and_print_errors_name_card_side_without_log_leak(
     tested = client.post(
         f'/deck/{deck.id}/advanced/test',
         data={
-            'source': '{{ content }}',
+            'front_source': '{{ content }}',
+            'back_source': '{{ content }}',
             'front_content_mode': 'escaped',
             'back_content_mode': 'raw',
         },
