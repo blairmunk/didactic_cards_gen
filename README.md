@@ -77,6 +77,7 @@ app/
 docs/
   USER_AND_TECHNICAL_GUIDE.md
   REMEDIATION_PLAN.md
+  BULK_CSV_IMPORT_AUDIT.md
 ```
 
-Пользовательская и техническая инструкция находится в [docs/USER_AND_TECHNICAL_GUIDE.md](docs/USER_AND_TECHNICAL_GUIDE.md). Проект распространяется по GPL-3.0; полный текст — в [LICENSE](LICENSE).
+Пользовательская и техническая инструкция находится в [docs/USER_AND_TECHNICAL_GUIDE.md](docs/USER_AND_TECHNICAL_GUIDE.md). План строгого импорта готовых Advanced-карточек из другой программы или нейросети — в [docs/BULK_CSV_IMPORT_AUDIT.md](docs/BULK_CSV_IMPORT_AUDIT.md). Проект распространяется по GPL-3.0; полный текст — в [LICENSE](LICENSE).
