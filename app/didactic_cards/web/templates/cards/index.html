@@ -321,6 +321,7 @@
     <div class="view-toggle">
         <button id="btn-view-table" class="active" aria-pressed="true" onclick="switchView('table')">📋 Таблица</button>
         <button id="btn-view-preview" aria-pressed="false" onclick="switchView('preview')">🃏 Превью</button>
+        <button id="btn-view-overlay" aria-pressed="false" onclick="switchView('overlay')">🪟 Сверка сторон</button>
     </div>
 
     <!-- Таблица -->
@@ -385,6 +386,43 @@
             </div>
             {% endfor %}
         </div>
+    </div>
+
+    <!-- Физическая сверка front/back -->
+    <div id="view-overlay" class="print-overlay-view" style="display:none">
+        <p class="preview-notice">
+            Геометрия, профиль, смещения и порядок ячеек совпадают с PDF.
+            Текст показан схематично; точную вёрстку содержимого проверяйте в PDF-превью.
+        </p>
+        <div class="print-overlay-controls" aria-label="Настройки сверки сторон">
+            <div>
+                <label for="overlay-profile">Профиль принтера:</label>
+                <select id="overlay-profile">
+                    <option value="">Базовая конфигурация</option>
+                    {% for profile in print_profiles %}
+                    <option value="{{ profile.key }}">{{ profile.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div>
+                <label for="overlay-sheet-select">Лист:</label>
+                <select id="overlay-sheet-select"></select>
+            </div>
+            <div>
+                <label for="overlay-opacity">Прозрачность оборота: <output id="overlay-opacity-value">45%</output></label>
+                <input type="range" id="overlay-opacity" min="5" max="100" value="45" step="5">
+            </div>
+            <label><input type="checkbox" id="overlay-show-front" checked> Лицевая сторона</label>
+            <label><input type="checkbox" id="overlay-show-back" checked> Оборотная сторона</label>
+            <label><input type="checkbox" id="overlay-align-back" checked> Совместить после переворота</label>
+            <label><input type="checkbox" id="overlay-cut-bounds" checked> Границы реза</label>
+            <label><input type="checkbox" id="overlay-slot-numbers" checked> Номера ячеек</label>
+        </div>
+        <div id="overlay-status" class="print-overlay-status" role="status" aria-live="polite" tabindex="-1"></div>
+        <div class="print-overlay-stage">
+            <div id="overlay-sheet" class="print-overlay-sheet" aria-label="Наложение лицевой и оборотной страниц A4"></div>
+        </div>
+        <p class="print-overlay-legend"><span class="legend-front"></span> лицевая сторона <span class="legend-back"></span> оборотная сторона</p>
     </div>
     {% endif %}
 

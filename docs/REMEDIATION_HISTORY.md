@@ -630,3 +630,34 @@ Semantic integrity отвергает неполную пару, naive/нева�
 restore/purge, quota и реальный Chromium keyboard workflow покрыты regression-тестами.
 Финальный gate инкремента: 786 passed, 100% statements, 99,48% branches и 99,88%
 общего coverage с реальными Chromium, `pdflatex` и `bubblewrap`.
+
+### 7.16. ✅ Физическая сверка лиц и оборотов
+
+`PREVIEW-OVERLAY-001` закрыт 25.08.2026. В редактор добавлен отдельный режим
+«Сверка сторон»: выбранный A4-лист показывает face/back слоями, позволяет менять
+прозрачность, скрывать стороны, включать физическое отражение, cut bounds и подписи
+`печатная ячейка → исходная ячейка`. Профиль синхронизирован со всеми PDF-формами;
+Advanced/raw содержимое отображается только через `textContent`.
+
+Матрица больше не продублирована в JavaScript. Domain `DuplexTransform` задаёт
+аффинное отражение long-edge `(-1,0,0,1,columns-1,0)` либо short-edge
+`(1,0,0,-1,0,rows-1)` и используется прежним PDF `build_sheets`. Renderer публикует
+ту же физическую `PrintGeometry`; use case строит overlay из одного SQLite
+`PrintJobSnapshot`. SHA-256 job ID включает deck version, карточки, настройки,
+approved wrapper, профиль, geometry и padding layout. PDF возвращает тот же ID,
+version, mode и matrix в `X-Print-*` headers.
+
+Первый скриншот оверлея выявил два ранее скрытых дефекта печати. Сетка начиналась от
+левого/верхнего поля 5 мм, но при недозаполненной ширине/высоте не была симметрична
+A4: после физического отражения нулевые offsets сами создавали крупный сдвиг.
+Теперь cut-grid центрирован по обеим осям. Кроме того, `\rotatebox{180}` вращал
+карточку вокруг baseline и уводил рамки оборота вверх; `origin=c` сохраняет рамку на
+той же позиции. Duplex permutation и пользовательская опция 0°/180° не удалены и не
+смешаны с этими исправлениями.
+
+Unit-тесты фиксируют обе матрицы и validation, HTTP — совпадение overlay/PDF job,
+профиля, offsets и headers. Реальные vector/raster PDF-тесты проверяют cut size,
+центрированный front/back и обновлённый golden; Chromium проходит оба flip mode,
+opacity, mirror axis, XSS boundary и синхронизацию профиля. Финальный gate:
+815 passed, 100% statements, 99,49% branches и 99,89% общего coverage с реальными
+Chromium, `pdflatex` и `bubblewrap`.

@@ -723,7 +723,7 @@ class TestLatexRenderer:
     def test_default_long_edge_rotates_each_back_card_by_180_degrees(self):
         source = LatexRenderer(cards_per_row=2, rows_per_page=1).render(self.make_deck(2))
         back_section = source.split('задние стороны', 1)[1]
-        assert back_section.count(r'\rotatebox{180}{\backcard') == 2
+        assert back_section.count(r'\rotatebox[origin=c]{180}{\backcard') == 2
 
     def test_back_rotation_can_be_disabled_independently_of_duplex_mode(self):
         source = LatexRenderer(
@@ -733,8 +733,46 @@ class TestLatexRenderer:
             back_rotation_deg=0,
         ).render(self.make_deck(2))
         back_section = source.split('задние стороны', 1)[1]
-        assert r'\rotatebox{180}' not in back_section
+        assert r'\rotatebox[origin=c]{180}' not in back_section
         assert back_section.index('A2') < back_section.index('A1')
+
+    def test_print_geometry_exposes_the_same_physical_renderer_configuration(self):
+        geometry = LatexRenderer(
+            cards_per_row=2,
+            rows_per_page=4,
+            duplex_mode='short-edge',
+            back_rotation_deg=0,
+            front_offset_x_mm=0.4,
+            front_offset_y_mm=-0.2,
+            back_offset_x_mm=1.1,
+            back_offset_y_mm=-0.7,
+        ).print_geometry('office', 'Office printer')
+
+        assert geometry.profile_id == 'office'
+        assert geometry.profile_name == 'Office printer'
+        assert (geometry.rows, geometry.columns) == (4, 2)
+        assert (geometry.page_width_mm, geometry.page_height_mm) == (210, 297)
+        assert (geometry.card_width_mm, geometry.card_height_mm) == (93, 63)
+        assert geometry.grid_origin_x_mm == pytest.approx(12)
+        assert geometry.grid_origin_y_mm == pytest.approx(21.445, abs=0.001)
+        assert (
+            2 * geometry.grid_origin_x_mm
+            + geometry.columns * geometry.card_width_mm
+        ) == pytest.approx(geometry.page_width_mm)
+        assert (
+            2 * geometry.grid_origin_y_mm
+            + geometry.rows * geometry.card_height_mm
+            + (geometry.rows - 1) * geometry.row_gap_mm
+        ) == pytest.approx(geometry.page_height_mm)
+        assert geometry.row_gap_mm == pytest.approx(0.703, abs=0.001)
+        assert (
+            geometry.front_offset_x_mm,
+            geometry.front_offset_y_mm,
+            geometry.back_offset_x_mm,
+            geometry.back_offset_y_mm,
+        ) == (0.4, -0.2, 1.1, -0.7)
+        assert geometry.back_rotation_deg == 0
+        assert geometry.duplex_transform.matrix == (1, 0, 0, -1, 0, 3)
 
     def test_short_edge_back_rows_are_reversed(self):
         source = LatexRenderer(
@@ -810,10 +848,26 @@ class TestLatexRenderer:
     @pytest.mark.parametrize(
         ('kwargs', 'side', 'axis'),
         [
-            ({'front_offset_x_mm': -5.01}, 'Лицевая', 'горизонтальное'),
-            ({'front_offset_y_mm': -5.01}, 'Лицевая', 'вертикальное'),
-            ({'back_offset_x_mm': -5.01}, 'Оборотная', 'горизонтальное'),
-            ({'back_offset_y_mm': -5.01}, 'Оборотная', 'вертикальное'),
+            (
+                {'card_width_cm': 10, 'cards_per_row': 2,
+                 'front_offset_x_mm': -5.01},
+                'Лицевая', 'горизонтальное',
+            ),
+            (
+                {'card_height_cm': 28.62, 'rows_per_page': 1,
+                 'front_offset_y_mm': -5.41},
+                'Лицевая', 'вертикальное',
+            ),
+            (
+                {'card_width_cm': 10, 'cards_per_row': 2,
+                 'back_offset_x_mm': -5.01},
+                'Оборотная', 'горизонтальное',
+            ),
+            (
+                {'card_height_cm': 28.62, 'rows_per_page': 1,
+                 'back_offset_y_mm': -5.41},
+                'Оборотная', 'вертикальное',
+            ),
             (
                 {
                     'card_width_cm': 10,

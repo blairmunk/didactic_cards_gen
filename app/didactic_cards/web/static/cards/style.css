@@ -109,6 +109,172 @@ button:hover, .btn:hover,
     margin: 0;
 }
 
+.print-overlay-view {
+    margin-top: 1rem;
+}
+
+.print-overlay-controls {
+    display: flex;
+    align-items: end;
+    gap: 0.75rem 1rem;
+    flex-wrap: wrap;
+    padding: 0.85rem;
+    border: 1px solid #d8dde3;
+    border-radius: 6px;
+    background: #f7f9fb;
+}
+
+.print-overlay-controls > label {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-bottom: 0.65rem;
+    font-weight: normal;
+}
+
+.print-overlay-controls select {
+    margin: 0;
+}
+
+.print-overlay-controls input[type="range"] {
+    display: block;
+    width: 13rem;
+}
+
+.print-overlay-status {
+    margin: 0.8rem 0;
+    padding: 0.65rem 0.8rem;
+    overflow-wrap: anywhere;
+    border-left: 4px solid #607d8b;
+    background: #eef3f6;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 0.82rem;
+}
+
+.print-overlay-status.has-errors {
+    border-color: #c62828;
+    color: #9b1c1c;
+    background: #fff0f0;
+}
+
+.print-overlay-stage {
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: 1rem;
+    overflow: auto;
+    background: #dfe4e8;
+}
+
+.print-overlay-sheet {
+    position: relative;
+    width: 100%;
+    min-width: 28rem;
+    overflow: hidden;
+    background: white;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+}
+
+.print-overlay-layer {
+    position: absolute;
+    inset: 0;
+    transform-origin: center;
+}
+
+.print-overlay-front-layer {
+    z-index: 1;
+    color: #075ea8;
+}
+
+.print-overlay-back-layer {
+    z-index: 2;
+    color: #c62828;
+}
+
+.print-overlay-back-layer.mirror-horizontal {
+    transform: scaleX(-1);
+}
+
+.print-overlay-back-layer.mirror-vertical {
+    transform: scaleY(-1);
+}
+
+.print-overlay-back-layer.mirror-horizontal .print-overlay-slot-number {
+    transform: scaleX(-1);
+}
+
+.print-overlay-back-layer.mirror-vertical .print-overlay-slot-number {
+    transform: scaleY(-1);
+}
+
+.print-overlay-slot {
+    position: absolute;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 1px solid currentColor;
+    background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
+.print-overlay-slot.is-empty {
+    background: repeating-linear-gradient(
+        135deg,
+        transparent,
+        transparent 7px,
+        color-mix(in srgb, currentColor 8%, transparent) 7px,
+        color-mix(in srgb, currentColor 8%, transparent) 14px
+    );
+}
+
+.print-overlay-slot-number {
+    position: absolute;
+    top: 0.2rem;
+    left: 0.25rem;
+    z-index: 2;
+    max-width: calc(100% - 0.5rem);
+    padding: 0.1rem 0.2rem;
+    overflow: hidden;
+    background: rgba(255, 255, 255, 0.88);
+    font: 600 0.62rem/1.2 Arial, sans-serif;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.print-overlay-slot-content {
+    display: block;
+    max-width: 84%;
+    max-height: 58%;
+    overflow: hidden;
+    font: 0.68rem/1.2 Arial, sans-serif;
+    text-align: center;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.print-overlay-sheet.hide-cut-bounds .print-overlay-slot {
+    border-color: transparent;
+}
+
+.print-overlay-sheet.hide-slot-numbers .print-overlay-slot-number {
+    display: none;
+}
+
+.print-overlay-legend {
+    text-align: center;
+    font-size: 0.85rem;
+}
+
+.print-overlay-legend span {
+    display: inline-block;
+    width: 0.8rem;
+    height: 0.8rem;
+    margin: 0 0.2rem 0 0.8rem;
+    border: 2px solid currentColor;
+}
+
+.legend-front { color: #075ea8; }
+.legend-back { color: #c62828; }
+
 .profile-form > label {
     margin-top: 0.75rem;
 }

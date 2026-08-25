@@ -49,27 +49,20 @@
 | `MODE-HIDDEN-FIELDS-001` | ✅ Выполнено | Safe add/edit/API/JSON/repository отклоняют любое непустое raw-поле карточки без частичной записи; type transition запрещён. Schema 14 исправляет schema-13 данные с recoverable backup, integrity ловит ручную порчу, export не теряет скрытые значения, Advanced round-trip пяти полей остаётся character-preserving. |
 | `TEXT-NEWLINE-001` | ✅ Выполнено | Safe front/back получили единые CRLF/LF/CR, line/paragraph/display-math semantics в HTML и PDF; SQLite/CSV/JSON остаются character-preserving, no-op browser edit не переписывает импортированный EOL, Advanced остаётся raw. Реальные Chromium, `pdflatex` и bbox regression проверяют layout и TeX-boundary. |
 | `PRINT-GEOMETRY-001` | ✅ Программная часть | PDF идёт `front-1/back-1/…`, long-edge/short-edge permutation отделена от поворота 0°/180°; cut size, offsets, мишени, calibration PDF и overflow покрыты PDF/raster/vector-тестами. |
+| `PREVIEW-OVERLAY-001` | ✅ Выполнено | UI накладывает front/back выбранного физического листа с opacity, cut bounds, slot/source numbers и профилем. Overlay и PDF используют один snapshot, renderer-owned geometry, transform matrix и детерминированный job ID. Оверлей выявил и закрыл два реальных print-дефекта: сетка теперь симметрична A4, а 180° вращается вокруг центра карточки. Chromium проходит long-edge/short-edge и сверяет PDF header. |
 | `PRINT-PHYSICAL-001` | 🟡 Заблокировано вне кода | Нужен принтер и реальные измерения long-edge, short-edge и ручной подачи по [протоколу](PHYSICAL_PRINT_ACCEPTANCE.md). До этого нельзя обещать точность на любом принтере. |
 
 Статус storage-пунктов подтверждён обычными regression-тестами: проверены
 forensic API/CLI restore, отказ при publication `replace/fsync`, committed WAL,
 конкурентный no-clobber backup и повторное использование stable pre-migration backup.
-Последний полный локальный gate 24.08.2026: **786 passed**, statement coverage
-100%, branch coverage **99,48%** (общий coverage 99,88%); в прогон вошли реальные Chromium,
+Последний полный локальный gate 25.08.2026: **815 passed**, statement coverage
+100%, branch coverage **99,49%** (общий coverage 99,89%); в прогон вошли реальные Chromium,
 `pdflatex` и `bubblewrap` integration-тесты.
 
 ## 3. Ближайший backlog
 
 Пункт переводится в «выполнено» только после падающего контракта, исправления,
 позитивных/негативных regression-тестов и обновления этого плана.
-
-### P1 — надёжность и основной UX
-
-1. **`PREVIEW-OVERLAY-001` — точная сверка сторон.**
-   Добавить в preview управляемое наложение front/back с зеркалированием,
-   прозрачностью, cut bounds, номерами slots и выбранным printer profile.
-   Критерий: overlay и print PDF получают один immutable job и одинаковую
-   transform-матрицу; E2E проходит оба duplex mode.
 
 ### P2 — эксплуатация и полировка
 
@@ -90,7 +83,7 @@ forensic API/CLI restore, отказ при publication `replace/fsync`, committ
 
 ## 4. Порядок работ
 
-1. Сделать `PREVIEW-OVERLAY-001`, не меняя print transform и не дублируя renderer.
+1. Сделать `BUG-OBS-002`, затем унифицировать error focus импорта.
 2. После доступа к принтеру выполнить `PRINT-PHYSICAL-001`, внести измерения
    в протокол и только после этого закрыть печатный этап.
 

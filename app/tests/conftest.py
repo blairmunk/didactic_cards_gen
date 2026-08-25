@@ -6,6 +6,7 @@ from flask import Flask
 from didactic_cards.adapters.sqlite_repository import SqliteRepository
 from didactic_cards.domain.entities import CardDeck
 from didactic_cards.domain.interfaces import CompileResult, DocumentRenderer, PdfCompiler
+from didactic_cards.domain.printing import DuplexTransform, PrintGeometry
 from didactic_cards.web.blueprint import cards_bp
 
 
@@ -38,6 +39,12 @@ class FakeRenderer(DocumentRenderer):
     def with_trusted_template(self, template):
         self.trusted_templates.append(template)
         return self
+
+    def print_geometry(self, profile_id='base', profile_name='Базовая конфигурация'):
+        return PrintGeometry(
+            profile_id, profile_name, 4, 2, 210, 297, 5, 5, 93, 63,
+            0.7, 0, 0, 0, 0, 180, DuplexTransform(4, 2),
+        )
 
     def render(self, deck: CardDeck) -> str:
         self.decks.append(deck)

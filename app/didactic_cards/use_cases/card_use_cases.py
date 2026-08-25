@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from dataclasses import dataclass
 
@@ -8,6 +10,7 @@ from ..domain.interfaces import (
     DocumentRenderer, PdfCompiler, CompileResult,
 )
 from ..domain.entities import Card, CardDeck, validate_card_mode_fields
+from ..domain.printing import PrintGeometry, build_sheets
 from ..domain.rendering import AuthoringMode, DeckRenderSettings
 from ..domain.trusted import PrintJobSnapshot, TrustedTemplateVersion
 from .card_import import (
@@ -50,6 +53,173 @@ def _configure_print_renderer(
         if settings.authoring_mode is AuthoringMode.ADVANCED
         else None
     )
+
+
+@dataclass(frozen=True)
+class PrintOverlaySlot:
+    page_slot: int
+    source_slot: int
+    card_id: str | None
+    card_number: int | None
+    section: str
+    front: str
+    back: str
+    empty: bool
+
+    def to_dict(self) -> dict:
+        return {
+            'page_slot': self.page_slot,
+            'source_slot': self.source_slot,
+            'card_id': self.card_id,
+            'card_number': self.card_number,
+            'section': self.section,
+            'front': self.front,
+            'back': self.back,
+            'empty': self.empty,
+        }
+
+
+@dataclass(frozen=True)
+class PrintOverlaySheet:
+    number: int
+    front_slots: tuple[PrintOverlaySlot, ...]
+    back_slots: tuple[PrintOverlaySlot, ...]
+
+    def to_dict(self) -> dict:
+        return {
+            'number': self.number,
+            'front_slots': [slot.to_dict() for slot in self.front_slots],
+            'back_slots': [slot.to_dict() for slot in self.back_slots],
+        }
+
+
+@dataclass(frozen=True)
+class PrintOverlayJob:
+    job_id: str
+    deck_id: str
+    deck_version: int
+    geometry: PrintGeometry
+    sheets: tuple[PrintOverlaySheet, ...]
+
+    def to_dict(self) -> dict:
+        return {
+            'job_id': self.job_id,
+            'deck_id': self.deck_id,
+            'deck_version': self.deck_version,
+            'geometry': self.geometry.to_dict(),
+            'sheet_count': len(self.sheets),
+            'sheets': [sheet.to_dict() for sheet in self.sheets],
+        }
+
+
+class PreparePrintOverlay:
+    """Describe the exact immutable print layout without rendering content."""
+
+    def __init__(
+        self,
+        repo: DeckRepository,
+        renderer: DocumentRenderer,
+        cards_per_page: int,
+        profile_id: str = 'base',
+        profile_name: str = 'Базовая конфигурация',
+        trusted_template: TrustedTemplateVersion | None = None,
+        snapshot: PrintJobSnapshot | None = None,
+    ):
+        self.repo = repo
+        self.renderer = renderer
+        self.cards_per_page = cards_per_page
+        self.profile_id = profile_id
+        self.profile_name = profile_name
+        self.trusted_template = trusted_template
+        self.snapshot = snapshot
+
+    def execute(self, deck_id: str) -> PrintOverlayJob:
+        if self.snapshot is None:
+            raise ValueError('print overlay requires an immutable snapshot')
+        deck, settings, template = _print_inputs(
+            self.repo, deck_id, self.trusted_template, self.snapshot
+        )
+        renderer = _configure_print_renderer(self.renderer, settings, template)
+        geometry = renderer.print_geometry(self.profile_id, self.profile_name)
+        if geometry.rows * geometry.columns != self.cards_per_page:
+            raise ValueError('print geometry capacity does not match print layout')
+        layout = renderer.prepare_print_layout(deck, self.cards_per_page)
+        physical_sheets = build_sheets(
+            layout.cards,
+            rows=geometry.rows,
+            columns=geometry.columns,
+            duplex_mode=geometry.duplex_transform.duplex_mode,
+        )
+        card_numbers = {
+            card.id: number
+            for number, card in enumerate(self.snapshot.cards, start=1)
+        }
+        sheets: list[PrintOverlaySheet] = []
+        for sheet_number, physical_sheet in enumerate(physical_sheets, start=1):
+            source_by_object = {
+                id(card): source_slot
+                for source_slot, card in enumerate(
+                    physical_sheet.front_slots, start=1
+                )
+            }
+
+            def describe(card: Card, page_slot: int) -> PrintOverlaySlot:
+                empty = card.id not in card_numbers
+                return PrintOverlaySlot(
+                    page_slot=page_slot,
+                    source_slot=source_by_object[id(card)],
+                    card_id=None if empty else card.id,
+                    card_number=None if empty else card_numbers[card.id],
+                    section='' if empty else card.section,
+                    front='' if empty else card.front,
+                    back='' if empty else card.back,
+                    empty=empty,
+                )
+
+            sheets.append(PrintOverlaySheet(
+                number=sheet_number,
+                front_slots=tuple(
+                    describe(card, page_slot)
+                    for page_slot, card in enumerate(
+                        physical_sheet.front_slots, start=1
+                    )
+                ),
+                back_slots=tuple(
+                    describe(card, page_slot)
+                    for page_slot, card in enumerate(
+                        physical_sheet.back_slots, start=1
+                    )
+                ),
+            ))
+
+        fingerprint = {
+            'deck_id': self.snapshot.deck_id,
+            'deck_version': self.snapshot.deck_version,
+            'cards': [card.to_dict() for card in self.snapshot.cards],
+            'render_settings': self.snapshot.render_settings.to_dict(),
+            'trusted_template_hash': (
+                self.snapshot.trusted_template.state_hash
+                if self.snapshot.trusted_template is not None else None
+            ),
+            'geometry': geometry.to_dict(),
+            'layout': [
+                None if card.id not in card_numbers else card.id
+                for card in layout.cards
+            ],
+        }
+        job_id = hashlib.sha256(json.dumps(
+            fingerprint,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(',', ':'),
+        ).encode('utf-8')).hexdigest()
+        return PrintOverlayJob(
+            job_id=job_id,
+            deck_id=deck_id,
+            deck_version=self.snapshot.deck_version,
+            geometry=geometry,
+            sheets=tuple(sheets),
+        )
 
 
 class CardLimitExceeded(ValueError):

@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Callable, Optional, TypeVar
 
 from .entities import Card, Deck, CardDeck
-from .printing import PrintLayout
+from .printing import PrintGeometry, PrintLayout
 from .rendering import DeckRenderSettings
 
 
@@ -144,6 +144,11 @@ class DeckRepository(ABC):
 
 
 class DocumentRenderer(ABC):
+
+    def print_geometry(
+        self, profile_id: str = 'base', profile_name: str = 'Базовая конфигурация'
+    ) -> PrintGeometry:
+        raise NotImplementedError('renderer does not expose print geometry')
 
     def prepare_print_layout(
         self, deck: CardDeck, cards_per_page: int

@@ -22,6 +22,7 @@ from didactic_cards.use_cases.card_use_cases import (
     GetDeck,
     ImportCsv,
     PreviewDocument,
+    PreparePrintOverlay,
     PreflightDocument,
     ReorderCards,
     ResetCards,
@@ -31,6 +32,91 @@ from didactic_cards.use_cases.card_use_cases import (
     preview_bulk_import,
     preview_csv_import,
 )
+
+
+@pytest.mark.parametrize(
+    ('mode', 'expected_numbers'),
+    [
+        ('long-edge', [2, 1, 4, 3, 6, 5, 8, 7]),
+        ('short-edge', [7, 8, 5, 6, 3, 4, 1, 2]),
+    ],
+)
+def test_print_overlay_uses_snapshot_geometry_and_duplex_mapping(
+    repo, deck_id, mode, expected_numbers
+):
+    for number in range(1, 9):
+        AddCard(repo).execute(deck_id, f'Q{number}', f'A{number}')
+    snapshot = repo.get_print_job_snapshot(deck_id)
+    renderer = LatexRenderer(
+        cards_per_row=2, rows_per_page=4, duplex_mode=mode
+    )
+
+    job = PreparePrintOverlay(
+        repo, renderer, 8, 'test-profile', 'Test profile', snapshot=snapshot
+    ).execute(deck_id)
+
+    assert job.deck_version == snapshot.deck_version
+    assert len(job.job_id) == 64
+    assert [slot.card_number for slot in job.sheets[0].front_slots] == list(
+        range(1, 9)
+    )
+    assert [slot.card_number for slot in job.sheets[0].back_slots] == (
+        expected_numbers
+    )
+    assert [slot.source_slot for slot in job.sheets[0].back_slots] == (
+        expected_numbers
+    )
+
+
+def test_print_overlay_job_id_is_stable_for_snapshot_and_changes_after_edit(
+    repo, deck_id
+):
+    card, _ = AddCard(repo).execute(deck_id, 'Q', 'A')
+    renderer = LatexRenderer(cards_per_row=2, rows_per_page=4)
+    snapshot = repo.get_print_job_snapshot(deck_id)
+    first = PreparePrintOverlay(
+        repo, renderer, 8, snapshot=snapshot
+    ).execute(deck_id)
+    repeated = PreparePrintOverlay(
+        repo, renderer, 8, snapshot=snapshot
+    ).execute(deck_id)
+
+    EditCard(repo).execute(deck_id, card.id, 'changed', 'A')
+    changed = PreparePrintOverlay(
+        repo, renderer, 8, snapshot=repo.get_print_job_snapshot(deck_id)
+    ).execute(deck_id)
+
+    assert repeated.job_id == first.job_id
+    assert changed.job_id != first.job_id
+
+
+def test_print_overlay_requires_snapshot_and_matching_geometry(repo, deck_id):
+    with pytest.raises(ValueError, match='immutable snapshot'):
+        PreparePrintOverlay(repo, LatexRenderer(), 8).execute(deck_id)
+    with pytest.raises(ValueError, match='capacity'):
+        PreparePrintOverlay(
+            repo,
+            LatexRenderer(cards_per_row=2, rows_per_page=4),
+            4,
+            snapshot=repo.get_print_job_snapshot(deck_id),
+        ).execute(deck_id)
+
+
+def test_renderer_without_geometry_contract_fails_explicitly():
+    with pytest.raises(NotImplementedError, match='geometry'):
+        DocumentRenderer.print_geometry(object())
+
+
+def test_print_overlay_empty_snapshot_has_no_sheets(repo, deck_id):
+    job = PreparePrintOverlay(
+        repo,
+        LatexRenderer(cards_per_row=2, rows_per_page=4),
+        8,
+        snapshot=repo.get_print_job_snapshot(deck_id),
+    ).execute(deck_id)
+
+    assert job.sheets == ()
+    assert job.to_dict()['sheet_count'] == 0
 
 
 def test_card_crud_and_reorder(repo, deck_id):

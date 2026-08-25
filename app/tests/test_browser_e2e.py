@@ -8,7 +8,6 @@ import pytest
 from werkzeug.serving import make_server
 
 from config import AppConfig
-from didactic_cards.adapters.latex_renderer import LatexRenderer
 from didactic_cards.domain.interfaces import CompileResult
 from run import create_app
 
@@ -257,6 +256,57 @@ async def _exercise_browser(
         assert not await page.querySelector('#advanced-mode')
         assert await page.querySelector('#render-settings-form')
 
+        # The physical overlay and generated PDF share one immutable job and
+        # the renderer-owned duplex transform for both flip modes.
+        await page.select('#overlay-profile', 'standard-long-edge')
+        await page.click('#btn-view-overlay')
+        await page.waitForFunction(
+            "document.getElementById('overlay-sheet').dataset.duplexMode === 'long-edge'"
+        )
+        long_overlay = await page.evaluate(
+            '''() => {
+                const sheet = document.getElementById('overlay-sheet');
+                const back = sheet.querySelector('.print-overlay-back-layer');
+                return {
+                    jobId: sheet.dataset.jobId,
+                    matrix: sheet.dataset.transformMatrix,
+                    mirrored: back.classList.contains('mirror-horizontal'),
+                    firstBackSource: back.querySelector('.print-overlay-slot').dataset.sourceSlot,
+                    opacity: back.style.opacity,
+                    images: sheet.querySelectorAll('img').length
+                };
+            }'''
+        )
+        assert long_overlay['matrix'] == '-1,0,0,1,1,0'
+        assert long_overlay['mirrored'] is True
+        assert long_overlay['firstBackSource'] == '2'
+        assert long_overlay['opacity'] == '0.45'
+        assert long_overlay['images'] == 0
+        assert not await page.evaluate('Boolean(window.__unsafePreview)')
+
+        await page.select('#overlay-profile', 'standard-short-edge')
+        await page.waitForFunction(
+            "document.getElementById('overlay-sheet').dataset.duplexMode === 'short-edge'"
+        )
+        short_overlay = await page.evaluate(
+            '''() => {
+                const sheet = document.getElementById('overlay-sheet');
+                const back = sheet.querySelector('.print-overlay-back-layer');
+                return {
+                    jobId: sheet.dataset.jobId,
+                    matrix: sheet.dataset.transformMatrix,
+                    mirrored: back.classList.contains('mirror-vertical'),
+                    firstBackSource: back.querySelector('.print-overlay-slot').dataset.sourceSlot,
+                    selectedPrintProfile: document.getElementById('print-profile').value
+                };
+            }'''
+        )
+        assert short_overlay['jobId'] != long_overlay['jobId']
+        assert short_overlay['matrix'] == '1,0,0,-1,0,3'
+        assert short_overlay['mirrored'] is True
+        assert short_overlay['firstBackSource'] == '7'
+        assert short_overlay['selectedPrintProfile'] == 'standard-short-edge'
+
         pdf_result = await page.evaluate(
             '''async () => {
                 const form = document.querySelector('form[action$="generate"]');
@@ -267,6 +317,7 @@ async def _exercise_browser(
                 return {
                     status: response.status,
                     contentType: response.headers.get('content-type'),
+                    jobId: response.headers.get('x-print-job-id'),
                     prefix: String.fromCharCode(...bytes.slice(0, 4))
                 };
             }'''
@@ -274,6 +325,7 @@ async def _exercise_browser(
         assert pdf_result == {
             'status': 200,
             'contentType': 'application/pdf',
+            'jobId': short_overlay['jobId'],
             'prefix': '%PDF',
         }
 
@@ -498,7 +550,6 @@ def test_complete_browser_workflow_is_offline_and_persistent(tmp_path):
             secret_key='browser-secret', trusted_latex_enabled=True
         ),
         data_dir=tmp_path / 'data',
-        renderer=LatexRenderer(),
         compiler=BrowserCompiler(),
     )
     app.config.update(

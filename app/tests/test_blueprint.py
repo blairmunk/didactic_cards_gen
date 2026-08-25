@@ -1356,12 +1356,100 @@ def test_print_profile_is_applied_to_generate_preview_and_preflight(
     )
     assert generated.status_code == 200
     assert r'\hspace*{1.5mm}' in app.config['COMPILER'].sources[-1]
-    assert r'\rotatebox{180}{\backcard' in app.config['COMPILER'].sources[-1]
+    assert (
+        r'\rotatebox[origin=c]{180}{\backcard'
+        in app.config['COMPILER'].sources[-1]
+    )
     preflight = client.post(
         f'/api/deck/{deck_id}/preflight', data={'profile_id': profile.key}
     )
     assert preflight.status_code == 200
     assert preflight.json['ready'] is True
+
+
+@pytest.mark.parametrize(
+    ('mode', 'back_numbers', 'matrix'),
+    [
+        ('long-edge', [2, 1, 4, 3, 6, 5, 8, 7], [-1, 0, 0, 1, 1, 0]),
+        ('short-edge', [7, 8, 5, 6, 3, 4, 1, 2], [1, 0, 0, -1, 0, 3]),
+    ],
+)
+def test_print_overlay_and_pdf_share_snapshot_profile_and_transform(
+    client, app, deck_id, mode, back_numbers, matrix
+):
+    profile = PrinterProfile(
+        f'test-{mode}', f'Test {mode}', duplex_mode=mode,
+        front_offset_x_mm=0.4, back_offset_y_mm=-0.7,
+    )
+    app.config['PRINT_PROFILES'] = {profile.key: profile}
+    app.config['RENDERER_FACTORY'] = lambda selected: LatexRenderer(
+        cards_per_row=2,
+        rows_per_page=4,
+        duplex_mode=selected.duplex_mode,
+        back_rotation_deg=selected.back_rotation_deg,
+        front_offset_x_mm=selected.front_offset_x_mm,
+        front_offset_y_mm=selected.front_offset_y_mm,
+        back_offset_x_mm=selected.back_offset_x_mm,
+        back_offset_y_mm=selected.back_offset_y_mm,
+    )
+    for number in range(1, 9):
+        response = client.post(
+            f'/api/deck/{deck_id}/add_card',
+            json={'front': f'Q{number}', 'back': f'A{number}'},
+        )
+        assert response.status_code == 200
+
+    overlay = client.post(
+        f'/api/deck/{deck_id}/print_overlay',
+        data={'profile_id': profile.key},
+    )
+    generated = client.post(
+        f'/deck/{deck_id}/preview_pdf',
+        data={'profile_id': profile.key},
+    )
+
+    assert overlay.status_code == generated.status_code == 200
+    assert overlay.json['geometry']['profile_id'] == profile.key
+    assert overlay.json['geometry']['transform']['matrix'] == matrix
+    assert overlay.json['geometry']['front_offset_x_mm'] == 0.4
+    assert overlay.json['geometry']['back_offset_y_mm'] == -0.7
+    assert [
+        slot['card_number'] for slot in overlay.json['sheets'][0]['back_slots']
+    ] == back_numbers
+    assert generated.headers['X-Print-Job-ID'] == overlay.json['job_id']
+    assert generated.headers['X-Print-Deck-Version'] == str(
+        overlay.json['deck_version']
+    )
+    assert generated.headers['X-Print-Duplex-Mode'] == mode
+    assert generated.headers['X-Print-Transform-Matrix'] == ','.join(
+        str(value) for value in matrix
+    )
+
+
+def test_print_overlay_ui_and_api_are_exposed(client, deck_id):
+    client.post(
+        f'/api/deck/{deck_id}/add_card', json={'front': '<img>', 'back': 'A'}
+    )
+    page = client.get(f'/deck/{deck_id}')
+    overlay = client.post(f'/api/deck/{deck_id}/print_overlay')
+    unknown = client.post(
+        f'/api/deck/{deck_id}/print_overlay', data={'profile_id': 'missing'}
+    )
+
+    assert page.status_code == 200
+    assert 'id="btn-view-overlay"' in page.text
+    assert 'id="overlay-align-back"' in page.text
+    assert overlay.status_code == 200
+    assert overlay.json['sheets'][0]['front_slots'][0]['front'] == '<img>'
+    assert unknown.status_code == 400
+
+
+def test_print_overlay_empty_deck_is_a_valid_empty_job(client, deck_id):
+    response = client.post(f'/api/deck/{deck_id}/print_overlay')
+
+    assert response.status_code == 200
+    assert response.json['sheet_count'] == 0
+    assert response.json['sheets'] == []
 
 
 @pytest.mark.parametrize(

@@ -2,12 +2,81 @@ import pytest
 
 from didactic_cards.domain.entities import Card
 from didactic_cards.domain.printing import (
+    DuplexTransform,
     DuplexMode,
+    PrintGeometry,
     PrinterProfile,
     build_print_layout,
     build_sheets,
     recommend_back_offsets,
 )
+
+
+@pytest.mark.parametrize(
+    ('mode', 'matrix', 'targets'),
+    [
+        ('long-edge', (-1, 0, 0, 1, 1, 0), [1, 0, 3, 2, 5, 4, 7, 6]),
+        ('short-edge', (1, 0, 0, -1, 0, 3), [6, 7, 4, 5, 2, 3, 0, 1]),
+    ],
+)
+def test_duplex_transform_exposes_the_pdf_slot_permutation(
+    mode, matrix, targets
+):
+    transform = DuplexTransform(4, 2, mode)
+
+    assert transform.matrix == matrix
+    assert [transform.target_index(index) for index in range(8)] == targets
+    assert transform.to_dict()['matrix'] == list(matrix)
+
+
+@pytest.mark.parametrize('rows, columns', [(0, 2), (4, 0), (-1, 2)])
+def test_duplex_transform_rejects_invalid_grid(rows, columns):
+    with pytest.raises(ValueError, match='positive'):
+        DuplexTransform(rows, columns)
+
+
+@pytest.mark.parametrize('index', [-1, 8, True])
+def test_duplex_transform_rejects_outside_slot(index):
+    with pytest.raises(ValueError, match='outside'):
+        DuplexTransform(4, 2).target_index(index)
+
+
+@pytest.mark.parametrize('coordinates', [(-1, 0), (0, 2), (True, 0), (0, 1.5)])
+def test_duplex_transform_rejects_outside_coordinates(coordinates):
+    with pytest.raises(ValueError, match='outside'):
+        DuplexTransform(4, 2).target_coordinates(*coordinates)
+
+
+def _geometry(**changes):
+    values = {
+        'profile_id': 'base', 'profile_name': 'Base',
+        'rows': 4, 'columns': 2,
+        'page_width_mm': 210, 'page_height_mm': 297,
+        'grid_origin_x_mm': 5, 'grid_origin_y_mm': 5,
+        'card_width_mm': 93, 'card_height_mm': 63, 'row_gap_mm': 0.7,
+        'front_offset_x_mm': 0, 'front_offset_y_mm': 0,
+        'back_offset_x_mm': 0, 'back_offset_y_mm': 0,
+        'back_rotation_deg': 180,
+        'duplex_transform': DuplexTransform(4, 2),
+    }
+    values.update(changes)
+    return PrintGeometry(**values)
+
+
+@pytest.mark.parametrize(
+    ('field', 'value', 'message'),
+    [
+        ('profile_id', '', 'identity'),
+        ('page_width_mm', 0, 'finite'),
+        ('front_offset_x_mm', float('inf'), 'finite'),
+        ('row_gap_mm', -1, 'non-negative'),
+        ('back_rotation_deg', 90, '0 or 180'),
+        ('duplex_transform', DuplexTransform(2, 2), 'do not match'),
+    ],
+)
+def test_print_geometry_rejects_inconsistent_values(field, value, message):
+    with pytest.raises(ValueError, match=message):
+        _geometry(**{field: value})
 
 
 def make_cards(count):

@@ -27,6 +27,7 @@ from ..use_cases.card_use_cases import (
     EditCard, ReorderCards, ResetCards, GetDeck,
     GenerateDocument, GenerateDocumentSide, PreviewDocument, CardLimitExceeded,
     PreflightDocument, BulkValidationError, CsvValidationError,
+    PreparePrintOverlay,
     preview_bulk_import, preview_csv_import,
     compile_error_context,
 )
@@ -64,6 +65,16 @@ def _renderer(profile_id: str | None = None):
     if profile is None or factory is None:
         abort(400, description='Неизвестный профиль принтера')
     return factory(profile)
+
+
+def _print_renderer_context(profile_id: str | None):
+    profile_id = (profile_id or '').strip()
+    if not profile_id:
+        return _renderer(), 'base', 'Базовая конфигурация'
+    profile = _print_profile_map().get(profile_id)
+    if profile is None:
+        abort(400, description='Неизвестный профиль принтера')
+    return _renderer(profile_id), profile.key, profile.name
 
 
 def _print_profiles():
@@ -1330,22 +1341,29 @@ def _generate_pdf_response(
             ),
         )
 
+    compile_started = time.perf_counter()
     try:
         selected_compiler, trusted_template, snapshot = _print_compiler_and_template(
             deck_id
         )
+        selected_renderer, profile_id, profile_name = _print_renderer_context(
+            request.form.get('profile_id')
+        )
+        print_job = PreparePrintOverlay(
+            _repo(), selected_renderer, _cards_per_page(),
+            profile_id, profile_name, trusted_template, snapshot,
+        ).execute(deck_id)
         if side is None:
             generator = GenerateDocument(
-                _repo(), _renderer(request.form.get('profile_id')),
+                _repo(), selected_renderer,
                 selected_compiler, _cards_per_page(), trusted_template, snapshot
             )
         else:
             generator = GenerateDocumentSide(
-                _repo(), _renderer(request.form.get('profile_id')),
+                _repo(), selected_renderer,
                 selected_compiler, _cards_per_page(), side, trusted_template,
                 snapshot
             )
-        compile_started = time.perf_counter()
         result = generator.execute(deck_id)
         compile_duration_ms = round(
             (time.perf_counter() - compile_started) * 1000, 3
@@ -1424,12 +1442,21 @@ def _generate_pdf_response(
 
     suffix = {'front': '-fronts', 'back': '-backs'}.get(side, '')
     filename = f'{deck_info.name}{suffix}.pdf' if deck_info else f'cards{suffix}.pdf'
-    return send_file(
+    response = send_file(
         io.BytesIO(result.pdf_data),
         mimetype='application/pdf',
         as_attachment=attachment,
         download_name=filename,
     )
+    response.headers['X-Print-Job-ID'] = print_job.job_id
+    response.headers['X-Print-Deck-Version'] = str(print_job.deck_version)
+    response.headers['X-Print-Duplex-Mode'] = (
+        print_job.geometry.duplex_transform.duplex_mode.value
+    )
+    response.headers['X-Print-Transform-Matrix'] = ','.join(
+        str(value) for value in print_job.geometry.duplex_transform.matrix
+    )
+    return response
 
 
 @cards_bp.route('/deck/<deck_id>/generate', methods=['POST'])
@@ -1477,6 +1504,21 @@ def preflight_document(deck_id):
                 'side': None,
             }],
         })
+
+
+@cards_bp.route('/api/deck/<deck_id>/print_overlay', methods=['POST'])
+def print_overlay(deck_id):
+    _selected_compiler, trusted_template, snapshot = _print_compiler_and_template(
+        deck_id
+    )
+    selected_renderer, profile_id, profile_name = _print_renderer_context(
+        request.form.get('profile_id')
+    )
+    job = PreparePrintOverlay(
+        _repo(), selected_renderer, _cards_per_page(),
+        profile_id, profile_name, trusted_template, snapshot,
+    ).execute(deck_id)
+    return jsonify(job.to_dict())
 
 
 @cards_bp.route('/deck/<deck_id>/preview_latex', methods=['POST'])

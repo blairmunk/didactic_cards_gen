@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', function() {
         previewBulk:'/api/deck/' + DECK_ID + '/preview_bulk',
         previewCsv: '/api/deck/' + DECK_ID + '/preview_csv',
         preflight:  '/api/deck/' + DECK_ID + '/preflight',
+        printOverlay: '/api/deck/' + DECK_ID + '/print_overlay',
         editPage:   '/deck/' + DECK_ID + '/edit_card/',
     };
 
@@ -23,12 +24,16 @@ document.addEventListener('DOMContentLoaded', function() {
         currentView = view;
         const tableDiv = document.getElementById('view-table');
         const previewDiv = document.getElementById('view-preview');
+        const overlayDiv = document.getElementById('view-overlay');
         if (tableDiv) tableDiv.style.display = view === 'table' ? '' : 'none';
         if (previewDiv) previewDiv.style.display = view === 'preview' ? '' : 'none';
+        if (overlayDiv) overlayDiv.style.display = view === 'overlay' ? '' : 'none';
         document.getElementById('btn-view-table').classList.toggle('active', view === 'table');
         document.getElementById('btn-view-preview').classList.toggle('active', view === 'preview');
+        document.getElementById('btn-view-overlay').classList.toggle('active', view === 'overlay');
         document.getElementById('btn-view-table').setAttribute('aria-pressed', view === 'table');
         document.getElementById('btn-view-preview').setAttribute('aria-pressed', view === 'preview');
+        document.getElementById('btn-view-overlay').setAttribute('aria-pressed', view === 'overlay');
 
         if (!IS_ADVANCED && view === 'preview' && !mathjaxRendered) {
             mathjaxRendered = true;
@@ -36,6 +41,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 MathJax.typesetPromise([document.getElementById('preview-grid')]);
             }
         }
+        if (view === 'overlay') loadPrintOverlay();
     };
 
     // ── Утилиты ──
@@ -72,6 +78,8 @@ document.addEventListener('DOMContentLoaded', function() {
             if (token) token.value = '';
             if (submit) submit.disabled = true;
         });
+        overlayJob = null;
+        if (currentView === 'overlay') loadPrintOverlay();
     }
 
     const mathStatus = document.getElementById('math-status');
@@ -221,12 +229,187 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     const printProfile = document.getElementById('print-profile');
+    const overlayProfile = document.getElementById('overlay-profile');
+    function syncPrintProfile(value) {
+        if (printProfile) printProfile.value = value;
+        if (overlayProfile) overlayProfile.value = value;
+        document.querySelectorAll('.print-form input[name="profile_id"]').forEach(function(input) {
+            input.value = value;
+        });
+    }
+    if (printProfile) {
+        printProfile.addEventListener('change', function() {
+            syncPrintProfile(printProfile.value);
+            overlayJob = null;
+            if (currentView === 'overlay') loadPrintOverlay();
+        });
+    }
+    if (overlayProfile) {
+        overlayProfile.addEventListener('change', function() {
+            syncPrintProfile(overlayProfile.value);
+            overlayJob = null;
+            loadPrintOverlay();
+        });
+    }
     document.querySelectorAll('.print-form').forEach(function(form) {
         form.addEventListener('submit', function() {
             const input = form.querySelector('input[name="profile_id"]');
             if (input) input.value = printProfile ? printProfile.value : '';
         });
     });
+
+    // ── Сверка физического положения лиц и оборотов ──
+
+    const overlaySheet = document.getElementById('overlay-sheet');
+    const overlayStatus = document.getElementById('overlay-status');
+    const overlaySheetSelect = document.getElementById('overlay-sheet-select');
+    const overlayOpacity = document.getElementById('overlay-opacity');
+    const overlayOpacityValue = document.getElementById('overlay-opacity-value');
+    const overlayShowFront = document.getElementById('overlay-show-front');
+    const overlayShowBack = document.getElementById('overlay-show-back');
+    const overlayAlignBack = document.getElementById('overlay-align-back');
+    const overlayCutBounds = document.getElementById('overlay-cut-bounds');
+    const overlaySlotNumbers = document.getElementById('overlay-slot-numbers');
+    let overlayJob = null;
+    let overlayRequestNumber = 0;
+
+    function overlaySlot(layer, slot, side, geometry) {
+        const pageIndex = slot.page_slot - 1;
+        const row = Math.floor(pageIndex / geometry.columns);
+        const column = pageIndex % geometry.columns;
+        const offsetX = side === 'front'
+            ? geometry.front_offset_x_mm : geometry.back_offset_x_mm;
+        const offsetY = side === 'front'
+            ? geometry.front_offset_y_mm : geometry.back_offset_y_mm;
+        const element = document.createElement('div');
+        element.className = 'print-overlay-slot' + (slot.empty ? ' is-empty' : '');
+        element.dataset.pageSlot = String(slot.page_slot);
+        element.dataset.sourceSlot = String(slot.source_slot);
+        element.dataset.cardNumber = slot.card_number === null ? '' : String(slot.card_number);
+        element.style.left = ((geometry.grid_origin_x_mm + offsetX + column * geometry.card_width_mm) / geometry.page_width_mm * 100) + '%';
+        element.style.top = ((geometry.grid_origin_y_mm + offsetY + row * (geometry.card_height_mm + geometry.row_gap_mm)) / geometry.page_height_mm * 100) + '%';
+        element.style.width = (geometry.card_width_mm / geometry.page_width_mm * 100) + '%';
+        element.style.height = (geometry.card_height_mm / geometry.page_height_mm * 100) + '%';
+
+        const number = document.createElement('span');
+        number.className = 'print-overlay-slot-number';
+        number.textContent = slot.empty
+            ? 'пусто · ячейка ' + slot.page_slot
+            : (side === 'front' ? 'F' : 'B') + slot.card_number +
+              ' · печ. ' + slot.page_slot + ' → исходная ' + slot.source_slot;
+        element.appendChild(number);
+
+        const content = document.createElement('span');
+        content.className = 'print-overlay-slot-content';
+        content.textContent = slot.empty ? '' : slot[side];
+        if (side === 'back') {
+            content.style.transform = 'rotate(' + geometry.back_rotation_deg + 'deg)';
+        }
+        element.appendChild(content);
+        layer.appendChild(element);
+    }
+
+    function renderPrintOverlay() {
+        if (!overlayJob || !overlaySheet) return;
+        const geometry = overlayJob.geometry;
+        const selectedIndex = Math.max(0, Number(overlaySheetSelect.value || 1) - 1);
+        const sheet = overlayJob.sheets[selectedIndex];
+        if (!sheet) return;
+        overlaySheet.replaceChildren();
+        overlaySheet.style.aspectRatio = geometry.page_width_mm + ' / ' + geometry.page_height_mm;
+
+        const frontLayer = document.createElement('div');
+        frontLayer.className = 'print-overlay-layer print-overlay-front-layer';
+        sheet.front_slots.forEach(function(slot) {
+            overlaySlot(frontLayer, slot, 'front', geometry);
+        });
+        const backLayer = document.createElement('div');
+        backLayer.className = 'print-overlay-layer print-overlay-back-layer';
+        sheet.back_slots.forEach(function(slot) {
+            overlaySlot(backLayer, slot, 'back', geometry);
+        });
+        if (overlayAlignBack.checked) {
+            backLayer.classList.add(
+                geometry.transform.mirror_axis === 'horizontal'
+                    ? 'mirror-horizontal' : 'mirror-vertical'
+            );
+        }
+        frontLayer.hidden = !overlayShowFront.checked;
+        backLayer.hidden = !overlayShowBack.checked;
+        backLayer.style.opacity = String(Number(overlayOpacity.value) / 100);
+        overlaySheet.classList.toggle('hide-cut-bounds', !overlayCutBounds.checked);
+        overlaySheet.classList.toggle('hide-slot-numbers', !overlaySlotNumbers.checked);
+        overlaySheet.append(frontLayer, backLayer);
+    }
+
+    async function loadPrintOverlay() {
+        if (!overlaySheet || !overlayStatus) return;
+        const requestNumber = ++overlayRequestNumber;
+        overlayStatus.classList.remove('has-errors');
+        overlayStatus.textContent = 'Подготовка неизменяемого задания печати…';
+        overlaySheet.setAttribute('aria-busy', 'true');
+        const body = new FormData();
+        body.set('profile_id', overlayProfile ? overlayProfile.value : '');
+        try {
+            const response = await fetch(API.printOverlay, {method: 'POST', body: body});
+            const data = await response.json();
+            if (requestNumber !== overlayRequestNumber) return;
+            if (!response.ok) throw new Error(data.error || 'HTTP ' + response.status);
+            overlayJob = data;
+            overlaySheet.dataset.jobId = data.job_id;
+            overlaySheet.dataset.deckVersion = String(data.deck_version);
+            overlaySheet.dataset.duplexMode = data.geometry.transform.duplex_mode;
+            overlaySheet.dataset.transformMatrix = data.geometry.transform.matrix.join(',');
+            overlaySheetSelect.replaceChildren();
+            data.sheets.forEach(function(sheet) {
+                const option = document.createElement('option');
+                option.value = String(sheet.number);
+                option.textContent = 'Лист ' + sheet.number + ' из ' + data.sheet_count;
+                overlaySheetSelect.appendChild(option);
+            });
+            if (!data.sheets.length) {
+                overlaySheet.replaceChildren();
+                overlayStatus.textContent = 'В задании печати нет карточек.';
+                return;
+            }
+            const matrix = data.geometry.transform.matrix.join(', ');
+            overlayStatus.textContent = data.geometry.profile_name +
+                ' · ' + data.geometry.transform.duplex_mode +
+                ' · matrix(' + matrix + ')' +
+                ' · задание ' + data.job_id.slice(0, 12) +
+                ' · версия ' + data.deck_version;
+            renderPrintOverlay();
+        } catch (error) {
+            if (requestNumber !== overlayRequestNumber) return;
+            console.error(error);
+            overlayJob = null;
+            delete overlaySheet.dataset.jobId;
+            delete overlaySheet.dataset.deckVersion;
+            delete overlaySheet.dataset.duplexMode;
+            delete overlaySheet.dataset.transformMatrix;
+            overlaySheet.replaceChildren();
+            overlayStatus.classList.add('has-errors');
+            overlayStatus.textContent = 'Не удалось подготовить сверку: ' + error.message;
+            overlayStatus.focus({preventScroll: true});
+            overlayStatus.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        } finally {
+            if (requestNumber === overlayRequestNumber) {
+                overlaySheet.removeAttribute('aria-busy');
+            }
+        }
+    }
+
+    if (overlaySheetSelect) overlaySheetSelect.addEventListener('change', renderPrintOverlay);
+    [overlayShowFront, overlayShowBack, overlayAlignBack, overlayCutBounds, overlaySlotNumbers]
+        .filter(Boolean).forEach(function(control) {
+            control.addEventListener('change', renderPrintOverlay);
+        });
+    if (overlayOpacity) {
+        overlayOpacity.addEventListener('input', function() {
+            overlayOpacityValue.value = overlayOpacity.value + '%';
+            renderPrintOverlay();
+        });
+    }
 
     // ── Удаление/добавление в превью ──
 

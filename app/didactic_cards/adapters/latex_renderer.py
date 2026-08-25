@@ -8,7 +8,9 @@ from ..domain.entities import Card, CardDeck
 from ..domain.interfaces import DocumentRenderer
 from ..domain.safe_text import safe_single_line, safe_text_paragraphs
 from ..domain.printing import (
+    DuplexTransform,
     DuplexMode,
+    PrintGeometry,
     PrintLayout,
     PrintPaddingCard,
     build_print_layout,
@@ -291,6 +293,26 @@ class LatexRenderer(DocumentRenderer):
         self.trusted_template = trusted_template
         self.cards_per_page = cards_per_row * rows_per_page
 
+    @property
+    def grid_width_mm(self) -> float:
+        return self.cards_per_row * self.card_width * 10
+
+    @property
+    def grid_cut_height_mm(self) -> float:
+        row_gap_mm = 2 * PT_TO_CM * 10
+        return (
+            self.rows_per_page * self.card_height * 10
+            + (self.rows_per_page - 1) * row_gap_mm
+        )
+
+    @property
+    def grid_origin_x_mm(self) -> float:
+        return (PAGE_WIDTH_MM - self.grid_width_mm) / 2
+
+    @property
+    def grid_origin_y_mm(self) -> float:
+        return (PAGE_HEIGHT_MM - self.grid_cut_height_mm) / 2
+
     def with_render_settings(
         self, settings: DeckRenderSettings
     ) -> LatexRenderer:
@@ -321,6 +343,35 @@ class LatexRenderer(DocumentRenderer):
             rows=self.rows_per_page,
             columns=self.cards_per_row,
             section_break=self.render_settings.section_break,
+        )
+
+    def print_geometry(
+        self,
+        profile_id: str = 'base',
+        profile_name: str = 'Базовая конфигурация',
+    ) -> PrintGeometry:
+        return PrintGeometry(
+            profile_id=profile_id,
+            profile_name=profile_name,
+            rows=self.rows_per_page,
+            columns=self.cards_per_row,
+            page_width_mm=PAGE_WIDTH_MM,
+            page_height_mm=PAGE_HEIGHT_MM,
+            grid_origin_x_mm=self.grid_origin_x_mm,
+            grid_origin_y_mm=self.grid_origin_y_mm,
+            card_width_mm=self.card_width * 10,
+            card_height_mm=self.card_height * 10,
+            row_gap_mm=2 * PT_TO_CM * 10,
+            front_offset_x_mm=self.front_offset[0],
+            front_offset_y_mm=self.front_offset[1],
+            back_offset_x_mm=self.back_offset[0],
+            back_offset_y_mm=self.back_offset[1],
+            back_rotation_deg=self.back_rotation_deg,
+            duplex_transform=DuplexTransform(
+                self.rows_per_page,
+                self.cards_per_row,
+                self.duplex_mode,
+            ),
         )
 
     def render(self, deck: CardDeck) -> str:
@@ -383,7 +434,7 @@ class LatexRenderer(DocumentRenderer):
 \end{{document}}'''
 
     def printable_area_warnings(self) -> tuple[str, ...]:
-        grid_width_mm = self.cards_per_row * self.card_width * 10
+        grid_width_mm = self.grid_width_mm
         grid_height_mm = self.rows_per_page * (
             self.card_height + 2 * PT_TO_CM
         ) * 10
@@ -392,9 +443,9 @@ class LatexRenderer(DocumentRenderer):
             ('Лицевая сторона', self.front_offset),
             ('Оборотная сторона', self.back_offset),
         ):
-            left = PAGE_MARGIN_MM + offset_x
+            left = self.grid_origin_x_mm + offset_x
             right = left + grid_width_mm
-            top = PAGE_MARGIN_MM + offset_y
+            top = self.grid_origin_y_mm + offset_y
             bottom = top + grid_height_mm
             if left < 0 or right > PAGE_WIDTH_MM:
                 warnings.append(
@@ -677,9 +728,13 @@ class LatexRenderer(DocumentRenderer):
         command = r'\frontcard' if side == 'front' else r'\backcard'
         offset_x, offset_y = self.front_offset if side == 'front' else self.back_offset
         grid_width = self.cards_per_row * self.card_width
+        layout_offset_x = self.grid_origin_x_mm - PAGE_MARGIN_MM
+        layout_offset_y = self.grid_origin_y_mm - PAGE_MARGIN_MM
         result = r'\registrationmarks' + '\n' if self.registration_marks else ''
+        result += f'\\vspace*{{{layout_offset_y}mm}}% centered grid\n'
         result += f'\\vspace*{{{offset_y}mm}}%\n'
-        result += f'\\noindent\\hspace*{{{offset_x}mm}}%\n'
+        result += f'\\noindent\\hspace*{{{layout_offset_x}mm}}% centered grid\n'
+        result += f'\\hspace*{{{offset_x}mm}}%\n'
         result += f'\\begin{{minipage}}[t]{{{grid_width}cm}}\n'
         for row in range(self.rows_per_page):
             for column in range(self.cards_per_row):
@@ -697,7 +752,9 @@ class LatexRenderer(DocumentRenderer):
                 )
                 rendered_card = command + '{' + checked_content + '}'
                 if side == 'back' and self.back_rotation_deg == 180:
-                    rendered_card = r'\rotatebox{180}{' + rendered_card + '}'
+                    rendered_card = (
+                        r'\rotatebox[origin=c]{180}{' + rendered_card + '}'
+                    )
                 result += rendered_card + '\n'
                 if column < self.cards_per_row - 1:
                     result += '%\n'

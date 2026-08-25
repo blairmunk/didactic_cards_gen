@@ -23,7 +23,7 @@ Safe допускает только точную пустую строку на
 schema 15 включает прежнюю mode-очистку в цепочку миграций, а Advanced UI и
 character-preserving round-trip пяти полей не изменены.
 
-В ходе аудита исправлены шесть разрывов:
+В ходе аудита исправлены семь разрывов:
 
 1. Advanced перенесён из смешанной панели оформления в явный неизменяемый тип колоды.
 2. Export JSON/CSV находился внутри скрытого блока генерации и поэтому исчезал у пустой
@@ -36,6 +36,9 @@ character-preserving round-trip пяти полей не изменены.
 6. Delete колоды был мгновенным hard delete без UI восстановления; теперь главная
    страница перемещает version-locked агрегат в видимую корзину, где доступны
    отдельные keyboard-достижимые restore и подтверждаемый purge.
+7. Печатную раскладку можно было проверить только по двум отдельным PDF-страницам;
+   теперь «Сверка сторон» показывает общий физический A4, профиль, offsets,
+   long-edge/short-edge отражение, cut bounds и соответствие печатной ячейки исходной.
 
 ## Матрица пользовательских функций
 
@@ -50,7 +53,7 @@ character-preserving round-trip пяти полей не изменены.
 | Обычная колода | Preset, выравнивание 3×3, верхний/нижний колонтитулы, `card_number/card_count`, линии, профили шрифтов/интервалов и section breaks | «Оформление обычной колоды»; дополнительные секции свёрнуты |
 | Advanced-колода | Raw TeX каждой стороны; необязательная versioned-оболочка и trusted-поля верхнего/нижнего колонтитула | Отдельная Advanced-панель; safe-оформление отсутствует |
 | Колода | Single add; strict bulk; mode-aware CSV с обязательным заголовком и read-only preview | Раздельные подсказки, шаблоны и поля обычной/Advanced-колоды |
-| Колода | Table/visual preview, edit/delete, drag и keyboard reorder | Таблица/превью карточек |
+| Колода | Table/visual preview, физическая front/back-сверка, edit/delete, drag и keyboard reorder | Три явных переключателя «Таблица» / «Превью» / «Сверка сторон» |
 | Колода | JSON/CSV export, включая пустую колоду | Всегда видимый раздел «Данные колоды» |
 | Колода | LaTeX preview, PDF, front-only, back-only, inline PDF | «Генерация» при наличии карточек |
 | Колода | Preflight с переходом к проблемной карточке | «Проверить перед печатью» |
@@ -63,7 +66,7 @@ character-preserving round-trip пяти полей не изменены.
 Следующие routes намеренно не являются самостоятельными пользовательскими экранами:
 
 - `/health/live` и `/health/ready` — probes для процесса/deployment;
-- `/api/deck/...` — JSON endpoints кнопок, CSV preview, preflight и reorder;
+- `/api/deck/...` — JSON endpoints кнопок, CSV preview, preflight, print overlay и reorder;
 - server-side add/delete routes — совместимые HTML boundaries, основной интерфейс вызывает
   эквивалентные API-действия и показывает результат без полной перезагрузки.
 
@@ -99,8 +102,11 @@ trash → keyboard restore → trash → purge сценарий.
 Дополнительное покрытие доказывает пятиколоночный Advanced round-trip, strict malformed
 input, сохранение raw whitespace/backslashes, свежесть preview и mode-aware UI. Chromium
 E2E импортирует внешний Advanced CSV, подтверждает raw trust и затем создаёт PDF через
-sandbox compiler.
+sandbox compiler. Тот же реальный Chromium переключает long-edge/short-edge overlay,
+проверяет mirror axis, opacity, XSS-границу, синхронизацию printer profile и равенство
+overlay job ID заголовку сгенерированного PDF.
 
-Полный accessibility review PDF overlay остаётся отдельным пунктом roadmap: этот аудит
-проверяет достижимость функций, названия controls, keyboard reorder и основные focus
-transitions, но не заявляет завершённую WCAG-оценку каждой страницы.
+Полный WCAG-аудит всего приложения остаётся отдельной эксплуатационной задачей: этот
+аудит проверяет достижимость функций, native keyboard controls, названия, aria-live,
+keyboard reorder и основные focus transitions, но не заявляет сертифицированную
+WCAG-оценку каждой страницы.
