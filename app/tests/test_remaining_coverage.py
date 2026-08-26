@@ -14,6 +14,7 @@ import pytest
 import config as config_module
 from config import AppConfig, load_or_create_local_secret
 from didactic_cards.adapters import sandboxed_pdflatex_compiler as sandbox_module
+from didactic_cards.adapters.latex_renderer import UnsafeLatexError
 from didactic_cards.adapters.sandboxed_pdflatex_compiler import (
     SandboxedPdfLatexCompiler,
 )
@@ -274,10 +275,15 @@ def test_optional_repository_and_renderer_capabilities_fail_explicitly(
 
 @pytest.mark.parametrize(
     ('error_kind', 'expected_status'),
-    [('timeout', 504), ('unexpected-kind', 500)],
+    [
+        ('timeout', 504),
+        ('validation', 422),
+        ('compile-error', 422),
+        ('unexpected-kind', 500),
+    ],
 )
 def test_calibration_compile_failures_map_to_safe_status(
-    client, app, error_kind, expected_status
+    client, app, error_kind, expected_status, monkeypatch
 ):
     class Renderer:
         def render_calibration_sheet(self):
@@ -290,12 +296,58 @@ def test_calibration_compile_failures_map_to_safe_status(
 
     app.config['RENDERER'] = Renderer()
     app.config['COMPILER'] = Compiler()
+    events = []
+    monkeypatch.setattr(
+        app.logger,
+        'info',
+        lambda message, *, extra: events.append((message, extra)),
+    )
 
     response = client.post('/printer_profiles/calibration-sheet')
 
     assert response.status_code == expected_status
     assert 'Не удалось сформировать калибровочный PDF' in response.text
     assert 'private detail' not in response.text
+    metrics = [
+        extra for message, extra in events if message == 'pdf_compilation'
+    ]
+    assert len(metrics) == 1
+    assert metrics[0]['request_id'] == response.headers['X-Request-ID']
+    assert metrics[0]['job_kind'] == 'calibration'
+    assert metrics[0]['profile_id'] == 'base'
+    assert metrics[0]['status'] == 'failure'
+    assert metrics[0]['error_kind'] == error_kind
+    assert '/private' not in repr(metrics[0])
+
+
+def test_calibration_render_validation_is_logged_without_private_details(
+    client, app, monkeypatch
+):
+    class Renderer:
+        def render_calibration_sheet(self):
+            raise UnsafeLatexError('/private/calibration-source.tex')
+
+    events = []
+    app.config['RENDERER'] = Renderer()
+    monkeypatch.setattr(
+        app.logger,
+        'info',
+        lambda message, *, extra: events.append((message, extra)),
+    )
+
+    response = client.post('/printer_profiles/calibration-sheet')
+
+    assert response.status_code == 422
+    assert 'Калибровочный лист не прошёл проверку' in response.text
+    assert '/private' not in response.text
+    metrics = [
+        extra for message, extra in events if message == 'pdf_compilation'
+    ]
+    assert len(metrics) == 1
+    assert metrics[0]['request_id'] == response.headers['X-Request-ID']
+    assert metrics[0]['status'] == 'failure'
+    assert metrics[0]['error_kind'] == 'validation'
+    assert '/private' not in repr(metrics[0])
 
 
 def test_add_card_limit_is_reported_on_html_route(client, app, deck_id):

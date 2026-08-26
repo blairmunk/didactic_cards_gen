@@ -1547,7 +1547,7 @@ def test_unknown_saved_profile_edit_is_reported(client):
     assert 'профиль для редактирования не найден' in response.text
 
 
-def test_calibration_sheet_download_uses_selected_profile(tmp_path):
+def test_calibration_sheet_download_uses_selected_profile(tmp_path, monkeypatch):
     class RecordingCompiler:
         def __init__(self):
             self.sources = []
@@ -1573,6 +1573,12 @@ def test_calibration_sheet_download_uses_selected_profile(tmp_path):
         compiler=compiler,
     )
     calibration_app.config['TESTING'] = True
+    events = []
+    monkeypatch.setattr(
+        calibration_app.logger,
+        'info',
+        lambda message, *, extra: events.append((message, extra)),
+    )
 
     response = calibration_app.test_client().post(
         '/printer_profiles/calibration-sheet',
@@ -1585,6 +1591,17 @@ def test_calibration_sheet_download_uses_selected_profile(tmp_path):
         'Content-Disposition'
     ]
     assert r'\calibrationtargets{-1.25}{0.5}{magenta,dashed}' in compiler.sources[0]
+    metrics = [
+        extra for message, extra in events if message == 'pdf_compilation'
+    ]
+    assert len(metrics) == 1
+    assert metrics[0]['request_id'] == response.headers['X-Request-ID']
+    assert metrics[0]['job_kind'] == 'calibration'
+    assert metrics[0]['profile_id'] == 'office-printer'
+    assert metrics[0]['side'] == 'calibration'
+    assert metrics[0]['status'] == 'success'
+    assert metrics[0]['error_kind'] is None
+    assert metrics[0]['duration_ms'] >= 0
     page = calibration_app.test_client().get('/printer_profiles')
     assert 'не настройки' in page.text
     assert 'Скачать калибровочный PDF' in page.text
@@ -1764,6 +1781,8 @@ def test_pdf_generation_logs_safe_duration_metric(client, app, deck_id, monkeypa
     metric = next(extra for message, extra in events if message == 'pdf_compilation')
     assert response.status_code == 200
     assert metric['deck_id'] == deck_id
+    assert metric['job_kind'] == 'deck'
+    assert metric['profile_id'] == 'base'
     assert metric['side'] == 'duplex'
     assert metric['status'] == 'success'
     assert metric['duration_ms'] >= 0

@@ -1,6 +1,6 @@
 # Актуальный план стабилизации и развития
 
-Актуализировано 24 августа 2026 года после повторной ревизии хранения,
+Актуализировано 27 августа 2026 года после повторной ревизии хранения,
 импорта, safe/Advanced UI, TeX-контура и двусторонней печати. Это единый
 текущий backlog; прежний пошаговый аудит сохранён только как
 [исторический архив](REMEDIATION_HISTORY.md).
@@ -50,13 +50,14 @@
 | `TEXT-NEWLINE-001` | ✅ Выполнено | Safe front/back получили единые CRLF/LF/CR, line/paragraph/display-math semantics в HTML и PDF; SQLite/CSV/JSON остаются character-preserving, no-op browser edit не переписывает импортированный EOL, Advanced остаётся raw. Реальные Chromium, `pdflatex` и bbox regression проверяют layout и TeX-boundary. |
 | `PRINT-GEOMETRY-001` | ✅ Программная часть | PDF идёт `front-1/back-1/…`, long-edge/short-edge permutation отделена от поворота 0°/180°; cut size, offsets, мишени, calibration PDF и overflow покрыты PDF/raster/vector-тестами. |
 | `PREVIEW-OVERLAY-001` | ✅ Выполнено | UI накладывает front/back выбранного физического листа с opacity, cut bounds, slot/source numbers и профилем. Overlay и PDF используют один snapshot, renderer-owned geometry, transform matrix и детерминированный job ID. Оверлей выявил и закрыл два реальных print-дефекта: сетка теперь симметрична A4, а 180° вращается вокруг центра карточки. Chromium проходит long-edge/short-edge и сверяет PDF header. |
+| `BUG-OBS-002` | ✅ Выполнено | Обычная печать и calibration PDF проходят один sanitised runner. Каждое запущенное задание пишет ровно одно коррелируемое `pdf_compilation` с `job_kind`, безопасным `profile_id`, status/error kind и duration; TeX, compiler log, exception text и пути не логируются. Success, validation, timeout, compile-error и unexpected exception покрыты unit/HTTP regression. |
 | `PRINT-PHYSICAL-001` | 🟡 Заблокировано вне кода | Нужен принтер и реальные измерения long-edge, short-edge и ручной подачи по [протоколу](PHYSICAL_PRINT_ACCEPTANCE.md). До этого нельзя обещать точность на любом принтере. |
 
 Статус storage-пунктов подтверждён обычными regression-тестами: проверены
 forensic API/CLI restore, отказ при publication `replace/fsync`, committed WAL,
 конкурентный no-clobber backup и повторное использование stable pre-migration backup.
-Последний полный локальный gate 25.08.2026: **815 passed**, statement coverage
-100%, branch coverage **99,49%** (общий coverage 99,89%); в прогон вошли реальные Chromium,
+Последний полный локальный gate 27.08.2026: **823 passed**, statement coverage
+100%, branch coverage **99,47%** (общий coverage 99,88%); в прогон вошли реальные Chromium,
 `pdflatex` и `bubblewrap` integration-тесты.
 
 ## 3. Ближайший backlog
@@ -66,24 +67,20 @@ forensic API/CLI restore, отказ при publication `replace/fsync`, committ
 
 ### P2 — эксплуатация и полировка
 
-1. **`BUG-OBS-002` — единое логирование calibration PDF.**
-   Провести calibration job через тот же sanitised observability wrapper, что обычную
-   печать. Критерий: success/validation/timeout/compiler failure дают одинаково
-   коррелируемые события без контента и путей.
-2. **`SEC-AUTH-001` — deployment-граница.**
+1. **`SEC-AUTH-001` — deployment-граница.**
    Описать и проверить reference deployment с TLS и внешней аутентификацией;
    до того не публиковать редактор напрямую в Интернет.
-3. **`DOC-OPS-001` — операционная проверка backup.**
+2. **`DOC-OPS-001` — операционная проверка backup.**
    В CI оставить автоматический round-trip; для production регулярно выносить backup
    за пределы host и периодически проводить учебное восстановление в отдельный
    каталог. Критерий: зафиксированы RPO/RTO, retention и результат последней drill-проверки.
-4. **`IMPORT-ERROR-FOCUS-001` — единый error focus для preview импорта.**
+3. **`IMPORT-ERROR-FOCUS-001` — единый error focus для preview импорта.**
    HTTP/network ошибки bulk/CSV должны получать тот же focus/scroll, что успешный
    preview и preflight; проверить keyboard/aria-live сценарием Chromium.
 
 ## 4. Порядок работ
 
-1. Сделать `BUG-OBS-002`, затем унифицировать error focus импорта.
+1. Унифицировать error focus импорта.
 2. После доступа к принтеру выполнить `PRINT-PHYSICAL-001`, внести измерения
    в протокол и только после этого закрыть печатный этап.
 

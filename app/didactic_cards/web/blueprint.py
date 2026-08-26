@@ -44,6 +44,7 @@ from ..use_cases.deck_transfer import (
     import_deck_json,
 )
 from ..use_cases.trusted_template_use_cases import TrustedTemplateService
+from .observability import run_observed_pdf_compilation
 
 cards_bp = Blueprint(
     'cards', __name__,
@@ -595,11 +596,26 @@ def printer_profiles():
 @cards_bp.route('/printer_profiles/calibration-sheet', methods=['POST'])
 def calibration_sheet():
     profile_id = request.form.get('profile_id', '')
-    renderer = _renderer(profile_id)
+    renderer, resolved_profile_id, _profile_name = _print_renderer_context(
+        profile_id
+    )
     render_sheet = getattr(renderer, 'render_calibration_sheet', None)
     if render_sheet is None:
         abort(501, description='Калибровочный лист недоступен')
-    result = _compiler().compile(render_sheet())
+    try:
+        result = run_observed_pdf_compilation(
+            lambda: _compiler().compile(render_sheet()),
+            logger=current_app.logger,
+            request_id=g.request_id,
+            job_kind='calibration',
+            profile_id=resolved_profile_id,
+            side='calibration',
+            validation_errors=(UnsafeLatexError,),
+        )
+    except UnsafeLatexError:
+        return _render_printer_profiles(
+            'Калибровочный лист не прошёл проверку.', 422
+        )
     if not result.success:
         status_by_kind = {
             'timeout': 504,
@@ -613,7 +629,7 @@ def calibration_sheet():
             'Не удалось сформировать калибровочный PDF.',
             status_by_kind.get(result.error_kind, 500),
         )
-    suffix = profile_id or 'base'
+    suffix = resolved_profile_id
     return send_file(
         io.BytesIO(result.pdf_data),
         mimetype='application/pdf',
@@ -1341,7 +1357,6 @@ def _generate_pdf_response(
             ),
         )
 
-    compile_started = time.perf_counter()
     try:
         selected_compiler, trusted_template, snapshot = _print_compiler_and_template(
             deck_id
@@ -1364,37 +1379,17 @@ def _generate_pdf_response(
                 selected_compiler, _cards_per_page(), side, trusted_template,
                 snapshot
             )
-        result = generator.execute(deck_id)
-        compile_duration_ms = round(
-            (time.perf_counter() - compile_started) * 1000, 3
-        )
-        current_app.logger.info(
-            'pdf_compilation',
-            extra={
-                'event': 'pdf_compilation',
-                'request_id': g.request_id,
-                'deck_id': deck_id,
-                'side': side or 'duplex',
-                'status': 'success' if result.success else 'failure',
-                'error_kind': result.error_kind,
-                'duration_ms': compile_duration_ms,
-            },
+        result = run_observed_pdf_compilation(
+            lambda: generator.execute(deck_id),
+            logger=current_app.logger,
+            request_id=g.request_id,
+            job_kind='deck',
+            profile_id=profile_id,
+            deck_id=deck_id,
+            side=side or 'duplex',
+            validation_errors=(UnsafeLatexError,),
         )
     except UnsafeLatexError as error:
-        current_app.logger.info(
-            'pdf_compilation',
-            extra={
-                'event': 'pdf_compilation',
-                'request_id': g.request_id,
-                'deck_id': deck_id,
-                'side': side or 'duplex',
-                'status': 'failure',
-                'error_kind': 'validation',
-                'duration_ms': round(
-                    (time.perf_counter() - compile_started) * 1000, 3
-                ),
-            },
-        )
         return render_template(
             'cards/error.html', deck=deck_info,
             errors=[str(error)], full_log=''

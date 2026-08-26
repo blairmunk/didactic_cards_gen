@@ -661,3 +661,26 @@ Unit-тесты фиксируют обе матрицы и validation, HTTP —
 opacity, mirror axis, XSS boundary и синхронизацию профиля. Финальный gate:
 815 passed, 100% statements, 99,49% branches и 99,89% общего coverage с реальными
 Chromium, `pdflatex` и `bubblewrap`.
+
+### 7.17. ✅ Единое наблюдение за PDF-заданиями
+
+`BUG-OBS-002` закрыт 27.08.2026. Калибровочный PDF больше не вызывает compiler в
+обход общего наблюдаемого контура. Обычная печать и calibration используют один
+runner, который замеряет длительность и формирует ровно одно событие
+`pdf_compilation` на фактически запущенное задание.
+
+Безопасная схема события содержит `request_id`, `job_kind=deck|calibration`,
+allowlisted/проверенный `profile_id`, сторону, status, error kind и duration. Для
+обычной печати сохраняется deck UUID; у calibration он отсутствует. Исходный TeX,
+compiler log, текст исключения и filesystem paths не являются полями схемы и не
+попадают в событие даже при ошибке. Неожиданное исключение получает только безопасный
+kind `internal` и пробрасывается штатному Flask error handler.
+
+Unit regression покрывает success, timeout, compile-error, validation exception и
+unexpected exception. HTTP regression дополнительно проверяет success/validation/
+timeout/compiler failure calibration route, единственность события, совпадение
+`request_id` с `X-Request-ID`, безопасный профиль и отсутствие приватного compiler
+log. Обычный deck job проверяется тем же контрактом.
+
+Финальный gate инкремента: 823 passed, 100% statements, 99,47% branches и
+99,88% общего coverage с реальными Chromium, `pdflatex` и `bubblewrap`.

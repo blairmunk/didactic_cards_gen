@@ -58,7 +58,7 @@ export DIDACTIC_CARDS_DATA_DIR='/srv/didactic-cards/data'
 .venv/bin/gunicorn --chdir app --workers 2 --bind 127.0.0.1:8000 'run:create_app()'
 ```
 
-`GET /health/live` проверяет процесс, `GET /health/ready` — целостность/доступность SQLite write-транзакции и наличие TeX executable. Debug по умолчанию выключен; `DIDACTIC_CARDS_DEBUG=true` предназначен только для локальной диагностики. Ответы получают `X-Request-ID`, а HTTP и PDF timing пишутся однострочными JSON-событиями без текста карточек и внутренних путей.
+`GET /health/live` проверяет процесс, `GET /health/ready` — целостность/доступность SQLite write-транзакции и наличие TeX executable. Debug по умолчанию выключен; `DIDACTIC_CARDS_DEBUG=true` предназначен только для локальной диагностики. Ответы получают `X-Request-ID`, а HTTP и каждое обычное/калибровочное PDF-задание пишутся коррелируемыми однострочными JSON-событиями без текста карточек, TeX/compiler log и внутренних путей.
 
 Advanced/trusted LaTeX на Linux требует `bubblewrap` (`sudo apt install bubblewrap`) и явного `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true`. Bubblewrap (`bwrap`) запускает `pdflatex` в отдельных Linux namespaces: без сети, secrets, каталога проекта и базы, с read-only TeX runtime и одним временным writable-каталогом. Это не виртуальная машина и не нужно обычным колодам. При включённом deployment-разрешении тип выбирается в форме создания; готовую колоду нельзя незаметно переключить. Advanced-колода печатает raw TeX даже без оболочек сторон; недоступная изоляция блокирует её печать, а не переводит в safe-режим. Для сетевого deployment обязательна внешняя аутентификация: встроенной модели пользователей пока нет. Полная карта controls — в [аудите UI](docs/UI_FUNCTIONALITY_AUDIT.md).
 

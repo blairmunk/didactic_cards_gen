@@ -54,7 +54,7 @@ TLS и аутентификацию следует завершать на rever
 
 Advanced-режим по умолчанию закрыт. Явный `DIDACTIC_CARDS_TRUSTED_LATEX_ENABLED=true` требует установленный `bubblewrap`, показывает редактор в оформлении и добавляет readiness-компонент `trusted-tex-sandbox`; проверяется не только executable, но и реальное создание namespaces. Включение флага само по себе не меняет PDF. Для сетевого доступа обязательна внешняя аутентификация: приложение пока не различает владельца и других пользователей.
 
-Каждый HTTP-ответ содержит новый UUID в `X-Request-ID`; страница ошибки показывает тот же код пользователю. Логи имеют однострочный JSON-формат. Событие `request_completed` содержит method/path/status/duration, а `pdf_compilation` — deck UUID, сторону (`duplex|front|back`), result/error kind и длительность. Содержимое карточек, TeX-log и filesystem paths в эти поля не записываются.
+Каждый HTTP-ответ содержит новый UUID в `X-Request-ID`; страница ошибки показывает тот же код пользователю. Логи имеют однострочный JSON-формат. Событие `request_completed` содержит method/path/status/duration. Каждое реально запущенное PDF-задание пишет ровно одно `pdf_compilation`: `job_kind=deck|calibration`, безопасный ключ профиля, сторону (`duplex|front|back|calibration`), result/error kind и длительность; для колоды добавляется её UUID. Содержимое карточек, исходный TeX, compiler log, текст исключения и filesystem paths в эти поля не записываются.
 
 По умолчанию данные сохраняются в абсолютном пути `app/data`, поэтому каталог запуска не меняет выбранную базу. Для отдельной базы используйте, например, `DIDACTIC_CARDS_DATA_DIR=/srv/didactic-cards/data`; каталог будет приведён к абсолютному пути.
 
