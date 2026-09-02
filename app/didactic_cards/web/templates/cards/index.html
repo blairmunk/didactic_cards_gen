@@ -274,7 +274,7 @@
             <br><br>
             <button type="button" id="bulk-preview-button" class="btn-secondary">Проверить пачку</button>
             <button type="submit" id="bulk-import-button" class="btn-primary" disabled>➕ Добавить все</button>
-            <div id="bulk-preview-result" class="import-preview" role="status" aria-live="polite" tabindex="-1"></div>
+            <div id="bulk-preview-result" class="import-preview" role="status" aria-live="polite" aria-atomic="true" aria-busy="false" tabindex="-1"></div>
         </form>
     </div>
 
@@ -309,7 +309,7 @@
             <br><br>
             <button type="button" id="csv-preview-button" class="btn-secondary">Проверить файл</button>
             <button type="submit" id="csv-import-button" class="btn-primary" disabled>📂 Импортировать</button>
-            <div id="csv-preview-result" class="import-preview" role="status" aria-live="polite" tabindex="-1"></div>
+            <div id="csv-preview-result" class="import-preview" role="status" aria-live="polite" aria-atomic="true" aria-busy="false" tabindex="-1"></div>
         </form>
     </div>
 

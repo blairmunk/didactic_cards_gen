@@ -635,6 +635,71 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // ── Read-only bulk/CSV previews ──
 
+    function beginImportPreview(result) {
+        result.replaceChildren();
+        const message = document.createElement('p');
+        message.textContent = 'Проверка…';
+        result.appendChild(message);
+        result.dataset.state = 'pending';
+        result.setAttribute('aria-busy', 'true');
+    }
+
+    function finishImportPreview(result, state) {
+        result.dataset.state = state;
+        result.setAttribute('aria-busy', 'false');
+        result.focus({preventScroll: true});
+        result.scrollIntoView({behavior: 'smooth', block: 'start'});
+    }
+
+    function renderImportError(result, message) {
+        result.replaceChildren();
+        const error = document.createElement('p');
+        error.className = 'error-message';
+        error.textContent = message;
+        result.appendChild(error);
+        finishImportPreview(result, 'error');
+    }
+
+    async function requestImportPreview(url, form, result, fallbackMessage) {
+        let response;
+        try {
+            response = await fetch(url, {
+                method: 'POST',
+                body: new FormData(form)
+            });
+        } catch (error) {
+            console.error(error);
+            renderImportError(
+                result,
+                'Ошибка сети. Проверьте соединение и повторите проверку.'
+            );
+            return null;
+        }
+
+        let data;
+        try {
+            data = await response.json();
+        } catch (error) {
+            console.error(error);
+            renderImportError(
+                result,
+                response.ok
+                    ? 'Сервер вернул некорректный ответ. Повторите проверку.'
+                    : fallbackMessage
+            );
+            return null;
+        }
+        if (!response.ok) {
+            renderImportError(
+                result,
+                data && typeof data.error === 'string'
+                    ? data.error : fallbackMessage
+            );
+            return null;
+        }
+        return data;
+    }
+
     function renderImportPreview(result, data) {
         result.replaceChildren();
         const summary = document.createElement('p');
@@ -698,8 +763,11 @@ document.addEventListener('DOMContentLoaded', function() {
             truncated.textContent = 'Предпросмотр усечён; итоговые счётчики относятся ко всему файлу.';
             result.appendChild(truncated);
         }
-        result.focus({preventScroll: true});
-        result.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+        finishImportPreview(
+            result,
+            data.error_count > 0 || data.rejected_count > 0
+                ? 'error' : 'success'
+        );
     }
 
     function installPreviewInvalidation(form, token, submit, ignoredName) {
@@ -720,28 +788,21 @@ document.addEventListener('DOMContentLoaded', function() {
         const bulkSubmit = document.getElementById('bulk-import-button');
         installPreviewInvalidation(bulkForm, bulkToken, bulkSubmit);
         bulkPreviewButton.addEventListener('click', async function() {
-            bulkResult.textContent = 'Проверка…';
+            beginImportPreview(bulkResult);
             bulkPreviewButton.disabled = true;
             bulkToken.value = '';
             bulkSubmit.disabled = true;
             try {
-                const response = await fetch(API.previewBulk, {
-                    method: 'POST',
-                    body: new FormData(bulkForm)
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    bulkResult.textContent = data.error || 'Не удалось проверить пачку';
-                    return;
-                }
+                const data = await requestImportPreview(
+                    API.previewBulk, bulkForm, bulkResult,
+                    'Не удалось проверить пачку'
+                );
+                if (!data) return;
                 renderImportPreview(bulkResult, data);
                 if (data.preview_token && data.rejected_count === 0 && data.accepted_count > 0) {
                     bulkToken.value = data.preview_token;
                     bulkSubmit.disabled = false;
                 }
-            } catch (error) {
-                console.error(error);
-                bulkResult.textContent = 'Ошибка сети';
             } finally {
                 bulkPreviewButton.disabled = false;
             }
@@ -762,28 +823,21 @@ document.addEventListener('DOMContentLoaded', function() {
             });
         }
         csvPreviewButton.addEventListener('click', async function() {
-            result.textContent = 'Проверка…';
+            beginImportPreview(result);
             csvPreviewButton.disabled = true;
             token.value = '';
             submit.disabled = true;
             try {
-                const response = await fetch(API.previewCsv, {
-                    method: 'POST',
-                    body: new FormData(csvForm)
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    result.textContent = data.error || 'Не удалось проверить CSV';
-                    return;
-                }
+                const data = await requestImportPreview(
+                    API.previewCsv, csvForm, result,
+                    'Не удалось проверить CSV'
+                );
+                if (!data) return;
                 renderImportPreview(result, data);
                 if (data.preview_token && data.rejected_count === 0 && data.accepted_count > 0) {
                     token.value = data.preview_token;
                     submit.disabled = Boolean(trust && !trust.checked);
                 }
-            } catch (error) {
-                console.error(error);
-                result.textContent = 'Ошибка сети';
             } finally {
                 csvPreviewButton.disabled = false;
             }

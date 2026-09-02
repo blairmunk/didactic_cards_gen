@@ -100,6 +100,20 @@ def test_preflight_result_is_focused_and_scrolled_into_view():
     assert "preflightResult.scrollIntoView({behavior: 'smooth', block: 'start'})" in script
 
 
+def test_import_preview_uses_one_accessible_completion_path():
+    index = (WEB_ROOT / 'templates/cards/index.html').read_text(encoding='utf-8')
+    script = (WEB_ROOT / 'static/cards/deck.js').read_text(encoding='utf-8')
+
+    assert index.count('class="import-preview" role="status"') == 2
+    assert index.count('aria-live="polite" aria-atomic="true"') == 2
+    assert index.count('aria-busy="false" tabindex="-1"') == 2
+    assert "result.setAttribute('aria-busy', 'true')" in script
+    assert "finishImportPreview(result, 'error')" in script
+    assert "data.error_count > 0 || data.rejected_count > 0" in script
+    assert "result.scrollIntoView({behavior: 'smooth', block: 'start'})" in script
+    assert script.count('await requestImportPreview(') == 2
+
+
 def test_screenshot_script_uses_stable_card_id_and_captures_profiles():
     script = (
         Path(__file__).parents[2] / 'scripts' / 'capture_screenshots.py'

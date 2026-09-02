@@ -52,7 +52,7 @@ character-preserving round-trip пяти полей не изменены.
 | Колода | Название/описание и printer profiles | Верхняя навигация колоды |
 | Обычная колода | Preset, выравнивание 3×3, верхний/нижний колонтитулы, `card_number/card_count`, линии, профили шрифтов/интервалов и section breaks | «Оформление обычной колоды»; дополнительные секции свёрнуты |
 | Advanced-колода | Raw TeX каждой стороны; необязательная versioned-оболочка и trusted-поля верхнего/нижнего колонтитула | Отдельная Advanced-панель; safe-оформление отсутствует |
-| Колода | Single add; strict bulk; mode-aware CSV с обязательным заголовком и read-only preview | Раздельные подсказки, шаблоны и поля обычной/Advanced-колоды |
+| Колода | Single add; strict bulk; mode-aware CSV с обязательным заголовком и read-only preview | Раздельные подсказки, шаблоны и поля обычной/Advanced-колоды; любой итог preview получает focus/scroll и объявляется через `aria-live` |
 | Колода | Table/visual preview, физическая front/back-сверка, edit/delete, drag и keyboard reorder | Три явных переключателя «Таблица» / «Превью» / «Сверка сторон» |
 | Колода | JSON/CSV export, включая пустую колоду | Всегда видимый раздел «Данные колоды» |
 | Колода | LaTeX preview, PDF, front-only, back-only, inline PDF | «Генерация» при наличии карточек |

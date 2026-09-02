@@ -231,13 +231,98 @@ async def _exercise_browser(
         )
         assert edited == 'second edited\nline 2\n\nparagraph'
 
+        # Every import-preview outcome is announced, focused and scrolled to:
+        # first a real HTTP validation error, then a simulated network failure.
+        await page.evaluate(
+            '''() => {
+                window.__importPreviewScrolls = 0;
+                window.__originalScrollIntoView = Element.prototype.scrollIntoView;
+                Element.prototype.scrollIntoView = function() {
+                    window.__importPreviewScrolls += 1;
+                };
+            }'''
+        )
+        await page.evaluate("document.getElementById('csv-preview-button').click()")
+        await page.waitForFunction(
+            "document.getElementById('csv-preview-result').textContent.includes('Выберите CSV-файл')"
+        )
+        csv_error_state = await page.evaluate(
+            '''() => {
+                const result = document.getElementById('csv-preview-result');
+                return {
+                    focused: document.activeElement.id,
+                    scrolls: window.__importPreviewScrolls,
+                    state: result.dataset.state,
+                    busy: result.getAttribute('aria-busy'),
+                    live: result.getAttribute('aria-live'),
+                    atomic: result.getAttribute('aria-atomic')
+                };
+            }'''
+        )
+        assert csv_error_state == {
+            'focused': 'csv-preview-result',
+            'scrolls': 1,
+            'state': 'error',
+            'busy': 'false',
+            'live': 'polite',
+            'atomic': 'true',
+        }
+
+        await page.evaluate(
+            '''() => {
+                window.__realFetch = window.fetch;
+                window.fetch = () => Promise.reject(new TypeError('offline'));
+            }'''
+        )
+        await page.evaluate("document.getElementById('bulk-preview-button').click()")
+        await page.waitForFunction(
+            "document.getElementById('bulk-preview-result').textContent.includes('Ошибка сети')"
+        )
+        bulk_error_state = await page.evaluate(
+            '''() => {
+                window.fetch = window.__realFetch;
+                const result = document.getElementById('bulk-preview-result');
+                return {
+                    focused: document.activeElement.id,
+                    scrolls: window.__importPreviewScrolls,
+                    state: result.dataset.state,
+                    busy: result.getAttribute('aria-busy')
+                };
+            }'''
+        )
+        assert bulk_error_state == {
+            'focused': 'bulk-preview-result',
+            'scrolls': 2,
+            'state': 'error',
+            'busy': 'false',
+        }
+
         upload = await page.querySelector('#csv_file')
         await upload.uploadFile(csv_path)
         await page.select('#delimiter', 'semicolon')
-        await page.click('#csv-preview-button')
+        await page.evaluate("document.getElementById('csv-preview-button').click()")
         await page.waitForFunction(
             "document.getElementById('csv-preview-result').textContent.includes('Принято: 1')"
         )
+        csv_success_state = await page.evaluate(
+            '''() => {
+                const result = document.getElementById('csv-preview-result');
+                const state = {
+                    focused: document.activeElement.id,
+                    scrolls: window.__importPreviewScrolls,
+                    state: result.dataset.state,
+                    busy: result.getAttribute('aria-busy')
+                };
+                Element.prototype.scrollIntoView = window.__originalScrollIntoView;
+                return state;
+            }'''
+        )
+        assert csv_success_state == {
+            'focused': 'csv-preview-result',
+            'scrolls': 3,
+            'state': 'success',
+            'busy': 'false',
+        }
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
             page.click('#csv-import-form button[type="submit"]'),
@@ -401,7 +486,7 @@ async def _exercise_browser(
         advanced_upload = await page.querySelector('#csv_file')
         await advanced_upload.uploadFile(advanced_csv_path)
         await page.select('#delimiter', 'semicolon')
-        await page.click('#csv-preview-button')
+        await page.evaluate("document.getElementById('csv-preview-button').click()")
         await page.waitForFunction(
             "document.getElementById('csv-preview-result').textContent.includes('Принято: 1')"
         )
@@ -409,10 +494,15 @@ async def _exercise_browser(
             '#csv-preview-result', 'element => element.textContent'
         )
         assert 'upper_header: CSV top' in advanced_preview
-        await page.click('#trust-raw-csv')
+        await page.evaluate("document.getElementById('trust-raw-csv').click()")
+        await page.waitForFunction(
+            "document.getElementById('csv-import-button').disabled === false"
+        )
         await asyncio.gather(
             page.waitForNavigation({'waitUntil': 'networkidle2'}),
-            page.click('#csv-import-button'),
+            page.evaluate(
+                "document.getElementById('csv-import-form').requestSubmit()"
+            ),
         )
         assert await page.Jeval(
             '#cards-count', 'element => element.textContent'

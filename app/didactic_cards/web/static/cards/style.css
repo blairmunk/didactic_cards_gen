@@ -464,6 +464,15 @@ select {
     outline-offset: 3px;
 }
 
+.import-preview[data-state="pending"] {
+    color: #57606a;
+}
+
+.import-preview[data-state="error"] {
+    border-left: 4px solid #b42318;
+    padding-left: 0.75rem;
+}
+
 .import-row-values {
     margin: 0.35rem 0 0.75rem;
     padding: 0.5rem;

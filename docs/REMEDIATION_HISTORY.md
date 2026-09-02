@@ -684,3 +684,26 @@ log. Обычный deck job проверяется тем же контракт
 
 Финальный gate инкремента: 823 passed, 100% statements, 99,47% branches и
 99,88% общего coverage с реальными Chromium, `pdflatex` и `bubblewrap`.
+
+### 7.18. ✅ Единый результат проверки импорта
+
+`IMPORT-ERROR-FOCUS-001` закрыт 02.09.2026. Раньше только успешный bulk/CSV preview
+получал фокус и прокрутку. HTTP 4xx и network failure меняли текст далеко ниже кнопки,
+поэтому действие выглядело не сработавшим. Кроме того, не-JSON HTTP-ответ попадал в
+общий `catch` и ошибочно назывался сетевой ошибкой.
+
+Обе формы теперь используют один UI-контур. Начало запроса очищает прежний результат,
+показывает «Проверка…» и выставляет `aria-busy=true`. Любой финал снимает busy,
+записывает состояние `success/error`, переводит клавиатурный фокус в общий
+`role=status`, `aria-live=polite`, `aria-atomic=true` region и прокручивает его к
+началу viewport. HTTP JSON error, неразбираемый ответ сервера и сетевой обрыв имеют
+раздельные безопасные сообщения. Preview с rejected rows приходит как HTTP 200, но
+получает визуальное error-состояние; import остаётся disabled без валидного token.
+
+Static regression фиксирует единственный helper и ARIA-контракт двух форм. Реальный
+Chromium проверяет HTTP 400 без файла, имитированный network failure bulk, следующий
+успешный CSV preview, точное состояние focus/scroll/live/busy и сохранение полного
+Safe/Advanced import workflow.
+
+Финальный gate инкремента: 824 passed, 100% statements, 99,47% branches и
+99,88% общего coverage с реальными Chromium, `pdflatex` и `bubblewrap`.
